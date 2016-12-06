@@ -3,3 +3,4 @@ for file in ~/.{aliases,functions,path}; do
 		source $file
 	fi
 done
+unset file
