@@ -1,0 +1,6 @@
+
+apk_file() {
+    docker run -it --rm jess/apk-file $*
+}
+alias apk-file='apk_file'
+
