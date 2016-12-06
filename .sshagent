@@ -1,11 +1,11 @@
+#!/bin/sh
 
-if [ ! -z ${SSH_CONNECTION+x} ]; then
-	if [ ! -S ~/.ssh/ssh_auth_sock ]; then
-		eval `ssh-agent -s`
+if [ "${SSH_CONNECTION}" != "" ]; then
+    if [ ! -S ~/.ssh/ssh_auth_sock ]; then
+        $(ssh-agent -s)
 		ln -sf "$SSH_AUTH_SOCK" ~/.ssh/ssh_auth_sock
-	fi
-	export SSH_AUTH_SOCK=~/.ssh/ssh_auth_sock
-	ssh-add -l | grep "The agent has no identities" && ssh-add
+    fi
+    export SSH_AUTH_SOCK=~/.ssh/ssh_auth_sock
+    ssh-add -l | grep "The agent has no identities" && ssh-add
 fi
-
 
