@@ -2,7 +2,7 @@
 
 if [ "${SSH_CONNECTION}" != "" ]; then
     if [ ! -S ~/.ssh/ssh_auth_sock ]; then
-        $(ssh-agent -s)
+        eval "$(ssh-agent -s)"
 		ln -sf "$SSH_AUTH_SOCK" ~/.ssh/ssh_auth_sock
     fi
     export SSH_AUTH_SOCK=~/.ssh/ssh_auth_sock

@@ -1,6 +1,31 @@
+#!/bin/sh
 
 apk_file() {
     docker run -it --rm jess/apk-file $*
 }
 alias apk-file='apk_file'
+
+docker_enter() {
+    if [ "$#" == 0 ]; then
+        echo "usage: docker-enter <container-name>"
+    elif [ "$#" == 1 ]; then
+        docker exec -it $1 /bin/bash -l
+    else
+        docker exec -it $@
+    fi
+}
+
+docker_login() {
+    if [ "$#" == 1 ]; then
+        docker exec -it $1 login -f `whoami`
+    elif [ "$#" == 2 ]; then
+        docker exec -it $1 login -f $2
+    else
+        echo "usage: docker-login <container-name> [user]"
+    fi
+}
+
+alias docker-enter="docker_enter"
+alias docker-login="docker_login"
+
 
