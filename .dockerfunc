@@ -1,5 +1,18 @@
 #!/bin/sh
 
+docker_ip() {
+    if [ "$#" == "0" ]; then
+        args="$(docker ps -qa)";
+    else
+        args=$@
+    fi
+
+    docker inspect --format '{{.Name}} - {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $args
+}
+
+alias docker-ip='docker_ip'
+
+
 apk_file() {
     docker run -it --rm jess/apk-file $*
 }
