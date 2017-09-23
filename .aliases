@@ -1,3 +1,2 @@
 alias ls='ls --color=auto -l'
 alias vi='vim'
-alias tm='tmux a || tmux'
