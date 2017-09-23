@@ -7,10 +7,14 @@ pkg_size(){
 }
 
 tm(){
-    if tmux list-s; then
-        tmux a
+    if [ $# -eq 0 ]; then
+        if tmux list-s; then
+            tmux a
+        else
+            tmux
+        fi
     else
-        tmux
+        tmux "$@"
     fi
 }
 
