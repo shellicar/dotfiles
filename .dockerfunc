@@ -1,38 +1,36 @@
 #!/bin/sh
 
 docker_ip() {
-    if [ "$#" == "0" ]; then
-        args="$(docker ps -qa)";
-    else
-        args=$@
+    if [ "$#" = "0" ]; then
+        @="$(docker ps -qa)";
     fi
 
-    docker inspect --format '{{.Name}} - {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $args
+    docker inspect --format '{{.Name}} - {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$@"
 }
 
 alias docker-ip='docker_ip'
 
 
 apk_file() {
-    docker run -it --rm jess/apk-file $*
+    docker run -it --rm jess/apk-file "$@"
 }
 alias apk-file='apk_file'
 
 docker_enter() {
-    if [ "$#" == 0 ]; then
+    if [ "$#" = 0 ]; then
         echo "usage: docker-enter <container-name>"
-    elif [ "$#" == 1 ]; then
-        docker exec -it $1 /bin/bash -l
+    elif [ "$#" = 1 ]; then
+        docker exec -it "$1" /bin/bash -l
     else
-        docker exec -it $@
+        docker exec -it "$@"
     fi
 }
 
 docker_login() {
-    if [ "$#" == 1 ]; then
-        docker exec -it $1 login -f `whoami`
-    elif [ "$#" == 2 ]; then
-        docker exec -it $1 login -f $2
+    if [ "$#" = 1 ]; then
+        docker exec -it "$1" login -f "$(whoami)"
+    elif [ "$#" = 2 ]; then
+        docker exec -it "$1" login -f "$2"
     else
         echo "usage: docker-login <container-name> [user]"
     fi
