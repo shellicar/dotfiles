@@ -1,5 +1,5 @@
 #!/bin/sh
-for file in .aliases .functions .path .sshagent .dockerfunc; do
+for file in .bashrc .aliases .functions .path .sshagent .dockerfunc; do
 	if [ -f $file ]; then
 		. "$file"
 	fi
