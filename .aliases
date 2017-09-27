@@ -1,2 +1,3 @@
 alias ls='ls --color=auto -l'
 alias vi='vim'
+alias gitlog='git log --graph --oneline'
