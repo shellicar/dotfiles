@@ -9,4 +9,5 @@
         cmd = "'' "
         trustExitCode = true
 [alias]
-        check-remotes = ! git branch -vv | cut -c 3- | awk '$3 !~/\\[/ { print $1 }' && git branch -vv | cut -c 3- | grep ': gone]' | awk '{print $1}'
+	check-remotes = ! git branch -vv | cut -c 3- | awk '$3 !~/\\[/ { print $1 }' && git branch -vv | cut -c 3- | grep ': gone]' | awk '{print $1}' 
+	glog = log --graph --all --decorate --oneline
