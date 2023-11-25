@@ -24,14 +24,18 @@ __prompt_command() {
     if [ -n "$TMUX" ]; then
         if [ $EXIT -eq 0 ]; then
             # 'O' for success
+            # tmux set -t $TMUX_PANE pane-border-style fg=green
             printf "\033]2;O\033\\"
-            tmux set -t $TMUX_PANE pane-border-style fg=green
-            tmux set -t $TMUX_PANE pane-active-border-style fg=lightgreen
+            # tmux select-pane -t $TMUX_PANE -T O
+            # echo "tmux set -t $TMUX_PANE pane-border-style fg=green" >> ~/tmux.log
+            # tmux set -t $TMUX_PANE pane-active-border-style fg=lightgreen
         else
             # 'X' for failure
             printf "\033]2;X\033\\"
-            tmux set -t $TMUX_PANE pane-border-style fg=darkred
-            tmux set -t $TMUX_PANE pane-active-border-style fg=red
+            # tmux select-pane -t $TMUX_PANE -T O
+            # tmux set -t $TMUX_PANE pane-border-style fg=darkred
+            # echo "tmux set -t $TMUX_PANE pane-border-style fg=darkred" >> ~/tmux.log
+            # tmux set -t $TMUX_PANE pane-active-border-style fg=red
         fi
     fi
 }
