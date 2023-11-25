@@ -1,3 +1,27 @@
+git_main() {
+  # Fetch and prune branches
+  if git fetch -p; then
+    # Get the current branch name
+    current_branch=$(git branch --show-current)
+
+    # Check if the current branch is 'main'
+    if [ "$current_branch" = "main" ]; then
+      # Pull the latest changes on 'main'
+      git pull
+    else
+      # Check if 'main' branch exists locally
+      if git rev-parse --verify main >/dev/null 2>&1; then
+        # Delete 'main' branch if it exists
+        git branch -d main
+      fi
+      # Checkout 'main' branch
+      git checkout main
+    fi
+  else
+    echo "Failed to fetch branches."
+  fi
+}
+
 pkg_size(){
 	apk info -es $(apk info -a) | \
     sed -e ':a' -e 'N' -e '$!ba' -e 's/\n\([0-9]\)/\1/g' | \
