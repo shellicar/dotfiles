@@ -1,6 +1,22 @@
 
 PROMPT_COMMAND=__prompt_command    # Function to generate PS1 after CMDs
 
+__tmux_question() {
+  if [ -n "$TMUX" ]; then
+    printf "\033]2;?\033\\"
+  fi
+}
+__tmux_success() {
+  if [ -n "$TMUX" ]; then
+    printf "\033]2;O\033\\"
+  fi
+}
+__tmux_failure() {
+  if [ -n "$TMUX" ]; then
+    printf "\033]2;X\033\\"
+  fi
+}
+
 __prompt_command() {
     local EXIT="$?"                # This needs to be first
     PS1=""
@@ -15,27 +31,13 @@ __prompt_command() {
 
     if [ $EXIT != 0 ]; then
         PS1+="${Red}\u${RCol}"        # Add red if exit code non 0
+        __tmux_failure
     else
         PS1+="${Gre}\u${RCol}"
+        __tmux_success
     fi
 
     PS1+="${RCol}@${BBlu}\h ${Pur}\W${BYel}$ ${RCol}"
-
-    if [ -n "$TMUX" ]; then
-        if [ $EXIT -eq 0 ]; then
-            # 'O' for success
-            # tmux set -t $TMUX_PANE pane-border-style fg=green
-            printf "\033]2;O\033\\"
-            # tmux select-pane -t $TMUX_PANE -T O
-            # echo "tmux set -t $TMUX_PANE pane-border-style fg=green" >> ~/tmux.log
-            # tmux set -t $TMUX_PANE pane-active-border-style fg=lightgreen
-        else
-            # 'X' for failure
-            printf "\033]2;X\033\\"
-            # tmux select-pane -t $TMUX_PANE -T O
-            # tmux set -t $TMUX_PANE pane-border-style fg=darkred
-            # echo "tmux set -t $TMUX_PANE pane-border-style fg=darkred" >> ~/tmux.log
-            # tmux set -t $TMUX_PANE pane-active-border-style fg=red
-        fi
-    fi
 }
+
+trap '__tmux_question' DEBUG
