@@ -2,7 +2,7 @@
 
 ############################### FOLDER ICONS ###################################
 
-folder="$(pwd)"
+folder="${1:-$(pwd)}"
 
 # Construct the path for the folder icon
 FOLDER_ICON_PATH="$folder/.icon"
