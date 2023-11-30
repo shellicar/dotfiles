@@ -1,10 +1,9 @@
 #!/usr/bin/bash
 
-############################### FOLDER ICONS ###################################
-
-folder_name="${1:-$(pwd)}"
+folder_name="$(basename ${1:-$(pwd)})"
 folderpath="${2:-$(pwd)}"
 
+############################### FOLDER ICONS ###################################
 # Construct the path for the folder icon
 FOLDER_ICON_PATH="$folderpath/.icon"
 
