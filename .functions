@@ -47,3 +47,18 @@ remove_bom() {
     xargs -0 grep -rl $'^\xEF\xBB\xBF' | \
     xargs -d '\n' sed -i '1s/^\xEF\xBB\xBF//'
 }
+
+tmuxa() {
+  if [[ -n "$1" ]]; then
+    session_match="$(tmux ls -F '#{session_name}' | grep -i "$1" | head -n 1)"
+  else
+    session_match="$(tmux ls -F '#{session_name}' | head -n 1)"
+  fi
+
+  if [[ -n "$session_match" ]]; then
+    tmux a -t "$session_match"
+  else
+    echo "No matching session found."
+    return 1
+  fi
+}
