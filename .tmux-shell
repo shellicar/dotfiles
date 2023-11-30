@@ -1,5 +1,13 @@
 #!/usr/bin/bash
 
+# Use in vs code with the following settings:
+# "terminal.integrated.profiles.linux": {
+#   "tmux-shell": {
+#     "path": "${userHome}/.tmux-shell",
+#     "args": ["${workspaceFolderBasename}", "${workspaceFolder}"],
+#     "icon": "terminal-tmux"
+#   }
+# },
 folder_name="$(basename ${1:-$(pwd)})"
 folderpath="${2:-$(pwd)}"
 
