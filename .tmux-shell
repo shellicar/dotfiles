@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 
 # Use in vs code with the following settings:
 # "terminal.integrated.profiles.linux": {
