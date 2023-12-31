@@ -1,0 +1,68 @@
+{
+  "files.exclude": {
+    "**/node_modules": false
+  },
+  "editor.tabSize": 2,
+  "files.eol": "\n",
+  "editor.indentSize": "tabSize",
+  "editor.detectIndentation": false,
+  "workbench.startupEditor": "none",
+  "explorer.confirmDragAndDrop": false,
+  "terminal.integrated.defaultProfile.windows": "Git Bash",
+  "git.openRepositoryInParentFolders": "never",
+  "debug.onTaskErrors": "debugAnyway",
+  "editor.autoClosingQuotes": "never",
+  "editor.autoClosingBrackets": "never",
+  "editor.suggest.showSnippets": false,
+  "editor.inlineSuggest.enabled": true,
+  "eslint.format.enable": true,
+  "bicep.suppressedWarnings": [
+    "Decompile on paste"
+  ],
+  "[javascript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "svelte.enable-ts-plugin": true,
+  "workbench.editor.labelFormat": "short",
+  "workbench.iconTheme": "material-icon-theme",
+  "workbench.tree.indent": 12,
+  "explorer.compactFolders": false,
+  "[typescript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "explorer.autoReveal": "focusNoScroll",
+  "[css]": {
+    "editor.defaultFormatter": "vscode.css-language-features"
+  },
+  "workbench.editor.enablePreview": false,
+  "[svelte]": {
+    "editor.defaultFormatter": "svelte.svelte-vscode"
+  },
+  "security.allowedUNCHosts": [
+    "wsl.localhost"
+  ],
+  "telemetry.telemetryLevel": "off",
+  "gitlens.telemetry.enabled": false,
+  "terminal.integrated.defaultProfile.linux": "tmux-shell",
+  "terminal.integrated.profiles.linux": {
+    "tmux-shell": {
+      "path": "${userHome}/.tmux-shell",
+      "args": ["${workspaceFolderBasename}", "${workspaceFolder}"],
+      "icon": "terminal-tmux"
+    }
+  },
+  "javascript.updateImportsOnFileMove.enabled": "always",
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "git.branchProtection": [
+    "main",
+    "master"
+  ],
+  "git.confirmSync": false,
+  "svelte.plugin.svelte.format.config.printWidth": 160,
+  "svelte.plugin.svelte.format.config.singleQuote": true,
+  "svelte.plugin.svelte.format.config.svelteStrictMode": false,
+  "diffEditor.hideUnchangedRegions.enabled": true,
+  "azure.resourceFilter": [
+    "47c124da-adfc-4b11-a831-3c824bdc98a9/383d501b-3906-496b-ac90-e336189d628f"
+  ]
+}
