@@ -56,7 +56,11 @@ tmuxa() {
   fi
 
   if [[ -n "$session_match" ]]; then
-    tmux a -t "$session_match"
+    if [[ -n "$TMUX" ]]; then
+      tmux switch-client -t "$session_match"
+    else
+      tmux a -t "$session_match"
+    fi
   else
     echo "No matching session found."
     return 1
