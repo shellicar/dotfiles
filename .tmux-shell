@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+#########################################################################
+# This is based on this article and gist by Jean-Mark Wright
+# https://medium.com/@jeanmark.wright/making-vs-code-and-tmux-awesome-9938081b9c25
+# https://gist.github.com/jaywhy13/4f3c05b15117ad9012a9ffade7789176
+#########################################################################
+
 # Use in vs code with the following settings:
 # "terminal.integrated.profiles.linux": {
 #   "tmux-shell": {
