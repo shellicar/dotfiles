@@ -8,6 +8,7 @@
 # gitversion - Semantic versioning
 # azure-functions-core-tools - Azure Functions
 # docker - Containers
+# Azure CLI - Azure
 ####################################################
 
 SETUP_SCRIPT_NAME="setup.sh"
@@ -161,7 +162,7 @@ if ! command -v func >/dev/null; then
     curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
     sudo mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg
     sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsoft-ubuntu-$(lsb_release -cs)-prod $(lsb_release -cs) main" > /etc/apt/sources.list.d/dotnetdev.list'
-    sudo apt-get update
+    sudo apt-get update -y
     sudo apt-get install azure-functions-core-tools-4 -y
   else
     echo "Unknown operating system."
@@ -175,17 +176,65 @@ fi
 
 echo "❔ Checking Docker"
 if [ "$OS" = "linux" ]; then
-  if ! check_package docker.io; then
+  if ! check_package docker-ce; then
     echo "❌ Installing Docker"
     
-    sudo apt update
-    sudo apt install docker.io -y
+    # Add Docker's official GPG key:
+    sudo apt-get update -y
+    sudo apt-get install ca-certificates curl -y
+    sudo install -m 0755 -d /etc/apt/keyrings
+    sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+    # Add the repository to Apt sources:
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+      sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    sudo apt-get update -y
+
+    sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+
+    # add current user to docker group
+    sudo gpasswd -a $USER docker
 
     echo "✅ Installed Docker"
   else
     echo "✔️ Docker already installed"
   fi
 fi
+
+echo "❔ Checking AzCli"
+if [ "$OS" = "linux" ]; then
+  if ! check_package azure-cli; then
+    echo "❌ Installing AzCli"
+
+    sudo apt-get update -y
+    sudo apt-get install ca-certificates curl apt-transport-https lsb-release gnupg -y
+
+    sudo mkdir -p /etc/apt/keyrings
+    curl -sLS https://packages.microsoft.com/keys/microsoft.asc |
+      gpg --dearmor |
+      sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
+    sudo chmod go+r /etc/apt/keyrings/microsoft.gpg
+
+    AZ_DIST=$(lsb_release -cs)
+    echo "deb [arch=`dpkg --print-architecture` signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $AZ_DIST main" |
+    sudo tee /etc/apt/sources.list.d/azure-cli.list
+    unset AZ_DIST
+
+    sudo apt-get update -y
+    sudo apt-get install azure-cli -y
+
+    echo "✅ Installed AzCli"
+  else
+    echo "✔️ AzCli already installed"
+  fi
+fi
+
+
+
+
 
 echo "✅✅✅ Setup completed successfully."
 
