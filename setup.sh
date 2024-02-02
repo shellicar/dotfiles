@@ -7,6 +7,7 @@
 # homebrew (OSX) - Package manager for OSX
 # gitversion - Semantic versioning
 # azure-functions-core-tools - Azure Functions
+# docker - Containers
 ####################################################
 
 SETUP_SCRIPT_NAME="setup.sh"
@@ -169,6 +170,21 @@ if ! command -v func >/dev/null; then
   echo "✅ Installed Azure Functions Core Tools"
 else
   echo "✔️ Azure Functions Core Tools already installed"
+fi
+
+
+echo "❔ Checking Docker"
+if [ "$OS" = "linux" ]; then
+  if ! check_package docker.io; then
+    echo "❌ Installing Docker"
+    
+    sudo apt update
+    sudo apt install docker.io -y
+
+    echo "✅ Installed Docker"
+  else
+    echo "✔️ Docker already installed"
+  fi
 fi
 
 echo "✅✅✅ Setup completed successfully."
