@@ -1,8 +1,8 @@
 [core]
-        autocrlf = true
+	autocrlf = input
 [user]
         name = Stephen Hellicar
-        email = shellicar@gmail.com
+	email = REDACTED_EMAIL
 [difftool "sourcetree"]
         cmd = '' \"$LOCAL\" \"$REMOTE\"
 [mergetool "sourcetree"]
@@ -16,3 +16,5 @@
 [credential]
 	manager = /mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe
 	helper = /mnt/c/Program\\ Files/Git/mingw64/bin/git-credential-manager.exe
+[init]
+	defaultBranch = main
