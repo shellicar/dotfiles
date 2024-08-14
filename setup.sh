@@ -24,7 +24,7 @@ echo "❔❔❔ Checking dependency status and activation"
 
 SETUP_NVM_VERSION=v0.39.7
 SETUP_HOMEBREW_VERSION=HEAD
-SETUP_NVM_DEFAULT_VERSION=--lts
+SETUP_NVM_DEFAULT_VERSION=20
 SETUP_PNPM_VERSION=latest
 SETUP_GITVERSION_VERSION="5.12.0"
 SETUP_GITVERSION_FILE=gitversion-linux-x64-${SETUP_GITVERSION_VERSION}.tar.gz
@@ -99,7 +99,7 @@ if ! command -v gitversion; then
   echo "❌ Installing gitversion"
   SETUP_TEMP_DIR=$(mktemp -d)
   SETUP_TEMP_FILE=${SETUP_TEMP_DIR}/${SETUP_GITVERSION_FILE}
-  
+
   echo "TEMP_FILE=$SETUP_TEMP_FILE"
   mkdir -p $SETUP_TEMP_DIR
   curl -LJ -o ${SETUP_TEMP_FILE} ${SETUP_GITVERSION_SRC} || return 1
@@ -174,11 +174,22 @@ else
 fi
 
 
+echo "❔ Checking zip"
+if [ "$OS" = "linux" ]; then
+  if ! check_package zip; then
+    echo "❌ Installing zip"
+    sudo apt install -y zip
+    echo "✅ Installed zip"
+  else
+    echo "✔️ zip already installed"
+  fi
+fi
+
 echo "❔ Checking Docker"
 if [ "$OS" = "linux" ]; then
   if ! check_package docker-ce; then
     echo "❌ Installing Docker"
-    
+
     # Add Docker's official GPG key:
     sudo apt-get update -y
     sudo apt-get install ca-certificates curl -y
