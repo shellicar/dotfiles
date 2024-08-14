@@ -15,6 +15,7 @@
 #   }
 # },
 folder_name="$(basename ${1:-$(pwd)})"
+folder_name=$(echo $folder_name | tr '.' '_')
 folderpath="${2:-$(pwd)}"
 
 ############################### FOLDER ICONS ###################################
