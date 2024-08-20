@@ -33,7 +33,7 @@ fi
 
 
 # Construct the session name
-SESSION="$folder_icon  $folder_name"
+SESSION="$folder_icon $folder_name"
 
 # Attach to Tmux
 
@@ -43,7 +43,7 @@ if [ -z "$TMUX" ]; then
   tmux attach-session -d -t "$SESSION" || tmux new-session -s "$SESSION"
 else
   # We're inside Tmux
-  if [ -z "$(tmux ls | grep $SESSION)" ]; then
+  if ! tmux ls | grep -q "$SESSION"; then
     # Create a new dettached session
     tmux new -s "$SESSION" -d
   fi

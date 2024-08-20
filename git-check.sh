@@ -4,17 +4,17 @@ MAIN_BRANCH=main
 
 # Function to check if a branch exists
 branch_exists() {
-    git rev-parse --verify $1 > /dev/null 2>&1
+    git rev-parse --verify "$1" > /dev/null 2>&1
 }
 
 # Function to find the closest common ancestor commit of the given branch and origin/main
 find_base_commit() {
-    git merge-base $1 origin/${MAIN_BRANCH}
+    git merge-base "$1" origin/${MAIN_BRANCH}
 }
 
 # Function to get the changes introduced between two commits
 get_commit_changes() {
-    git diff $1 $2 | sed -n '/^---/!p' \
+    git diff "$1" "$2" | sed -n '/^---/!p' \
   | sed -n '/^+++/!p' \
   | sed -n '/^@@/!p'  \
   | sed -n '/^index /!p'
@@ -26,13 +26,16 @@ check_single_branch() {
     local delete_branch=$2
 
     # Find the base commit
-    local base_commit=$(find_base_commit $target_branch)
+    local base_commit
+    base_commit=$(find_base_commit "$target_branch")
 
     # Get the tip commit of the target branch
-    local target_commit=$(git rev-parse $target_branch)
+    local target_commit
+    target_commit=$(git rev-parse "$target_branch")
 
     # Get the changes from the common ancestor to the tip of the branch
-    local target_changes=$(get_commit_changes $base_commit $target_commit)
+    local target_changes
+    target_changes=$(get_commit_changes "$base_commit" "$target_commit")
 
     # Initialize a variable to keep track of the previous commit hash
     local prev_commit=$base_commit
@@ -42,16 +45,17 @@ check_single_branch() {
       # echo "Details:"
       # git log -1 $commit
       if [ "$delete_branch" = true ]; then
-          git branch -D $target_branch
+          git branch -D "$target_branch"
           # echo "Deleted branch: $target_branch"
       fi
       return 0
     fi 
 
     # Iterate over each commit in origin/main since the base commit
-    for commit in $(git rev-list --reverse $base_commit..origin/${MAIN_BRANCH}); do
+    for commit in $(git rev-list --reverse "$base_commit"..origin/${MAIN_BRANCH}); do
         # Get the changes introduced in this commit against its immediate parent
-        local commit_changes=$(get_commit_changes $prev_commit $commit)
+        local commit_changes
+        commit_changes=$(get_commit_changes "$prev_commit" "$commit")
 
         # Update the previous commit hash for the next iteration
         prev_commit=$commit
@@ -62,7 +66,7 @@ check_single_branch() {
             # echo "Details:"
             # git log -1 $commit
             if [ "$delete_branch" = true ]; then
-                git branch -D $target_branch
+                git branch -D "$target_branch"
                 # echo "Deleted branch: $target_branch"
             fi
             return 0
@@ -79,10 +83,9 @@ delete_branch=false
 check_all=false
 
 # Parse options
-OPTS=$(getopt -o "da" -l "delete,all" -- "$@")
-if [ $? != 0 ]; then
-    echo "Failed to parse options"
-    exit 1
+if ! OPTS=$(getopt -o "da" -l "delete,all" -- "$@"); then
+  echo "Failed to parse options"
+  exit 1
 fi
 
 eval set -- "$OPTS"
@@ -123,7 +126,7 @@ fi
 if [ "$check_all" = true ]; then
     for branch in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
         if [ "$branch" != "${MAIN_BRANCH}" ]; then
-            check_single_branch $branch $delete_branch
+            check_single_branch "$branch" $delete_branch
         fi
     done
 else
@@ -132,5 +135,5 @@ else
         echo "Specified branch does not exist."
         exit 1
     fi
-    check_single_branch $target_branch $delete_branch
+    check_single_branch "$target_branch" $delete_branch
 fi
