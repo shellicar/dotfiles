@@ -1,0 +1,6 @@
+export set REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
+# ZScalar
+# export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ZScalar.pem
+export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/combined-certs.pem
+# ZScalar end

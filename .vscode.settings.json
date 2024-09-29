@@ -1,68 +1,80 @@
 {
-  "files.exclude": {
-    "**/node_modules": false
-  },
-  "editor.tabSize": 2,
-  "files.eol": "\n",
-  "editor.indentSize": "tabSize",
-  "editor.detectIndentation": false,
-  "workbench.startupEditor": "none",
-  "explorer.confirmDragAndDrop": false,
-  "terminal.integrated.defaultProfile.windows": "Git Bash",
-  "git.openRepositoryInParentFolders": "never",
-  "debug.onTaskErrors": "debugAnyway",
-  "editor.autoClosingQuotes": "never",
-  "editor.autoClosingBrackets": "never",
-  "editor.suggest.showSnippets": false,
-  "editor.inlineSuggest.enabled": true,
-  "eslint.format.enable": true,
-  "bicep.suppressedWarnings": [
-    "Decompile on paste"
-  ],
-  "[javascript]": {
-    "editor.defaultFormatter": "vscode.typescript-language-features"
-  },
-  "svelte.enable-ts-plugin": true,
-  "workbench.editor.labelFormat": "short",
-  "workbench.iconTheme": "material-icon-theme",
-  "workbench.tree.indent": 12,
-  "explorer.compactFolders": false,
-  "[typescript]": {
-    "editor.defaultFormatter": "vscode.typescript-language-features"
-  },
-  "explorer.autoReveal": "focusNoScroll",
-  "[css]": {
-    "editor.defaultFormatter": "vscode.css-language-features"
-  },
-  "workbench.editor.enablePreview": false,
-  "[svelte]": {
-    "editor.defaultFormatter": "svelte.svelte-vscode"
-  },
-  "security.allowedUNCHosts": [
-    "wsl.localhost"
-  ],
-  "telemetry.telemetryLevel": "off",
-  "gitlens.telemetry.enabled": false,
-  "terminal.integrated.defaultProfile.linux": "tmux-shell",
-  "terminal.integrated.profiles.linux": {
-    "tmux-shell": {
-      "path": "${userHome}/.tmux-shell",
-      "args": ["${workspaceFolderBasename}", "${workspaceFolder}"],
-      "icon": "terminal-tmux"
+    "files.exclude": {
+      "**/node_modules": false
+    },
+    "editor.tabSize": 2,
+    "files.eol": "\n",
+    "editor.indentSize": "tabSize",
+    "editor.detectIndentation": false,
+    "workbench.startupEditor": "none",
+    "explorer.confirmDragAndDrop": false,
+    "terminal.integrated.defaultProfile.windows": "Git Bash",
+    "git.openRepositoryInParentFolders": "never",
+    "debug.onTaskErrors": "debugAnyway",
+    "editor.autoClosingQuotes": "never",
+    "editor.autoClosingBrackets": "never",
+    "editor.suggest.showSnippets": false,
+    "editor.inlineSuggest.enabled": true,
+    "eslint.format.enable": true,
+    "bicep.suppressedWarnings": [
+      "Decompile on paste"
+    ],
+    "[javascript]": {
+      "editor.defaultFormatter": "vscode.typescript-language-features"
+    },
+    "svelte.enable-ts-plugin": true,
+    "workbench.editor.labelFormat": "short",
+    "workbench.iconTheme": "material-icon-theme",
+    "workbench.tree.indent": 12,
+    "explorer.compactFolders": false,
+    "[typescript]": {
+      "editor.defaultFormatter": "vscode.typescript-language-features"
+    },
+    "explorer.autoReveal": "focusNoScroll",
+    "[css]": {
+      "editor.defaultFormatter": "vscode.css-language-features"
+    },
+    "workbench.editor.enablePreview": false,
+    "[svelte]": {
+      "editor.defaultFormatter": "svelte.svelte-vscode"
+    },
+    "security.allowedUNCHosts": [
+      "wsl.localhost"
+    ],
+    "telemetry.telemetryLevel": "off",
+    "gitlens.telemetry.enabled": false,
+    "terminal.integrated.defaultProfile.linux": "tmux-shell",
+    "terminal.integrated.profiles.linux": {
+      "tmux-shell": {
+        "path": "${userHome}/.tmux-shell",
+        "args": ["${workspaceFolderBasename}", "${workspaceFolder}"],
+        "icon": "terminal-tmux"
+      }
+    },
+    "javascript.updateImportsOnFileMove.enabled": "always",
+    "typescript.updateImportsOnFileMove.enabled": "always",
+    "typescript.inlayHints.parameterNames.enabled": "all",
+    "git.branchProtection": [
+      "main",
+      "master"
+    ],
+    "git.confirmSync": false,
+    "svelte.plugin.svelte.format.config.printWidth": 160,
+    "svelte.plugin.svelte.format.config.singleQuote": true,
+    "svelte.plugin.svelte.format.config.svelteStrictMode": false,
+    "azure.resourceFilter": [
+      "47c124da-adfc-4b11-a831-3c824bdc98a9/383d501b-3906-496b-ac90-e336189d628f",
+      "a882bc25-e1dd-4721-b861-aba1afaec76d/355daa83-8aa8-474b-88e4-124d741a706b",
+      "a882bc25-e1dd-4721-b861-aba1afaec76d/9d576f4d-0cb1-49d1-926b-2e865f8a02d8",
+      "a882bc25-e1dd-4721-b861-aba1afaec76d/d369b8f9-d35a-4466-84ae-f8159226ffd8"
+    ],
+    "diffEditor.ignoreTrimWhitespace": true,
+    "remote.autoForwardPortsSource": "hybrid",
+    "snyk.yesWelcomeNotification": false,
+    "github.copilot.editor.enableAutoCompletions": true,
+    "diffEditor.hideUnchangedRegions.enabled": true,
+    "git.suggestSmartCommit": false,
+    "[vue]": {
+      "editor.defaultFormatter": "Vue.volar"
     }
-  },
-  "javascript.updateImportsOnFileMove.enabled": "always",
-  "typescript.updateImportsOnFileMove.enabled": "always",
-  "git.branchProtection": [
-    "main",
-    "master"
-  ],
-  "git.confirmSync": false,
-  "svelte.plugin.svelte.format.config.printWidth": 160,
-  "svelte.plugin.svelte.format.config.singleQuote": true,
-  "svelte.plugin.svelte.format.config.svelteStrictMode": false,
-  "diffEditor.hideUnchangedRegions.enabled": true,
-  "azure.resourceFilter": [
-    "47c124da-adfc-4b11-a831-3c824bdc98a9/383d501b-3906-496b-ac90-e336189d628f"
-  ]
-}
+  }
