@@ -1,6 +1,6 @@
 #!/bin/sh
 
-for file in .bashrc .aliases .functions .path .dockerfunc .prompt; do
+for file in .bashrc .aliases .functions .path .dockerfunc .prompt .certificates; do
   if [ -f "$HOME/$file" ]; then
     # shellcheck source=/dev/null
 	  . "$HOME/$file"
