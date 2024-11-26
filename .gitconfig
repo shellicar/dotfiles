@@ -12,7 +12,7 @@
 	check-remotes = ! git branch -vv | cut -c 3- | awk '$3 !~/\\[/ { print $1 }' && git branch -vv | cut -c 3- | grep ': gone]' | awk '{print $1}' 
 	glog = log --graph --all --decorate --oneline
 [credential "https://dev.azure.com"]
-    useHttpPath = true
+	useHttpPath = true
 [credential]
 	manager = /mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe
 	helper = /mnt/c/Program\\ Files/Git/mingw64/bin/git-credential-manager.exe
