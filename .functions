@@ -1,5 +1,6 @@
 git_main() {
   # Fetch and prune branches
+  echo "Fetching"
   if git fetch -p; then
     # Check if 'main' branch exists on remote
     if git ls-remote --heads origin main | grep 'refs/heads/main' >/dev/null; then
@@ -31,7 +32,7 @@ git_main() {
       fi
       # Checkout 'main' branch
       echo "Checking out target branch"
-      git checkout $target_branch
+      git checkout $target_branch --
     fi
   else
     echo "Failed to fetch branches."
