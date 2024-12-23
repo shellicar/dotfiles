@@ -1,4 +1,8 @@
-#!/bin/bash
-# the pbcopy script
-tee <&0 | clip.exe
-exit 0
+#!/bin/sh
+input=$(cat)
+# Check if input has any characters at all
+if [ "$input" = "" ]; then
+  exit 0
+fi
+
+echo -n "$input" | clip.exe
