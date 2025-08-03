@@ -1,6 +1,17 @@
-export set REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 # ZScalar
 # export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ZScalar.pem
-export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/combined-certs.pem
+
+OS=$(uname)
+
+case $OS in
+Linux)
+  echo "Setting certs for linux"
+  export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/combined-certs.pem;
+  export set REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+  ;;
+*)
+  echo "Ignoring: $OS"
+esac
+
 # ZScalar end
