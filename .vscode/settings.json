@@ -1,3 +1,115 @@
 {
-  "git.branchProtection": []
+  "[css]": {
+    "editor.defaultFormatter": "vscode.css-language-features"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "biomejs.biome"
+  },
+  "[svelte]": {
+    "editor.defaultFormatter": "svelte.svelte-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "[vue]": {
+    "editor.defaultFormatter": "Vue.volar"
+  },
+  "bicep.suppressedWarnings": [
+    "Decompile on paste"
+  ],
+  "chat.agent.maxRequests": 2500,
+  "chat.editing.autoAcceptDelay": 1,
+  "cSpell.language": "en-AU",
+  "cSpell.userWords": [
+    "HMAC",
+    "organisation",
+    "serialisation",
+    "shellicar",
+    "Unplugin"
+  ],
+  "debug.onTaskErrors": "debugAnyway",
+  "diffEditor.codeLens": true,
+  "diffEditor.hideUnchangedRegions.enabled": true,
+  "diffEditor.ignoreTrimWhitespace": true,
+  "diffEditor.renderIndicators": true,
+  "diffEditor.renderSideBySide": true,
+  "diffEditor.useInlineViewWhenSpaceIsLimited": false,
+  "editor.autoClosingBrackets": "never",
+  "editor.autoClosingQuotes": "never",
+  "editor.detectIndentation": false,
+  "editor.gotoLocation.multipleDefinitions": "goto",
+  "editor.indentSize": "tabSize",
+  "editor.inlineSuggest.enabled": true,
+  "editor.suggest.showSnippets": false,
+  "editor.tabSize": 2,
+  "editor.unicodeHighlight.nonBasicASCII": false,
+  "explorer.autoReveal": "focusNoScroll",
+  "explorer.compactFolders": false,
+  "explorer.confirmDragAndDrop": false,
+  "explorer.sortOrder": "filesFirst",
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 5000,
+  "files.eol": "\n",
+  "files.exclude": {
+    "**/node_modules": false
+  },
+  "git.branchProtection": [],
+  "git.confirmSync": false,
+  "git.openRepositoryInParentFolders": "never",
+  "git.suggestSmartCommit": false,
+  "github.copilot.advanced": {
+    "language.typescript.enable": true
+  },
+  "github.copilot.chat.agent.thinkingTool": false,
+  "github.copilot.chat.localeOverride": "en",
+  "github.copilot.chat.summarizeAgentConversationHistory.enabled": false,
+  "gitlens.telemetry.enabled": false,
+  "gitlens.views.scm.grouped.views": {
+    "branches": false,
+    "commits": true,
+    "contributors": true,
+    "launchpad": false,
+    "remotes": true,
+    "repositories": false,
+    "searchAndCompare": false,
+    "stashes": true,
+    "tags": true,
+    "worktrees": true
+  },
+  "html.autoClosingTags": false,
+  "javascript.updateImportsOnFileMove.enabled": "always",
+  "readTime.enabled": true,
+  "remote.autoForwardPortsSource": "hybrid",
+  "search.quickOpen.includeHistory": false,
+  "security.allowedUNCHosts": [
+    "wsl.localhost"
+  ],
+  "svelte.enable-ts-plugin": true,
+  "svelte.plugin.svelte.format.config.printWidth": 160,
+  "svelte.plugin.svelte.format.config.singleQuote": true,
+  "svelte.plugin.svelte.format.config.svelteStrictMode": false,
+  "terminal.integrated.defaultProfile.linux": "tmux-shell",
+  "terminal.integrated.defaultProfile.osx": "tmux-shell",
+  "terminal.integrated.defaultProfile.windows": "Git Bash",
+  "terminal.integrated.profiles.linux": {
+    "tmux-shell": {
+      "args": [
+        "${workspaceFolderBasename}",
+        "${workspaceFolder}"
+      ],
+      "icon": "terminal-tmux",
+      "path": "${userHome}/.tmux-shell"
+    }
+  },
+  "typescript.inlayHints.parameterNames.enabled": "all",
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "update.showReleaseNotes": false,
+  "workbench.editor.enablePreview": false,
+  "workbench.editor.labelFormat": "short",
+  "workbench.iconTheme": "material-icon-theme",
+  "workbench.startupEditor": "none",
+  "workbench.tree.indent": 12
 }
