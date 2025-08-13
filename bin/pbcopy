@@ -1,8 +1,33 @@
 #!/bin/sh
-input=$(cat)
-# Check if input has any characters at all
-if [ "$input" = "" ]; then
-  exit 0
-fi
 
-printf "%s" "$input" | /usr/bin/pbcopy
+get_distro() {
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "wsl"
+    elif [ "$(uname)" = "Darwin" ]; then
+        echo "macos"
+    else
+        echo "linux"
+    fi
+}
+
+input=$(cat)
+[ "$input" = "" ] && exit 0
+
+case $(get_distro) in
+    wsl)
+        printf "%s" "$input" | clip.exe
+        ;;
+    macos)
+        printf "%s" "$input" | /usr/bin/pbcopy
+        ;;
+    linux)
+        if command -v xclip >/dev/null; then
+            printf "%s" "$input" | xclip -selection clipboard
+        elif command -v xsel >/dev/null; then
+            printf "%s" "$input" | xsel --clipboard --input
+        else
+            echo "No clipboard utility found" >&2
+            exit 1
+        fi
+        ;;
+esac
