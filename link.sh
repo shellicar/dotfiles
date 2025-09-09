@@ -8,18 +8,25 @@ isfile() {
     [ -f "$1" ]
 }
 
+link_item() {
+    source="$1"
+    target="$2"
+    
+    printf "Linking file %s: " "$target"
+    if ! isfile "../$target"; then
+        if ln -s "dotfiles/$source" "../$target"; then
+            echo "ok!"
+        fi
+    elif [ "$(readlink "../$target")" = "dotfiles/$source" ]; then
+        echo "exists"
+    else
+        echo "exists but not same"
+    fi
+}
+
 makelink() {
     if isfile "$1"; then
-        printf "Linking file %s: " "$1"
-        if ! isfile ../"$1"; then
-            if ln -s "dotfiles/$1" "../$1"; then
-                echo "ok!"
-            fi
-        elif [ "$(readlink "../$i")" = dotfiles/"$1" ]; then
-            echo "exists"
-        else
-            echo "exists but not same"
-        fi
+        link_item "$1" "$1"
     elif isdir "$1"; then
         printf "Linking dir %s: " "$1"
         if ! isdir "../$1"; then
@@ -43,6 +50,12 @@ linkfiles() {
             continue;
         fi
 
+        case "$i" in
+            .gitconfig-*)
+                continue
+                ;;
+        esac
+
         makelink "$i"
     done
     unset i
@@ -61,4 +74,17 @@ linkdirs() {
 
 linkfiles
 linkdirs
+
+case "$(uname -s)" in
+    Darwin)
+        link_item ".gitconfig-macos" ".gitconfig"
+        ;;
+    Linux)
+        link_item ".gitconfig-linux" ".gitconfig"
+        ;;
+    *)
+        echo "Unknown OS: $(uname -s)"
+        exit 1
+        ;;
+esac
 
