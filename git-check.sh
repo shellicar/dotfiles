@@ -1,8 +1,16 @@
 #!/bin/sh
 
-set -eu
+set -u
 
-MAIN_BRANCH=main
+get_main_branch() {
+  local branch
+  branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null)
+  if [ $? -ne 0 ]; then
+    echo "Error: Failed to get main branch from origin/HEAD" >&2
+    exit 1
+  fi
+  echo "$branch" | sed 's@^refs/remotes/origin/@@'
+}
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2
@@ -23,15 +31,19 @@ fetch_latest_origin_data() {
 }
 
 validate_main_branch_exists() {
-  log "Checking if origin/${MAIN_BRANCH} exists..."
-  if ! branch_exists "origin/${MAIN_BRANCH}"; then
-    echo "Error: origin/${MAIN_BRANCH} branch does not exist." >&2
+  local main_branch="$1"
+  log "Checking if origin/${main_branch} exists..."
+  if ! branch_exists "origin/${main_branch}"; then
+    echo "Error: origin/${main_branch} branch does not exist." >&2
     echo "Make sure you have fetched from origin and that the main branch exists." >&2
     exit 1
   fi
 }
 
 validate_arguments() {
+  local check_all="$1"
+  local target_branch="$2"
+  
   if [ "$check_all" = "false" ] && [ -z "$target_branch" ]; then
     echo "Error: Please specify a branch name or use the --all flag." >&2
     echo "Usage: $0 [-d|--delete] [-a|--all] [branch_name]" >&2
@@ -40,16 +52,23 @@ validate_arguments() {
 }
 
 check_all_local_branches() {
+  local delete_branch="$1"
+  local main_branch="$2"
+  
   log "Checking all local branches..."
   for branch in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
-    if [ "$branch" != "${MAIN_BRANCH}" ]; then
+    if [ "$branch" != "${main_branch}" ]; then
       log "Checking branch: $branch"
-      has_branch_been_merged "$branch" "$delete_branch"
+      has_branch_been_merged "$branch" "$delete_branch" "$main_branch"
     fi
   done
 }
 
 check_specified_branch() {
+  local target_branch="$1"
+  local delete_branch="$2"
+  local main_branch="$3"
+  
   log "Checking specified branch: $target_branch"
   if ! branch_exists "$target_branch"; then
     echo "Error: Specified branch '$target_branch' does not exist." >&2
@@ -57,7 +76,7 @@ check_specified_branch() {
     git branch >&2
     exit 1
   fi
-  has_branch_been_merged "$target_branch" "$delete_branch"
+  has_branch_been_merged "$target_branch" "$delete_branch" "$main_branch"
 }
 
 branch_exists() {
@@ -69,9 +88,11 @@ branch_exists() {
 }
 
 find_common_ancestor_with_main() {
-  log "Finding base commit for branch: $1"
+  local branch="$1"
+  local main_branch="$2"
+  log "Finding base commit for branch: $branch"
   local common_ancestor
-  common_ancestor=$(git merge-base "$1" "origin/${MAIN_BRANCH}")
+  common_ancestor=$(git merge-base "$branch" "origin/${main_branch}")
   log "Base commit: $common_ancestor"
   echo "$common_ancestor"
 }
@@ -109,9 +130,10 @@ search_for_matching_changes_in_main() {
   local delete_branch="$2"
   local base_commit="$3"
   local target_changes="$4"
+  local main_branch="$5"
   local prev_commit="$base_commit"
 
-  for commit in $(git rev-list --reverse "$base_commit"..origin/${MAIN_BRANCH}); do
+  for commit in $(git rev-list --reverse "$base_commit"..origin/${main_branch}); do
     local commit_changes
     commit_changes=$(get_diff_content_only "$prev_commit" "$commit")
     prev_commit=$commit
@@ -130,9 +152,10 @@ search_for_matching_changes_in_main() {
 has_branch_been_merged() {
   local target_branch=$1
   local delete_branch=$2
+  local main_branch=$3
 
   local base_commit
-  base_commit=$(find_common_ancestor_with_main "$target_branch")
+  base_commit=$(find_common_ancestor_with_main "$target_branch" "$main_branch")
 
   local target_commit
   target_commit=$(get_branch_tip_commit "$target_branch")
@@ -145,29 +168,27 @@ has_branch_been_merged() {
     return 0
   fi 
 
-  if search_for_matching_changes_in_main "$target_branch" "$delete_branch" "$base_commit" "$target_changes"; then
+  if search_for_matching_changes_in_main "$target_branch" "$delete_branch" "$base_commit" "$target_changes" "$main_branch"; then
     return 0
   fi
 
-  echo "Branch $target_branch has not been merged into origin/${MAIN_BRANCH}"
+  echo "Branch $target_branch has not been merged into origin/${main_branch}"
   return 1
 }
 
-initialize_variables() {
-  target_branch=""
-  delete_branch=false
-  check_all=false
-}
-
 parse_arguments() {
+  local args_target_branch=""
+  local args_delete_branch=false
+  local args_check_all=false
+  
   while [ $# -gt 0 ]; do
     case "$1" in
       -d|--delete)
-        delete_branch=true
+        args_delete_branch=true
         shift
         ;;
       -a|--all)
-        check_all=true
+        args_check_all=true
         shift
         ;;
       -h|--help)
@@ -182,29 +203,42 @@ parse_arguments() {
         exit 1
         ;;
       *)
-        if [ -n "$target_branch" ]; then
+        if [ -n "$args_target_branch" ]; then
           echo "Error: Multiple branch names specified" >&2
           exit 1
         fi
-        target_branch="$1"
+        args_target_branch="$1"
         shift
         ;;
     esac
   done
+  
+  printf '"%s" %s %s' "$args_target_branch" "$args_delete_branch" "$args_check_all"
 }
 
 main() {
-  initialize_variables
-  parse_arguments "$@"
+  local target_branch=""
+  local delete_branch=false
+  local check_all=false
+  local main_branch
+  
+  main_branch=$(get_main_branch)
+  log "Detected main branch: $main_branch"
+  
+  set -- $(parse_arguments "$@")
+  target_branch=$(echo "$1" | tr -d '"')
+  delete_branch="$2"
+  check_all="$3"
+  
   ensure_in_git_repository
   fetch_latest_origin_data
-  validate_main_branch_exists
-  validate_arguments
+  validate_main_branch_exists "$main_branch"
+  validate_arguments "$check_all" "$target_branch"
 
   if [ "$check_all" = "true" ]; then
-    check_all_local_branches
+    check_all_local_branches "$delete_branch" "$main_branch"
   else
-    check_specified_branch
+    check_specified_branch "$target_branch" "$delete_branch" "$main_branch"
   fi
 }
 
