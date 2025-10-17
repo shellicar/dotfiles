@@ -1,19 +1,14 @@
 #!/bin/sh
 
-get_distro() {
-    if grep -qi microsoft /proc/version 2>/dev/null; then
-        echo "wsl"
-    elif [ "$(uname)" = "Darwin" ]; then
-        echo "macos"
-    else
-        echo "linux"
-    fi
-}
-
 input=$(cat)
 [ "$input" = "" ] && exit 0
 
-case $(get_distro) in
+detected_os=$(dirname "$0")/../get-os.sh
+
+case $($detected_os) in
+    windows-bash)
+        printf "%s" "$input" | clip.exe
+        ;;
     wsl)
         printf "%s" "$input" | clip.exe
         ;;
