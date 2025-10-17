@@ -30,27 +30,27 @@ if [ ! -f "$DOTFILES_SETTINGS" ]; then
 fi
 
 detect_vscode_settings_path() {
-    case "$(uname -s)" in
-        Linux*)
-            if [ -n "$WSL_DISTRO_NAME" ]; then
-                echo "Detected: WSL ($WSL_DISTRO_NAME)" >&2
-                windows_user=$(whoami)
-                echo "Windows user: $windows_user" >&2
-                echo "/mnt/c/Users/$windows_user/AppData/Roaming/Code/User/settings.json"
-            else
-                echo "Detected: Native Linux" >&2
-                echo "Error: Native Linux not yet supported" >&2
-                exit 1
-            fi
+    os=$(../get-os.sh)
+    
+    case "$os" in
+        windows-bash)
+            echo "Detected: Windows Git Bash" >&2
+            echo "/c/Users/$(whoami)/AppData/Roaming/Code/User/settings.json"
             ;;
-        Darwin*)
+        wsl)
+            echo "Detected: WSL" >&2
+            echo "/mnt/c/Users/$(whoami)/AppData/Roaming/Code/User/settings.json"
+            ;;
+        macos)
             echo "Detected: macOS" >&2
-            echo "Home directory: $HOME" >&2
             echo "$HOME/Library/Application Support/Code/User/settings.json"
             ;;
+        linux)
+            echo "Error: Native Linux not supported" >&2
+            exit 1
+            ;;
         *)
-            echo "Detected: Unknown OS ($(uname -s))" >&2
-            echo "Error: Unsupported OS" >&2
+            echo "Error: Unsupported OS: $detected_os" >&2
             exit 1
             ;;
     esac

@@ -75,15 +75,17 @@ linkdirs() {
 linkfiles
 linkdirs
 
-case "$(uname -s)" in
-    Darwin)
+os=$(./get-os.sh)
+
+case "$os" in
+    macos)
         link_item ".gitconfig-macos" ".gitconfig"
         ;;
-    Linux)
+    windows-bash|wsl|linux)
         link_item ".gitconfig-linux" ".gitconfig"
         ;;
     *)
-        echo "Unknown OS: $(uname -s)"
+        echo "Error: Unsupported OS: $os"
         exit 1
         ;;
 esac

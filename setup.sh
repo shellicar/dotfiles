@@ -32,13 +32,17 @@ SETUP_GITVERSION_SRC=https://github.com/GitTools/GitVersion/releases/download/${
 
 # Determine the environment
 SETUP_ARCHITECTURE=""
-SETUP_OS="unknown"
+detected_os=$(./get-os.sh)
 
-case $(uname) in
-Darwin) OS="macOS"; SETUP_ARCHITECTURE="osx-arm64" ;;
-Linux) OS="linux";  SETUP_ARCHITECTURE="linux-x64" ;;
+case "$detected_os" in
+macos) OS="macOS"; SETUP_ARCHITECTURE="osx-arm64" ;;
+wsl|linux) OS="linux";  SETUP_ARCHITECTURE="linux-x64" ;;
+windows-bash)
+  echo "Error: Windows Git Bash not supported for setup"
+  exit 1
+  ;;
 *)
-  echo "Unknown operating system."
+  echo "Error: Unsupported OS: $detected_os"
   exit 1
   ;;
 esac
