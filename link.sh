@@ -18,7 +18,9 @@ link_item() {
             echo "ok!"
         fi
     elif [ "$(readlink "../$target")" = "dotfiles/$source" ]; then
-        echo "exists"
+        echo "exists (symlink)"
+    elif diff -q "$source" "../$target" >/dev/null 2>&1; then
+        echo "exists (content same)"
     else
         echo "exists but not same"
     fi
@@ -33,7 +35,7 @@ makelink() {
             if ln -s "dotfiles/$1" "../$1"; then
                 echo "ok!"
             fi
-        elif [ "$(readlink "../$i")" = "dotfiles/$1" ]; then
+        elif [ "$(readlink "../$1")" = "dotfiles/$1" ]; then
             echo "exists"
         else
             echo "exists but not same"
