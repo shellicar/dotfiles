@@ -8,7 +8,8 @@ function parseJsonFile(filePath) {
   }
   const buffer = fs.readFileSync(filePath);
   let text = buffer.toString('utf8');
-  text = text.replace('\\n', '\\\\n');
+  text = text.replace(/\\n/g, '\\\\n');
+  text = text.replace(/\\b/g, '\\\\\\b');
   return JSON.parse(text);
 }
 
