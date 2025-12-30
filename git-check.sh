@@ -2,6 +2,23 @@
 
 set -u
 
+# Color definitions
+if [ -t 1 ]; then
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  RED='\033[0;31m'
+  RESET='\033[0m'
+else
+  GREEN=''
+  YELLOW=''
+  RED=''
+  RESET=''
+fi
+
+# Emojis
+CHECKMARK='✅'
+CROSS='❌'
+
 get_main_branch() {
   local branch
   branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null)
@@ -119,7 +136,7 @@ handle_branch_already_merged() {
   local delete_branch="$2"
   local commit="$3"
   
-  echo "Found contents for $target_branch on commit: $commit"
+  echo "${GREEN}${CHECKMARK} Branch $target_branch has been merged${RESET} (found on commit: $commit)"
   if [ "$delete_branch" = "true" ]; then
     git branch -D "$target_branch"
   fi
@@ -139,7 +156,7 @@ search_for_matching_changes_in_main() {
     prev_commit=$commit
 
     if [ "$commit_changes" = "$target_changes" ]; then
-      echo "Found contents for $target_branch on commit: $commit"
+      echo "${GREEN}${CHECKMARK} Branch $target_branch has been merged${RESET} (found on commit: $commit)"
       if [ "$delete_branch" = "true" ]; then
         git branch -D "$target_branch"
       fi
@@ -172,7 +189,7 @@ has_branch_been_merged() {
     return 0
   fi
 
-  echo "Branch $target_branch has not been merged into origin/${main_branch}"
+  echo "${YELLOW}${CROSS} Branch $target_branch has not been merged into origin/${main_branch}${RESET}"
   return 1
 }
 
