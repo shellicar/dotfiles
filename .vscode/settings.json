@@ -112,5 +112,5 @@
   "workbench.iconTheme": "material-icon-theme",
   "workbench.startupEditor": "none",
   "workbench.tree.indent": 12,
-  "chat.disableAIFeatures": true
+  "chat.disableAIFeatures": false
 }
