@@ -3,14 +3,14 @@
 # ZScaler
 
 set_linux_certs() {
-    echo "Setting certs for Linux"
+    # echo "Setting certs for Linux"
     # export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/combined-certs.pem;
     export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
     export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 }
 
 set_macos_certs() {
-    echo "Setting certs for macOS"
+    # echo "Setting certs for macOS"
     export NODE_EXTRA_CA_CERTS="$(brew --prefix)/etc/ca-certificates/cert.pem"
     export REQUESTS_CA_BUNDLE="$(brew --prefix)/etc/ca-certificates/cert.pem"
 }
