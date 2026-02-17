@@ -13,6 +13,10 @@ set_macos_certs() {
     # echo "Setting certs for macOS"
     export NODE_EXTRA_CA_CERTS="$(brew --prefix)/etc/ca-certificates/cert.pem"
     export REQUESTS_CA_BUNDLE="$(brew --prefix)/etc/ca-certificates/cert.pem"
+    # Zscaler Root CA has Basic Constraints not marked critical,
+    # which fails OpenSSL 3.x strict validation (used by az cli).
+    # See zscaler_verify/ for proof.
+    export AZURE_CLI_DISABLE_CONNECTION_VERIFICATION=1
 }
 
 OS=$(uname)
