@@ -197,6 +197,7 @@ parse_arguments() {
   local args_target_branch=""
   local args_delete_branch=false
   local args_check_all=false
+  local args_base_branch=""
   
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -208,11 +209,21 @@ parse_arguments() {
         args_check_all=true
         shift
         ;;
+      -b|--base)
+        shift
+        if [ $# -eq 0 ]; then
+          echo "Error: --base requires a branch name" >&2
+          exit 1
+        fi
+        args_base_branch="$1"
+        shift
+        ;;
       -h|--help)
-        echo "Usage: $0 [-d|--delete] [-a|--all] [branch_name]"
-        echo "  -d, --delete  Delete the branch if it has been merged"
-        echo "  -a, --all     Check all branches"
-        echo "  -h, --help    Show this help message"
+        echo "Usage: $0 [-d|--delete] [-a|--all] [-b|--base <branch>] [branch_name]"
+        echo "  -d, --delete          Delete the branch if it has been merged"
+        echo "  -a, --all             Check all branches"
+        echo "  -b, --base <branch>   Compare against this branch instead of the default main branch"
+        echo "  -h, --help            Show this help message"
         exit 0
         ;;
       -*)
@@ -229,8 +240,8 @@ parse_arguments() {
         ;;
     esac
   done
-  
-  printf '"%s" %s %s' "$args_target_branch" "$args_delete_branch" "$args_check_all"
+
+  printf '"%s" %s %s "%s"' "$args_target_branch" "$args_delete_branch" "$args_check_all" "$args_base_branch"
 }
 
 main() {
@@ -238,15 +249,22 @@ main() {
   local delete_branch=false
   local check_all=false
   local main_branch
-  
-  main_branch=$(get_main_branch)
-  log "Detected main branch: $main_branch"
-  
+  local base_override=""
+
   set -- $(parse_arguments "$@")
   target_branch=$(echo "$1" | tr -d '"')
   delete_branch="$2"
   check_all="$3"
-  
+  base_override=$(echo "$4" | tr -d '"')
+
+  if [ -n "$base_override" ]; then
+    main_branch="$base_override"
+    log "Using custom base branch: $main_branch"
+  else
+    main_branch=$(get_main_branch)
+    log "Detected main branch: $main_branch"
+  fi
+
   ensure_in_git_repository
   fetch_latest_origin_data
   validate_main_branch_exists "$main_branch"
