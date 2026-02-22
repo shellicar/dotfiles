@@ -76,5 +76,10 @@
     "git.suggestSmartCommit": false,
     "[vue]": {
       "editor.defaultFormatter": "Vue.volar"
-    }
+    },
+    "editor.unicodeHighlight.ambiguousCharacters": true,
+    "accessibility.signals.terminalBell": {
+      "sound": "on"
+    },
+    "terminal.integrated.enableVisualBell": true
   }
