@@ -1,5 +1,6 @@
 [core]
 	autocrlf = input
+	excludesfile = /home/stephen/.gitignore_global
 [user]
 	name = Stephen Hellicar
 [difftool "sourcetree"]
