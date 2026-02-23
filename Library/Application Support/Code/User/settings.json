@@ -43,7 +43,7 @@
   ],
   "telemetry.telemetryLevel": "off",
   "gitlens.telemetry.enabled": false,
-  "terminal.integrated.defaultProfile.osx": "tmux-shell",
+  "terminal.integrated.defaultProfile.osx": "zsh",
   "terminal.integrated.profiles.osx": {
     "tmux-shell": {
       "path": "${userHome}/.tmux-shell",
@@ -155,5 +155,6 @@
   "diffEditor.hideUnchangedRegions.enabled": true,
   "biome.suggestInstallingGlobally": false,
   "mssql.objectExplorer.groupBySchema": true,
-  "update.showReleaseNotes": false
+  "update.showReleaseNotes": false,
+  "http.systemCertificates": true
 }

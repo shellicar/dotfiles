@@ -92,7 +92,7 @@
   "svelte.plugin.svelte.format.config.singleQuote": true,
   "svelte.plugin.svelte.format.config.svelteStrictMode": false,
   "terminal.integrated.defaultProfile.linux": "tmux-shell",
-  "terminal.integrated.defaultProfile.osx": "tmux-shell",
+  "terminal.integrated.defaultProfile.osx": "zsh",
   "terminal.integrated.defaultProfile.windows": "Git Bash",
   "terminal.integrated.profiles.linux": {
     "tmux-shell": {

@@ -1,12 +1,14 @@
 [core]
 	autocrlf = input
+	excludesfile = /Users/shellicar/.gitignore_global
 [user]
 	name = Stephen Hellicar
 [difftool "sourcetree"]
-        cmd = '' \"$LOCAL\" \"$REMOTE\"
+	cmd = opendiff \"$LOCAL\" \"$REMOTE\"
+	path = 
 [mergetool "sourcetree"]
-        cmd = "'' "
-        trustExitCode = true
+	cmd = /Applications/Sourcetree.app/Contents/Resources/opendiff-w.sh \"$LOCAL\" \"$REMOTE\" -ancestor \"$BASE\" -merge \"$MERGED\"
+	trustExitCode = true
 [alias]
 	check-remotes = ! git branch -vv | cut -c 3- | awk '$3 !~/\\[/ { print $1 }' && git branch -vv | cut -c 3- | grep ': gone]' | awk '{print $1}' 
 	glog = log --graph --all --decorate --oneline
