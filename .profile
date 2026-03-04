@@ -18,6 +18,11 @@ if [ -d "$HOME/.local/bin" ] ; then
     PATH="$HOME/.local/bin:$PATH"
 fi
 
+# Custom
+if [ -n "$WSL_DISTRO_NAME" ]; then
+    export BROWSER="wslview"
+fi
+
 export VISUAL=vim
 export EDITOR="$VISUAL"
 export ENABLE_LSP_TOOL=1

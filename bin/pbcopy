@@ -10,7 +10,11 @@ case $($detected_os) in
         printf "%s" "$input" | clip.exe
         ;;
     wsl)
-        printf "%s" "$input" | clip.exe
+        if command -v xclip >/dev/null; then
+            printf "%s" "$input" | xclip -selection clipboard
+        else
+            printf "%s" "$input" | clip.exe
+        fi
         ;;
     macos)
         printf "%s" "$input" | /usr/bin/pbcopy
