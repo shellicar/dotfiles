@@ -1,11 +1,25 @@
 #!/bin/sh
 set -e
 
-config="GitVersion.yml"
-if [ ! -f "$config" ]; then
-  echo "Error: No GitVersion.yml found in $(pwd)" >&2
+find_up() {
+  dir=$(pwd)
+  while true; do
+    if [ -f "$dir/$1" ]; then
+      echo "$dir/$1"
+      return 0
+    fi
+    parent=$(dirname "$dir")
+    if [ "$parent" = "$dir" ]; then
+      return 1
+    fi
+    dir="$parent"
+  done
+}
+
+config=$(find_up "GitVersion.yml") || {
+  echo "Error: No GitVersion.yml found in $(pwd) or any parent directory" >&2
   exit 1
-fi
+}
 
 if grep -q '^strategies:' "$config"; then
   version=6
