@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+config="GitVersion.yml"
+if [ ! -f "$config" ]; then
+  echo "Error: No GitVersion.yml found in $(pwd)" >&2
+  exit 1
+fi
+
+if grep -q '^strategies:' "$config"; then
+  version=6
+elif grep -q '^mode:' "$config"; then
+  version=5
+else
+  echo "Error: Cannot determine GitVersion version from $config" >&2
+  echo "Expected 'mode:' (v5) or 'strategies:' (v6) at root level" >&2
+  exit 1
+fi
+
+bin="$HOME/.gitversion/$version/gitversion"
+if [ ! -x "$bin" ]; then
+  echo "Error: GitVersion $version not installed at $bin" >&2
+  echo "Run: ~/dotfiles/install-gitversion.sh $version" >&2
+  exit 1
+fi
+
+exec "$bin" "$@"
