@@ -43,7 +43,7 @@
   ],
   "telemetry.telemetryLevel": "off",
   "gitlens.telemetry.enabled": false,
-  "terminal.integrated.defaultProfile.osx": "zsh",
+  "terminal.integrated.defaultProfile.osx": "tmux-shell",
   "terminal.integrated.profiles.osx": {
     "tmux-shell": {
       "path": "${userHome}/.tmux-shell",
