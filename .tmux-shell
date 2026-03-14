@@ -40,14 +40,10 @@ SESSION="$folder_icon $folder_name"
 if [ -z "$TMUX" ]; then
   # We're not inside Tmux
   echo "Attaching to $SESSION"
-  tmux attach-session -d -t "$SESSION" || tmux new-session -s "$SESSION"
+  tmux attach-session -d -t "=$SESSION" || tmux new-session -s "$SESSION"
 else
   # We're inside Tmux
-  if ! tmux ls | grep -q "$SESSION"; then
-    # Create a new dettached session
-    tmux new -s "$SESSION" -d
-  fi
-
-  # Switch to the session
-  tmux switch-client -t "$SESSION"
+  echo "Switching to $SESSION"
+  tmux has-session -t "=$SESSION" 2>/dev/null || tmux new -s "$SESSION" -d
+  tmux switch-client -t "=$SESSION"
 fi
