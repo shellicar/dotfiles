@@ -26,3 +26,6 @@ fi
 export VISUAL=vim
 export EDITOR="$VISUAL"
 export ENABLE_LSP_TOOL=1
+
+# Vite+ bin (https://viteplus.dev)
+. "$HOME/.vite-plus/env"
