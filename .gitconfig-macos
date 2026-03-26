@@ -1,8 +1,10 @@
 [core]
 	autocrlf = input
-	excludesfile = /Users/shellicar/.gitignore_global
+	excludesfile = ~/.gitignore_global
 [user]
 	name = Stephen Hellicar
+	useConfigOnly = true
+	signingkey = D4383CAA1FF13B65
 [difftool "sourcetree"]
 	cmd = opendiff \"$LOCAL\" \"$REMOTE\"
 	path = 
@@ -13,9 +15,9 @@
 	check-remotes = ! git branch -vv | cut -c 3- | awk '$3 !~/\\[/ { print $1 }' && git branch -vv | cut -c 3- | grep ': gone]' | awk '{print $1}' 
 	glog = log --graph --all --decorate --oneline
 [credential]
-	helper = /usr/local/share/gcm-core/git-credential-manager
 	credentialStore = keychain
 	gitHubAuthModes = browser
+	helper = /usr/local/share/gcm-core/git-credential-manager
 [credential "https://dev.azure.com"]
 	useHttpPath = true
 [init]
@@ -23,3 +25,5 @@
 [push]
 	autoSetupRemote = true
 	default = current
+[commit]
+	gpgsign = true
