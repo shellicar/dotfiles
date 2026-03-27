@@ -82,6 +82,7 @@ os=$(./get-os.sh)
 case "$os" in
     macos)
         link_item ".gitconfig-macos" ".gitconfig"
+        makelink ".hammerspoon"
         ;;
     windows-bash|wsl|linux)
         link_item ".gitconfig-linux" ".gitconfig"

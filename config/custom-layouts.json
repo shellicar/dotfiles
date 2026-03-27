@@ -1,0 +1,121 @@
+{
+  "custom-layouts": [
+    {
+      "uuid": "{8EDE70E7-003A-4786-B402-119389BB79E1}",
+      "name": "Grid",
+      "type": "grid",
+      "info": {
+        "rows": 2,
+        "columns": 4,
+        "rows-percentage": [
+          5000,
+          5000
+        ],
+        "columns-percentage": [
+          2500,
+          2500,
+          2500,
+          2500
+        ],
+        "cell-child-map": [
+          [
+            0,
+            2,
+            3,
+            6
+          ],
+          [
+            1,
+            4,
+            5,
+            7
+          ]
+        ],
+        "show-spacing": false,
+        "spacing": 16,
+        "sensitivity-radius": 20
+      }
+    },
+    {
+      "uuid": "{6E4A8A84-8F94-4490-835B-9000B08CB534}",
+      "name": "Hub",
+      "type": "grid",
+      "info": {
+        "rows": 2,
+        "columns": 5,
+        "rows-percentage": [
+          5000,
+          5000
+        ],
+        "columns-percentage": [
+          1667,
+          1667,
+          3332,
+          1667,
+          1667
+        ],
+        "cell-child-map": [
+          [
+            0,
+            1,
+            4,
+            5,
+            6
+          ],
+          [
+            2,
+            3,
+            4,
+            7,
+            8
+          ]
+        ],
+        "show-spacing": false,
+        "spacing": 16,
+        "sensitivity-radius": 20
+      }
+    },
+    {
+      "uuid": "{F1910D06-23A0-4AF3-885D-2C7F226BDBDF}",
+      "name": "Primary",
+      "type": "grid",
+      "info": {
+        "rows": 2,
+        "columns": 6,
+        "rows-percentage": [
+          6669,
+          3331
+        ],
+        "columns-percentage": [
+          1667,
+          1667,
+          1667,
+          1667,
+          1666,
+          1666
+        ],
+        "cell-child-map": [
+          [
+            0,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        ],
+        "show-spacing": false,
+        "spacing": 16,
+        "sensitivity-radius": 20
+      }
+    }
+  ]
+}
