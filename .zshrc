@@ -20,3 +20,8 @@ bindkey '^[[5~' up-history           # Page Up (if you use it)
 bindkey '^[[6~' down-history         # Page Down
 bindkey '^[[1;5A' history-beginning-search-backward
 bindkey '^[[1;5B' history-beginning-search-forward
+# The following lines have been added by Docker Desktop to enable Docker CLI completions.
+fpath=(/Users/stephen/.docker/completions $fpath)
+autoload -Uz compinit
+compinit
+# End of Docker CLI completions

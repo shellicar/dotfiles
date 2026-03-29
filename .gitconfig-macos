@@ -1,6 +1,7 @@
 [core]
 	autocrlf = input
 	excludesfile = ~/.gitignore_global
+	hooksPath = /Users/stephen/.config/git/hooks
 [user]
 	name = Stephen Hellicar
 	useConfigOnly = true
