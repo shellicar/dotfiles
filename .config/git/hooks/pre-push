@@ -1,0 +1,17 @@
+#!/bin/sh
+branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+# Skip if detached HEAD or main/master
+case "$branch" in
+  ""|main|master) exit 0 ;;
+esac
+
+# Allowlist: only these prefixes
+case "$branch" in
+  fix/*|security/*|feature/*|epic/*) exit 0 ;;
+esac
+
+echo "Branch '$branch' doesn't match allowed prefixes: fix/ security/ feature/ epic/"
+echo "Confirm if the branch name is correct, or ask for a new branch name"
+echo "Rename with: git branch -m <new-name>"
+exit 1

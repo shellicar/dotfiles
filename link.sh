@@ -1,5 +1,7 @@
 #!/bin/sh
 
+DOTFILES_DIR=$(pwd)
+
 isdir() {
     [ -d "$1" ]
 }
@@ -74,8 +76,25 @@ linkdirs() {
     unset i
 }
 
+link_dir() {
+    mkdir -p "$(dirname "../$1")"
+    src="$DOTFILES_DIR/$1"
+    tgt="$(cd .. && pwd)/$1"
+    printf "Linking dir %s: " "$1"
+    if ! isdir "$tgt"; then
+        if ln -s "$src" "$tgt"; then
+            echo "ok!"
+        fi
+    elif [ "$(readlink "$tgt")" = "$src" ]; then
+        echo "exists"
+    else
+        echo "exists but not same"
+    fi
+}
+
 linkfiles
 linkdirs
+link_dir ".config/git/hooks"
 
 os=$(./get-os.sh)
 
