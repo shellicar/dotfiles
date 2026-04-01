@@ -3,6 +3,7 @@
 	excludesfile = /home/stephen/.gitignore_global
 [user]
 	name = Stephen Hellicar
+	email = shellicar@gmail.com
 [difftool "sourcetree"]
         cmd = '' \"$LOCAL\" \"$REMOTE\"
 [mergetool "sourcetree"]
