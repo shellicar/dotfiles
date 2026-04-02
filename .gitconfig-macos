@@ -1,11 +1,10 @@
 [core]
 	autocrlf = input
 	excludesfile = ~/.gitignore_global
-	hooksPath = /Users/stephen/.config/git/hooks
+	hooksPath = ~/.config/git/hooks
 [user]
 	name = Stephen Hellicar
 	useConfigOnly = true
-	signingkey = D4383CAA1FF13B65
 [difftool "sourcetree"]
 	cmd = opendiff \"$LOCAL\" \"$REMOTE\"
 	path = 
@@ -28,3 +27,9 @@
 	default = current
 [commit]
 	gpgsign = true
+
+[includeIf "hasconfig:remote.*.url:https://github.com/shellicar/**"]
+  path = ~/dotfiles/.gitconfig.d/shellicar
+
+[includeIf "hasconfig:remote.*.url:https://eagersautomotive@dev.azure.com/eagersautomotive/**"]
+  path = ~/dotfiles/.gitconfig.d/eagers
