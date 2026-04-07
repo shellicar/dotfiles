@@ -1,17 +1,30 @@
 #!/bin/sh
-branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 
-# Skip if detached HEAD or main/master
-case "$branch" in
-  ""|main|master) exit 0 ;;
-esac
+run_local_hook() {
+  REPO_HOOK="$(git rev-parse --git-dir)/hooks/pre-push"
+  if [ -x "$REPO_HOOK" ]; then
+    exec "$REPO_HOOK" "$@"
+  fi
+}
 
-# Allowlist: only these prefixes
-case "$branch" in
-  fix/*|security/*|feature/*|epic/*) exit 0 ;;
-esac
+check_branch() {
+  branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 
-echo "Branch '$branch' doesn't match allowed prefixes: fix/ security/ feature/ epic/"
-echo "Confirm if the branch name is correct, or ask for a new branch name"
-echo "Rename with: git branch -m <new-name>"
-exit 1
+  # Skip if detached HEAD or main/master
+  case "$branch" in
+    ""|main|master) return 0 ;;
+  esac
+
+  # Allowlist: only these prefixes
+  case "$branch" in
+    docs/*|fix/*|security/*|feature/*|epic/*) return 0 ;;
+  esac
+
+  echo "Branch '$branch' doesn't match allowed prefixes: fix/ security/ feature/ epic/"
+  echo "Confirm if the branch name is correct, or ask for a new branch name"
+  echo "Rename with: git branch -m <new-name>"
+  exit 1
+}
+
+check_branch
+run_local_hook "$@"

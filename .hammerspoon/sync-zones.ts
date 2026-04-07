@@ -153,7 +153,7 @@ function main(): void {
     process.exit(1);
   }
 
-  const layoutsPath = resolve("./.layouts.lua");
+  const layoutsPath = resolve("./layouts.lua");
 
   const parsed = parseFancyZones(fzPath);
   console.log(`Parsed ${parsed.length} layout(s) from FancyZones:`);
