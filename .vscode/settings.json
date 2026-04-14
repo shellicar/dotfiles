@@ -132,7 +132,7 @@
   "svelte.plugin.svelte.format.config.svelteStrictMode": false,
   "telemetry.telemetryLevel": "off",
   "terminal.integrated.defaultProfile.linux": "tmux-shell",
-  "terminal.integrated.defaultProfile.osx": "tmux-shell",
+  "terminal.integrated.defaultProfile.osx": "zsh",
   "terminal.integrated.defaultProfile.windows": "tmux-shell",
   "terminal.integrated.enableVisualBell": true,
   "terminal.integrated.profiles.linux": {
