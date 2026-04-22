@@ -13,10 +13,4 @@ done
 # No repo found, do nothing
 [ "$DIR" = "/" ] && exit 0
 
-CACHE="/tmp/.tmux-vscode-last"
-LAST="$(cat "$CACHE" 2>/dev/null)"
-if [ "$DIR" != "$LAST" ]; then
-  echo "$DIR" > "$CACHE"
-  osascript -e 'tell application "Visual Studio Code" to open POSIX file "'"$DIR"'"'
-fi
-
+osascript -e 'tell application "Visual Studio Code" to open POSIX file "'"$DIR"'"'
