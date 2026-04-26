@@ -1,0 +1,10 @@
+#!/bin/sh
+
+run_local_hook() {
+  REPO_HOOK="$(git rev-parse --git-dir)/hooks/pre-commit"
+  if [ -x "$REPO_HOOK" ]; then
+    exec "$REPO_HOOK" "$@"
+  fi
+}
+
+run_local_hook "$@"
