@@ -7,6 +7,8 @@ GPG_CONF="$HOME/.gnupg/gpg.conf"
 KEYCHAIN_NAME="gpg.keychain"
 KEYCHAIN_PATH="$HOME/Library/Keychains/${KEYCHAIN_NAME}-db"
 KEYCHAIN_TIMEOUT=1
+CRON_HOUR="${CRON_HOUR:-6}"
+CRON_MINUTE="${CRON_MINUTE:-0}"
 
 # --- Helpers ---
 usage() {
@@ -16,6 +18,8 @@ usage() {
   echo "  --generate     Generate a new GPG key (interactive)"
   echo "  --test-sign    Test signing with a key (prompts for email)"
   echo "  --configure    Configure gpg-agent, keychain, and pinentry"
+  echo "  --schedule     Set up daily cron to kill gpg-agent (default 6am)"
+  echo "  --reset        Kill gpg-agent now (next sign prompts)"
   exit 1
 }
 
@@ -70,6 +74,33 @@ test_sign() {
   fi
 }
 
+schedule_reset() {
+  echo "GPG Agent Scheduled Reset"
+  echo "========================="
+  echo ""
+
+  cron_line="$CRON_MINUTE $CRON_HOUR * * * gpgconf --kill gpg-agent"
+
+  # Check if already scheduled
+  if crontab -l 2>/dev/null | grep -q "gpgconf --kill gpg-agent"; then
+    echo "  Existing cron entry found. Replacing..."
+    crontab -l 2>/dev/null | grep -v "gpgconf --kill gpg-agent" | { cat; echo "$cron_line"; } | crontab -
+  else
+    { crontab -l 2>/dev/null; echo "$cron_line"; } | crontab -
+  fi
+
+  echo "  Scheduled: kill gpg-agent at $(printf '%02d:%02d' "$CRON_HOUR" "$CRON_MINUTE") daily"
+  echo "  First commit after reset will prompt for passphrase."
+  echo ""
+  echo "Done."
+}
+
+reset_agent() {
+  echo "Killing gpg-agent..."
+  gpgconf --kill gpg-agent
+  echo "Done. Next sign will prompt for passphrase."
+}
+
 configure_agent() {
   echo "GPG Agent + Keychain Configuration"
   echo "===================================="
@@ -109,8 +140,8 @@ configure_agent() {
   chmod 700 "$HOME/.gnupg"
 
   cat > "$GPG_AGENT_CONF" <<EOF
-default-cache-ttl 0
-max-cache-ttl 0
+default-cache-ttl 86400
+max-cache-ttl 86400
 EOF
 
   if command -v pinentry-mac > /dev/null 2>&1; then
@@ -139,5 +170,7 @@ case "${1:-}" in
   --generate)   generate_key ;;
   --test-sign)  test_sign ;;
   --configure)  configure_agent ;;
+  --schedule)   schedule_reset ;;
+  --reset)      reset_agent ;;
   *)            usage ;;
 esac
