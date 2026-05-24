@@ -1,21 +1,11 @@
 # Common tmux helper functions
-__tmux_question() {
-  if [ -n "$TMUX" ]; then
-    printf "\033]2;?\033\\"
-  fi
+__tmux_status() {
+  [ -n "$TMUX" ] && tmux set-option -pq @status "$1" && tmux refresh-client -S
 }
 
-__tmux_success() {
-  if [ -n "$TMUX" ]; then
-    printf "\033]2;O\033\\"
-  fi
-}
-
-__tmux_failure() {
-  if [ -n "$TMUX" ]; then
-    printf "\033]2;X\033\\"
-  fi
-}
+__tmux_question() { __tmux_status '⏳'; }
+__tmux_success()  { __tmux_status '✅'; }
+__tmux_failure()  { __tmux_status '❌'; }
 
 # Function to determine if we're running in zsh
 __is_zsh() {
