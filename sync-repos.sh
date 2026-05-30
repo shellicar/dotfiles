@@ -60,4 +60,10 @@ for repo in $REPOS; do
       echo "  Done"
     fi
   fi
+
+  dirty=$(git status --porcelain)
+  if [ -n "$dirty" ]; then
+    echo "  Dirty:"
+    echo "$dirty" | sed 's/^/    /'
+  fi
 done
