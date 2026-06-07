@@ -1,28 +1,30 @@
 #!/bin/sh
 # window-status.sh — render a tmux window-status entry.
 #
-# Reads user options to override parts of the default rendering. Each option
-# lives at its natural scope; the script queries explicitly so resolution
-# doesn't depend on tmux's inheritance.
+# The renderer reads no tmux state directly; user-option values come in as
+# args from the format string. This keeps invocation cheap (no tmux IPC per
+# render) since the format runs every status-interval per window.
 #
-# Window-scope (identify the window/project):
+# Window-scope inputs (identify the window/project):
 #   @title  — replaces the cwd-folder slot (left field)
 #   @colour — fg colour for the title slot
 #             (name kept for cutover; semantically @title-colour)
 #   @state  — appended in brackets when set; shared status board
 #
-# Pane-scope (per the active pane of the window):
+# Pane-scope inputs (per the active pane of the window):
 #   @role   — replaces the derived process-name slot (right field)
 #   @status — glyph prefixed to the entry (e.g. ✅/❌/⏳); written by the prompt
 #
 # Usage:
-#   window-status.sh [--current] <window_id> <pane_id> <pane_pid> <pane_current_path> <window_idx> <pane_idx>
+#   window-status.sh [--current] <window_idx> <pane_idx> <pane_pid> \
+#                    <pane_current_path> <@title> <@colour> <@state> \
+#                    <@role> <@status>
 #
 # Output shape:
 #   [<status> ]<title>.<W>.<P>:<role>[ [state]]
-# where <title> defaults to the cwd .git-root basename and <role> defaults to
-# the derived process name. Each slot can be independently overridden via the
-# user options above.
+# where <title> defaults to the cwd .git-root basename (pane-path.sh) and
+# <role> defaults to the derived process name (pane-name.sh). Each slot can
+# be independently overridden via the inputs above.
 
 current=0
 if [ "$1" = "--current" ]; then
@@ -30,12 +32,15 @@ if [ "$1" = "--current" ]; then
   shift
 fi
 
-window_id="$1"
-pane_id="$2"
+window_idx="$1"
+pane_idx="$2"
 pane_pid="$3"
 pane_path="$4"
-window_idx="$5"
-pane_idx="$6"
+title="$5"
+colour="$6"
+state="$7"
+role="$8"
+status="$9"
 
 script_dir="$(dirname "$0")"
 
@@ -51,15 +56,6 @@ else
 fi
 role_fg=colour209
 state_fg=colour141
-
-# Window-scope options.
-title=$(tmux show-options -wqv -t "$window_id" @title)
-colour=$(tmux show-options -wqv -t "$window_id" @colour)
-state=$(tmux show-options -wqv -t "$window_id" @state)
-
-# Pane-scope options (active pane of the window).
-role=$(tmux show-options -pqv -t "$pane_id" @role)
-status=$(tmux show-options -pqv -t "$pane_id" @status)
 
 # Title slot: @title overrides cwd; @colour overrides default fg.
 if [ -n "$title" ]; then
