@@ -1,3 +1,0 @@
-alias ls='gls --color=auto -l'
-alias vi='vim'
-alias gitlog='git log --graph --oneline'
