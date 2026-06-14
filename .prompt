@@ -37,7 +37,7 @@ __prompt_command() {
     local Red="%F{red}"
     local Gre="%F{green}"
     local BYel="%F{yellow}"
-    local BBlu="%F{blue}"
+    local BBlu="%F{39}"
     local Pur="%F{magenta}"
     local Dim="%F{8}"
 
