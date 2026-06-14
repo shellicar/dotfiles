@@ -11,5 +11,5 @@ case ":$PATH:" in
 esac
 
 # ZScaler certs (macOS)
-export NODE_EXTRA_CA_CERTS="$(brew --prefix)/etc/ca-certificates/cert.pem"
-export REQUESTS_CA_BUNDLE="$(brew --prefix)/etc/ca-certificates/cert.pem"
+export NODE_EXTRA_CA_CERTS="$HOMEBREW_PREFIX/etc/ca-certificates/cert.pem"
+export REQUESTS_CA_BUNDLE="$HOMEBREW_PREFIX/etc/ca-certificates/cert.pem"
