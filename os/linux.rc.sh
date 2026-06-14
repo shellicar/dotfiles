@@ -1,0 +1,16 @@
+#!/bin/sh
+# Linux interactive.
+
+pkg_size(){
+	apk info -es $(apk info -a) | \
+    sed -e ':a' -e 'N' -e '$!ba' -e 's/\n\([0-9]\)/\1/g' | \
+    sed -e ':a' -e 'N' -e '$!ba' -e 's/\n\n/\n /g' | \
+    sed 's/\(.*\):\([0-9]*\)/\2 \1/g' | \
+    sort -n
+}
+
+remove_bom() {
+    find . -type f -not -path '*/.git/*' -print0 | \
+    xargs -0 grep -rl $'^\xEF\xBB\xBF' | \
+    xargs -d '\n' sed -i '1s/^\xEF\xBB\xBF//'
+}
