@@ -17,3 +17,4 @@ done
 
 osascript -e 'tell application "Visual Studio Code" to open POSIX file "'"$DIR"'"' >/dev/null
 hs -c 'local w = hs.application.get("Code"); if w then local win = w:mainWindow(); if win then win:moveToUnit(hs.geometry.rect(0.5, 0, 0.5, 1)) end end'
+# hs -c 'local w = hs.application.get("Code"); if w then local win = w:mainWindow(); if win then hs.spaces.moveWindowToSpace(win:id(), hs.spaces.focusedSpace()); win:moveToUnit(hs.geometry.rect(0.5, 0, 0.5, 1)) end end'
