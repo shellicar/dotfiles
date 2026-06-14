@@ -1,10 +1,15 @@
 #!/bin/sh
 # install.sh — make $HOME mirror the pointers under home/.
 #
-# Symlinks every file in home/common and home/<os> into the matching path
-# under $HOME. Idempotent and re-runnable: already-correct links are left
-# alone, our own symlinks get repointed, and a real file is never clobbered —
-# it is moved to <file>.pre-dotfiles first.
+# Links the contents of home/common and home/<os> into the matching paths
+# under $HOME. Files and ordinary directories are linked per-file (so e.g.
+# ~/bin can also hold unmanaged files); directories named in is_whole_dir()
+# are symlinked whole — for project dirs where per-file linking would drag in
+# node_modules and the like.
+#
+# Idempotent and re-runnable: already-correct links are left alone, our own
+# symlinks get repointed, and a real path is never clobbered (it is moved to
+# <name>.pre-dotfiles first).
 #
 # You run this; it changes $HOME.
 
@@ -13,36 +18,61 @@ set -eu
 DOTFILES="${DOTFILES:-$HOME/dotfiles}"
 OS="${DOTFILES_OS:-$("$DOTFILES/get-os.sh")}"
 
+# Directories symlinked whole rather than file-by-file.
+is_whole_dir() {
+  case "$1" in
+    .hammerspoon) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+link_one() {
+  src="$1"
+  dst="$2"
+
+  # Already linked correctly -> nothing to do.
+  if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$dst")"
+
+  if [ -L "$dst" ]; then
+    ln -sfn "$src" "$dst"
+    echo "repointed ~/${dst#"$HOME"/}"
+  elif [ -e "$dst" ]; then
+    backup="$dst.pre-dotfiles"
+    if [ -e "$backup" ]; then
+      echo "skipped ~/${dst#"$HOME"/} - present and backup already exists ($backup)" >&2
+      return 0
+    fi
+    mv "$dst" "$backup"
+    ln -s "$src" "$dst"
+    echo "linked ~/${dst#"$HOME"/} (existing moved to $backup)"
+  else
+    ln -s "$src" "$dst"
+    echo "linked ~/${dst#"$HOME"/}"
+  fi
+}
+
 link_tree() {
   src_root="$1"
   [ -d "$src_root" ] || return 0
 
-  find "$src_root" -type f | while IFS= read -r src; do
+  # Walk immediate entries (incl. dotfiles). Whole-dir entries get one symlink;
+  # everything else is linked per-file.
+  for src in "$src_root"/* "$src_root"/.[!.]*; do
+    [ -e "$src" ] || continue
     rel="${src#"$src_root"/}"
-    dst="$HOME/$rel"
 
-    # Already linked correctly -> skip.
-    if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
-      continue
-    fi
-
-    mkdir -p "$(dirname "$dst")"
-
-    if [ -L "$dst" ]; then
-      ln -sfn "$src" "$dst"
-      echo "repointed ~/$rel"
-    elif [ -e "$dst" ]; then
-      backup="$dst.pre-dotfiles"
-      if [ -e "$backup" ]; then
-        echo "skipped ~/$rel - real file present and backup already exists ($backup)" >&2
-        continue
-      fi
-      mv "$dst" "$backup"
-      ln -s "$src" "$dst"
-      echo "linked ~/$rel (old file backed up to $backup)"
+    if [ -d "$src" ] && is_whole_dir "$rel"; then
+      link_one "$src" "$HOME/$rel"
+    elif [ -d "$src" ]; then
+      find "$src" -type f | while IFS= read -r f; do
+        link_one "$f" "$HOME/${f#"$src_root"/}"
+      done
     else
-      ln -s "$src" "$dst"
-      echo "linked ~/$rel"
+      link_one "$src" "$HOME/$rel"
     fi
   done
 }
