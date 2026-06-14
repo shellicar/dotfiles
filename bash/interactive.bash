@@ -5,8 +5,6 @@
 # --- prompt ---
 __prompt_command() {
   local EXIT="$?"  # This needs to be first
-  local timestamp
-  timestamp=$(date '+%d/%m %H:%M:%S')
 
   local RCol='\[\e[0m\]'
   local Red='\[\e[0;31m\]'
@@ -16,7 +14,7 @@ __prompt_command() {
   local Pur='\[\e[0;35m\]'
   local Dim='\[\e[0;90m\]'
 
-  PS1="${Dim}${timestamp}${RCol} "
+  PS1="${Dim}\D{%d/%m %H:%M:%S}${RCol} "
 
   if [ $EXIT != 0 ]; then
     PS1+="${Red}\u${RCol}"  # Add red if exit code non 0

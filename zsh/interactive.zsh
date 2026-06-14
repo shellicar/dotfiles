@@ -5,8 +5,6 @@
 # --- prompt ---
 __prompt_command() {
   local EXIT="$?"  # This needs to be first
-  local timestamp
-  timestamp=$(date '+%d/%m %H:%M:%S')
 
   local RCol="%f"
   local Red="%F{red}"
@@ -22,10 +20,10 @@ __prompt_command() {
 
   if [ $EXIT != 0 ]; then
     __tmux_failure
-    PROMPT="${Dim}${timestamp}${RCol} ${Red}${user_part}${RCol}@${BBlu}${host_part} ${Pur}${dir_part}${BYel}$ ${RCol}"
+    PROMPT="${Dim}%D{%d/%m %H:%M:%S}${RCol} ${Red}${user_part}${RCol}@${BBlu}${host_part} ${Pur}${dir_part}${BYel}$ ${RCol}"
   else
     __tmux_success
-    PROMPT="${Dim}${timestamp}${RCol} ${Gre}${user_part}${RCol}@${BBlu}${host_part} ${Pur}${dir_part}${BYel}$ ${RCol}"
+    PROMPT="${Dim}%D{%d/%m %H:%M:%S}${RCol} ${Gre}${user_part}${RCol}@${BBlu}${host_part} ${Pur}${dir_part}${BYel}$ ${RCol}"
   fi
 }
 autoload -Uz add-zsh-hook
