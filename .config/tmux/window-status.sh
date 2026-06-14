@@ -44,14 +44,16 @@ status="$9"
 
 script_dir="$(dirname "$0")"
 
-# Palette differs between current and other windows so the active one stands out.
+# Title colour is constant: @colour or the fallback — it never varies with
+# focus (a tagged title doesn't, so the fallback mustn't either; the underline
+# marks the active window). Only the machinery text (index/process) brightens
+# on the active window.
+title_default_fg=colour81
 if [ "$current" = "1" ]; then
-  title_default_fg=colour81
   index_fg=colour250
   process_fg=colour255
 else
-  title_default_fg=colour138
-  index_fg=colour237
+  index_fg=colour244
   process_fg=colour250
 fi
 role_fg=colour209
