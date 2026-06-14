@@ -44,4 +44,8 @@ bindkey "^R" history-incremental-search-backward
 # --- completion ---
 fpath=($HOME/.docker/completions $fpath)
 autoload -Uz compinit
-compinit
+if [[ -n $HOME/.zcompdump(#qN.mh+24) ]]; then
+  compinit          # dump older than 24h → full rebuild + security audit
+else
+  compinit -C       # recent dump → load it and skip the audit
+fi
