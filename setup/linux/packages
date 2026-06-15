@@ -1,0 +1,8 @@
+# APT packages the dotfiles configs rely on.
+# (Linux ls is already GNU, so no coreutils needed here.)
+
+git
+tmux
+vim
+gnupg
+xclip

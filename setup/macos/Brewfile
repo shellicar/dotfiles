@@ -1,0 +1,9 @@
+# Dependencies the dotfiles configs rely on.
+# (Broader toolchain — azure-cli, docker, etc. — goes here too if you want it.)
+
+brew "git"        # newer than the system git
+brew "coreutils"  # provides gls (the `ls` alias)
+brew "fnm"        # Node version manager
+brew "tmux"       # .tmux.conf and the prompt status hooks
+brew "vim"        # EDITOR, .vimrc, the vi alias
+brew "gnupg"      # GPG-signed commits
