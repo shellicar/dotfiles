@@ -82,9 +82,9 @@ schedule_reset() {
   cron_line="$CRON_MINUTE $CRON_HOUR * * * gpgconf --kill gpg-agent"
 
   # Check if already scheduled
-  if crontab -l 2>/dev/null | grep -q "gpgconf --kill gpg-agent"; then
+  if crontab -l 2>/dev/null | grep -q "/opt/homebrew/bin/gpgconf --kill gpg-agent"; then
     echo "  Existing cron entry found. Replacing..."
-    crontab -l 2>/dev/null | grep -v "gpgconf --kill gpg-agent" | { cat; echo "$cron_line"; } | crontab -
+    crontab -l 2>/dev/null | grep -v "/opt/homebrew/bin/gpgconf --kill gpg-agent" | { cat; echo "$cron_line"; } | crontab -
   else
     { crontab -l 2>/dev/null; echo "$cron_line"; } | crontab -
   fi
