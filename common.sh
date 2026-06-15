@@ -97,11 +97,6 @@ docker_ip() {
 }
 alias docker-ip='docker_ip'
 
-apk_file() {
-    docker run -it --rm jess/apk-file "$@"
-}
-alias apk-file='apk_file'
-
 docker_enter() {
     if [ "$#" = 0 ]; then
         echo "usage: docker-enter <container-name>"
