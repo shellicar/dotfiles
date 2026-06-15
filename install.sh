@@ -26,9 +26,26 @@ is_whole_dir() {
   esac
 }
 
+# True if any parent directory of $1 (below $HOME) is a symlink. Writing into
+# it would land inside the symlink's target (e.g. back in the repo), not $HOME.
+has_symlink_parent() {
+  p=$(dirname "$1")
+  while [ "$p" != "$HOME" ] && [ "$p" != "/" ] && [ -n "$p" ]; do
+    [ -L "$p" ] && return 0
+    p=$(dirname "$p")
+  done
+  return 1
+}
+
 link_one() {
   src="$1"
   dst="$2"
+
+  # Refuse to write through a symlinked directory, or we would mangle its target.
+  if has_symlink_parent "$dst"; then
+    echo "refusing ~/${dst#"$HOME"/}: a parent dir is a symlink, remove it and re-run" >&2
+    return 0
+  fi
 
   # Already linked correctly -> nothing to do.
   if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
