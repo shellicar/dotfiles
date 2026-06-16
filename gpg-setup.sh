@@ -7,6 +7,7 @@ GPG_CONF="$HOME/.gnupg/gpg.conf"
 KEYCHAIN_NAME="gpg.keychain"
 KEYCHAIN_PATH="$HOME/Library/Keychains/${KEYCHAIN_NAME}-db"
 KEYCHAIN_TIMEOUT=1
+CACHE_TTL=86400
 CRON_HOUR="${CRON_HOUR:-6}"
 CRON_MINUTE="${CRON_MINUTE:-0}"
 
@@ -140,8 +141,8 @@ configure_agent() {
   chmod 700 "$HOME/.gnupg"
 
   cat > "$GPG_AGENT_CONF" <<EOF
-default-cache-ttl 86400
-max-cache-ttl 86400
+default-cache-ttl $CACHE_TTL
+max-cache-ttl $CACHE_TTL
 EOF
 
   if command -v pinentry-mac > /dev/null 2>&1; then
@@ -149,7 +150,7 @@ EOF
     echo "  pinentry: $(command -v pinentry-mac)"
   fi
 
-  echo "  gpg-agent cache: disabled (TTL 0)"
+  echo "  gpg-agent cache: ${CACHE_TTL}s"
   echo "  config: $GPG_AGENT_CONF"
   echo ""
 
