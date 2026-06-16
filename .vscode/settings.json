@@ -6,7 +6,7 @@
     "editor.defaultFormatter": "vscode.typescript-language-features"
   },
   "[json]": {
-    "editor.defaultFormatter": "biomejs.biome"
+    "editor.defaultFormatter": "vscode.json-language-features"
   },
   "[jsonc]": {
     "editor.defaultFormatter": "vscode.json-language-features"
@@ -29,9 +29,7 @@
   "bicep.suppressedWarnings": [
     "Decompile on paste"
   ],
-  "chat.agent.maxRequests": 2500,
   "chat.disableAIFeatures": true,
-  "chat.editing.autoAcceptDelay": 1,
   "debug.onTaskErrors": "debugAnyway",
   "diffEditor.codeLens": true,
   "diffEditor.hideUnchangedRegions.enabled": true,
@@ -42,21 +40,22 @@
   "editor.autoClosingBrackets": "never",
   "editor.autoClosingQuotes": "never",
   "editor.detectIndentation": false,
-  "editor.gotoLocation.multipleDeclarations": "goto",
+  "editor.gotoLocation.multipleDeclarations": "gotoAndPeek",
   "editor.gotoLocation.multipleDefinitions": "goto",
-  "editor.gotoLocation.multipleReferences": "goto",
+  "editor.gotoLocation.multipleReferences": "gotoAndPeek",
   "editor.indentSize": "tabSize",
   "editor.inlineSuggest.enabled": true,
   "editor.suggest.showSnippets": false,
   "editor.tabSize": 2,
   "editor.unicodeHighlight.ambiguousCharacters": true,
-  "editor.unicodeHighlight.nonBasicASCII": true,
+  "editor.unicodeHighlight.nonBasicASCII": false,
   "explorer.autoReveal": "focusNoScroll",
   "explorer.compactFolders": false,
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
   "explorer.sortOrder": "filesFirst",
   "extensions.allowed": {
+    "svelte.svelte-vscode": "stable",
     "biomejs.biome": "stable",
     "bradlc.vscode-tailwindcss": "stable",
     "ciarant.vscode-structurizr": "stable",
@@ -73,9 +72,7 @@
     "mhutchie.git-graph": "stable",
     "microsoft": true,
     "ms-azuretools.vscode-containers": false,
-    "PKief.material-icon-theme": [
-      "5.31.0"
-    ],
+    "PKief.material-icon-theme": "stable",
     "redhat": "stable",
     "rust-lang.rust-analyzer": [
       "5.0.0@win32-x64",
@@ -85,7 +82,7 @@
     "vitest.explorer": "stable",
     "Vue.volar": "stable"
   },
-  "files.autoSave": "off",
+  "files.autoSave": "afterDelay",
   "files.autoSaveDelay": 5000,
   "files.eol": "\n",
   "files.exclude": {
@@ -98,12 +95,6 @@
   "git.confirmSync": false,
   "git.openRepositoryInParentFolders": "never",
   "git.suggestSmartCommit": false,
-  "github.copilot.advanced": {
-    "language.typescript.enable": true
-  },
-  "github.copilot.chat.agent.thinkingTool": false,
-  "github.copilot.chat.localeOverride": "en",
-  "github.copilot.chat.summarizeAgentConversationHistory.enabled": false,
   "gitlens.telemetry.enabled": false,
   "gitlens.views.scm.grouped.views": {
     "branches": false,
@@ -119,7 +110,8 @@
   },
   "html.autoClosingTags": false,
   "http.systemCertificates": true,
-  "javascript.updateImportsOnFileMove.enabled": "always",
+  "js/ts.inlayHints.parameterNames.enabled": "all",
+  "js/ts.updateImportsOnFileMove.enabled": "never",
   "readTime.enabled": true,
   "remote.autoForwardPortsSource": "hybrid",
   "search.quickOpen.includeHistory": false,
@@ -131,46 +123,15 @@
   "svelte.plugin.svelte.format.config.singleQuote": true,
   "svelte.plugin.svelte.format.config.svelteStrictMode": false,
   "telemetry.telemetryLevel": "off",
-  "terminal.integrated.defaultProfile.linux": "tmux-shell",
+  "terminal.integrated.defaultProfile.linux": "bash",
   "terminal.integrated.defaultProfile.osx": "zsh",
-  "terminal.integrated.defaultProfile.windows": "tmux-shell",
+  "terminal.integrated.defaultProfile.windows": "Git Bash",
   "terminal.integrated.enableVisualBell": true,
-  "terminal.integrated.profiles.linux": {
-    "tmux-shell": {
-      "args": [
-        "${workspaceFolderBasename}",
-        "${workspaceFolder}"
-      ],
-      "icon": "terminal-tmux",
-      "path": "${userHome}/.tmux-shell"
-    }
-  },
-  "terminal.integrated.profiles.osx": {
-    "tmux-shell": {
-      "args": [
-        "${workspaceFolderBasename}",
-        "${workspaceFolder}"
-      ],
-      "icon": "terminal-tmux",
-      "path": "${userHome}/.tmux-shell"
-    }
-  },
-  "terminal.integrated.profiles.windows": {
-    "tmux-shell": {
-      "args": [
-        "${workspaceFolderBasename}",
-        "${workspaceFolder}"
-      ],
-      "icon": "terminal-tmux",
-      "path": "${userHome}/.tmux-shell"
-    }
-  },
-  "typescript.inlayHints.parameterNames.enabled": "all",
-  "typescript.updateImportsOnFileMove.enabled": "always",
   "update.showReleaseNotes": false,
   "workbench.editor.enablePreview": false,
   "workbench.editor.labelFormat": "short",
   "workbench.iconTheme": "material-icon-theme",
   "workbench.startupEditor": "none",
-  "workbench.tree.indent": 12
+  "workbench.tree.indent": 12,
+  "scm.defaultViewMode": "tree"
 }
