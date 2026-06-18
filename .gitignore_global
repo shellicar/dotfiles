@@ -1,0 +1,10 @@
+**/cli-session
+**/.DS_Store
+.sdk-history.jsonl
+*.log
+.claude/.cli-session
+.claude/sdk-config.json
+**/.claude/.sdk-conversation-id
+**/.claude/.sdk-conversation-history
+.claude/*
+CLAUDE.local.md
