@@ -1,0 +1,286 @@
+#!/usr/bin/env node
+// tmux-snapshot — capture the current tmux server's layout to JSON and rehydrate
+// it later. Per pane it records session/window/pane identity, the exact window
+// layout, the cwd, the foreground command, a resolved process label, the claude
+// session id (when applicable), and the five custom user-options the status bar
+// renders from.
+//
+// Node, not shell: restore is plan-then-execute (compute every action first,
+// then either print it as the default dry-run, or run it under --apply), which
+// is far cleaner with real objects than with shell word-splitting — and
+// sidesteps the IFS field-collapse traps entirely, since tmux args are passed
+// as an array, never re-split.
+//
+// Process label: a pane's foreground is often a `node` wrapper (claude-sdk-cli
+// launched via launcher.mjs), so the real CLI is a descendant. We scan the
+// pane's tty (ps -t) rather than walk one level of children, which misses it.
+//
+// Every tmux read is pinned to an explicit pane/window id; nothing relies on the
+// "current" pane, which follows focus.
+
+'use strict';
+
+const fs = require('fs');
+const { execFileSync } = require('child_process');
+
+const HOME = process.env.HOME;
+
+// The snapshot file is named after the tmux server (its socket label), so each
+// server round-trips to its own file and save/restore agree with no argument.
+function snapshotPath() {
+  const socket = process.env.TMUX.split(',')[0]; // e.g. /tmp/tmux-501/shellicar
+  return `${HOME}/.tmux-snapshot-${socket.slice(socket.lastIndexOf('/') + 1)}.json`;
+}
+const SEP = '\x1f'; // US: a field separator that cannot appear in tmux values
+const PARK = '999999'; // parking index for the throwaway window new-session spawns
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+
+function die(msg) {
+  process.stderr.write(`tmux-snapshot: ${msg}\n`);
+  process.exit(1);
+}
+
+function note(msg) {
+  process.stderr.write(`tmux-snapshot: ${msg}\n`);
+}
+
+function run(cmd, args, allowFail) {
+  try {
+    return execFileSync(cmd, args, { encoding: 'utf8' });
+  } catch (e) {
+    if (allowFail) return (e.stdout || '').toString();
+    throw e;
+  }
+}
+
+const tmux = (args, allowFail) => run('tmux', args, allowFail);
+const lines = (s) => (s || '').split('\n').filter(Boolean);
+
+function requireTmux() {
+  if (!process.env.TMUX) die('not inside a tmux server');
+}
+
+// --- save -------------------------------------------------------------------
+
+function cmdSave() {
+  requireTmux();
+  const file = snapshotPath();
+
+  const fmt = [
+    '#{pane_id}', '#{session_name}', '#{window_index}', '#{window_name}',
+    '#{window_layout}', '#{pane_index}', '#{pane_tty}', '#{pane_current_path}',
+    '#{pane_current_command}', '#{@title}', '#{@colour}', '#{@state}',
+    '#{@role}', '#{@status}',
+  ].join(SEP);
+
+  const panes = lines(tmux(['list-panes', '-a', '-F', fmt])).map((line) => {
+    const [
+      paneId, session, windowIndex, windowName, windowLayout, paneIndex,
+      paneTty, path, cmd, title, colour, state, role, status,
+    ] = line.split(SEP);
+
+    // If any process on the pane's tty is claude-sdk-cli, label it that.
+    const shortTty = paneTty.replace(/^\/dev\//, '');
+    const comm = run('ps', ['-t', shortTty, '-o', 'comm='], true);
+    const proc = /claude-sdk-cli/.test(comm) ? 'claude-sdk-cli' : cmd;
+
+    // Session id for claude panes: scrape the CLI's own status line, which
+    // renders the id at the foot of the pane. The last UUID on screen is that
+    // line; ids printed earlier in the transcript sit above it. A structural
+    // source (a marker the CLI writes about its own pid/tty) would be sturdier;
+    // deferred for now.
+    let sessionId = '';
+    if (proc === 'claude-sdk-cli') {
+      const found = (tmux(['capture-pane', '-p', '-t', paneId], true) || '').match(UUID);
+      if (found) sessionId = found[found.length - 1];
+    }
+
+    return {
+      session, window_index: windowIndex, window_name: windowName,
+      window_layout: windowLayout, pane_index: paneIndex, path, cmd, proc,
+      session_id: sessionId,
+      options: {
+        '@title': title, '@colour': colour, '@state': state,
+        '@role': role, '@status': status,
+      },
+    };
+  });
+
+  const snapshot = {
+    generated: new Date().toISOString(),
+    socket: process.env.TMUX.split(',')[0],
+    panes,
+  };
+  fs.writeFileSync(file, JSON.stringify(snapshot, null, 2) + '\n');
+  process.stdout.write(summarize(panes) + '\n');
+  note(`wrote ${panes.length} panes to ${file}`);
+}
+
+// A readable tree of what was captured: session → window → panes, each pane
+// showing its resolved process and cwd.
+function summarize(panes) {
+  const out = [];
+  let lastSession = null;
+  for (const w of groupWindows(panes)) {
+    if (w.session !== lastSession) {
+      out.push(w.session);
+      lastSession = w.session;
+    }
+    const n = w.panes.length;
+    out.push(`  ${w.window_index}  ${w.window_name}  (${n} pane${n > 1 ? 's' : ''})`);
+    for (const p of w.panes) {
+      out.push(`       ${p.pane_index}  ${p.proc.padEnd(15)} ${p.path}`);
+    }
+  }
+  return out.join('\n');
+}
+
+// --- restore ----------------------------------------------------------------
+
+// Group panes into windows (ordered by session, then numeric window index;
+// panes within a window ordered by numeric pane index).
+function groupWindows(panes) {
+  const map = new Map();
+  for (const p of panes) {
+    const key = `${p.session}${SEP}${p.window_index}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        session: p.session, window_index: p.window_index,
+        window_name: p.window_name, window_layout: p.window_layout, panes: [],
+      });
+    }
+    map.get(key).panes.push(p);
+  }
+  const windows = [...map.values()];
+  windows.sort((a, b) =>
+    a.session < b.session ? -1 : a.session > b.session ? 1
+      : Number(a.window_index) - Number(b.window_index));
+  for (const w of windows) w.panes.sort((a, b) => Number(a.pane_index) - Number(b.pane_index));
+  return windows;
+}
+
+// Work out, against the live server, exactly what restore would do. Returns a
+// plan that both the default dry-run and an --apply run consume, so the preview
+// can never diverge from what executes.
+function planRestore(snapshot) {
+  const windows = groupWindows(snapshot.panes);
+
+  const liveSessions = new Set(lines(tmux(['list-sessions', '-F', '#{session_name}'], true)));
+  const liveWindows = {};
+  for (const s of liveSessions) {
+    liveWindows[s] = new Set(lines(tmux(['list-windows', '-t', `=${s}`, '-F', '#{window_index}'], true)));
+  }
+
+  const wantedSessions = [...new Set(snapshot.panes.map((p) => p.session))];
+  const createSessions = wantedSessions.filter((s) => !liveSessions.has(s));
+
+  const createWindows = [];
+  const skipWindows = [];
+  for (const w of windows) {
+    const exists = liveSessions.has(w.session) && liveWindows[w.session].has(String(w.window_index));
+    (exists ? skipWindows : createWindows).push(w);
+  }
+
+  return { createSessions, createWindows, skipWindows };
+}
+
+function describePlan(plan) {
+  const out = [];
+  for (const s of plan.createSessions) out.push(`create session: ${s}`);
+  for (const w of plan.createWindows) {
+    const n = w.panes.length;
+    out.push(`create window: ${w.session}:${w.window_index} "${w.window_name}" (${n} pane${n > 1 ? 's' : ''})`);
+    for (const p of w.panes) {
+      out.push(`    pane ${p.pane_index}: cwd=${p.path}`);
+      if (p.proc === 'claude-sdk-cli' && p.session_id) {
+        out.push(`      run: claude-sdk-cli --resume ${p.session_id}`);
+      }
+    }
+  }
+  for (const w of plan.skipWindows) out.push(`skip window: ${w.session}:${w.window_index} (exists)`);
+  return out;
+}
+
+function executePlan(plan) {
+  // Create missing sessions detached; park the auto-spawned window so our
+  // indexed windows are free, and reap it once the session has real windows
+  // (killing it sooner could take the session with it and fire session-closed).
+  const created = [];
+  for (const s of plan.createSessions) {
+    tmux(['new-session', '-d', '-s', s]);
+    const ph = lines(tmux(['list-windows', '-t', `=${s}`, '-F', '#{window_id}']))[0];
+    tmux(['move-window', '-s', ph, '-t', `${s}:${PARK}`]);
+    created.push(s);
+  }
+
+  for (const w of plan.createWindows) {
+    const tgt = `${w.session}:${w.window_index}`;
+
+    // First pane via new-window, the rest via split. Geometry is fixed from the
+    // saved layout afterward, so the split direction is moot.
+    w.panes.forEach((p, i) => {
+      if (i === 0) tmux(['new-window', '-t', tgt, '-n', w.window_name, '-c', p.path]);
+      else tmux(['split-window', '-t', tgt, '-c', p.path]);
+    });
+    tmux(['select-layout', '-t', tgt, w.window_layout]);
+
+    // Window-scope labels (title/colour/state) — shared across the window's
+    // panes, taken from the first.
+    const o = w.panes[0].options;
+    if (o['@title']) tmux(['set-option', '-w', '-t', tgt, '@title', o['@title']]);
+    if (o['@colour']) tmux(['set-option', '-w', '-t', tgt, '@colour', o['@colour']]);
+    if (o['@state']) tmux(['set-option', '-w', '-t', tgt, '@state', o['@state']]);
+
+    for (const p of w.panes) {
+      const pt = `${tgt}.${p.pane_index}`;
+      // Pane-scope labels (role/status).
+      if (p.options['@role']) tmux(['set-option', '-p', '-t', pt, '@role', p.options['@role']]);
+      if (p.options['@status']) tmux(['set-option', '-p', '-t', pt, '@status', p.options['@status']]);
+
+      // Claude panes: run the resume command so the conversation comes back.
+      // Other panes are left at a shell already sitting in the right cwd.
+      if (p.proc === 'claude-sdk-cli' && p.session_id) {
+        tmux(['send-keys', '-t', pt, '-l', `claude-sdk-cli --resume ${p.session_id}`]);
+        tmux(['send-keys', '-t', pt, 'Enter']);
+      }
+    }
+  }
+
+  for (const s of created) tmux(['kill-window', '-t', `${s}:${PARK}`], true);
+}
+
+function cmdRestore(args) {
+  // Dry-run is the default: print the plan and change nothing. --apply commits.
+  const apply = args.includes('--apply');
+
+  requireTmux();
+  const file = snapshotPath();
+  if (!fs.existsSync(file)) die(`no snapshot at ${file}`);
+  const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+  const plan = planRestore(snapshot);
+
+  if (!apply) {
+    process.stdout.write('DRY RUN — no changes will be made (pass --apply to commit)\n');
+    const desc = describePlan(plan);
+    if (desc.length) process.stdout.write(desc.join('\n') + '\n');
+    note(`would create ${plan.createSessions.length} session(s), ${plan.createWindows.length} window(s); skip ${plan.skipWindows.length} existing`);
+    return;
+  }
+
+  executePlan(plan);
+  note(`restore complete from ${file} — created ${plan.createWindows.length} window(s), skipped ${plan.skipWindows.length}`);
+}
+
+// --- dispatch ---------------------------------------------------------------
+
+function usage() {
+  process.stderr.write('usage: tmux-snapshot save\n');
+  process.stderr.write('       tmux-snapshot restore [--apply]\n');
+  process.exit(2);
+}
+
+const [, , sub, ...rest] = process.argv;
+if (sub === 'save') cmdSave();
+else if (sub === 'restore') cmdRestore(rest);
+else usage();
