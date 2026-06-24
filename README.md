@@ -1,55 +1,59 @@
 # dotfiles
 
-shellicar's Dotfiles
+shellicar's dotfiles. Cloned to `~/dotfiles`.
 
-I clone this into my home directory.
+(For agents working in this repo, see `CLAUDE.md`.)
 
-e.g.: ~/dotfiles
+## Model
+
+Config is layered: a shared **common** base plus a **per-OS overlay**. The OS is
+detected by `get-os.sh` — one of `windows-bash`, `wsl`, `macos`, `linux`. The
+path/filename *is* the condition; there is no runtime `if macos` branching, and
+overlay files exist only when there's something to put in them.
 
 ## Setup
 
-`link.sh` is a helper script to symlink files to your home directory.
+- `./install.sh` — symlinks `home/common/` and `home/<os>/` into `$HOME`.
+  Idempotent and re-runnable. An existing real file is moved to
+  `<name>.pre-dotfiles` before linking, so nothing is clobbered.
+- `./setup.sh` — per-OS bootstrap via `setup/<os>/setup.sh` (Homebrew `Brewfile`
+  on macOS, packages on linux). Safe to run on a bare machine.
 
-If a file already exists, it will not overwrite it.
+## Shell config
 
-## tmux
+Sourced through `load.sh` in two phases:
 
-### .tmux-shell
+- `env` — `env.sh` → `os/<os>.env.sh` → `path.sh`
+- `interactive <shell>` — `common.sh` → `os/<os>.rc.sh` → `<shell>/interactive.<shell>`
 
-Script to start up a tmux shell from a VS Code directory.
+## Layout
 
-This ensures that the terminal in each project is self contained.
+- `home/common/`, `home/<os>/` — files symlinked into `$HOME`
+- `os/` — per-OS `env`/`rc` fragments
+- `setup/<os>/` — bootstrap (`Brewfile`, `packages`)
+- `.gitconfig.d/` — per-context git config (see Git)
+- `.vscode/` — VS Code settings sync
 
-### .prompt
+## Git
 
-Uses some shell magic to improve the tmux shell.
+- **Identity & signing** are conditional on the remote URL via `.gitconfig.d/`
+  (`shellicar`, `eagers`, `hopeventures`), using
+  `includeIf "hasconfig:remote.*.url:…"`.
+- **Global ignore** is managed: `core.excludesfile` → `~/dotfiles/.gitignore_global`
+  — the always-never-commit bits: `.DS_Store`, `*.log`, `CLAUDE.local.md`,
+  `**/.claude/.*` (hidden session files inside any `.claude/`), and
+  `**/.claude/settings.local.json` (Claude Code's personal local settings).
+- **Two `.claude` adoption levels:**
+  - *Checked in* (shellicar, eagers): `.claude/` is committed; only `.claude/.*`,
+    `.claude/settings.local.json`, and `CLAUDE.local.md` are kept out. Other
+    non-dot files like `.claude/sdk-config.json` are committed.
+  - *Not checked in* (hopeventures): the whole `.claude/` is kept out per-clone
+    via `.git/info/exclude`, leaving no trace in the repo — not even a `.gitignore`
+    entry naming it. (Not centralisable: `core.excludesfile` is single-valued, and
+    a committed ignore would itself be a trace.)
 
-Updates the shell status to include a `?` (running) `O` (success) or `X` (failure) depending on the exit code of the command.
+## VS Code
 
-This is disaplyed in the tmux window.
-
-### bin/pbcopy
-
-Only needed for windows using WSL2. Mouse mode is enabled in tmux, and pipes into `pbcopy`.
-
-Should work out of the box for linux and OSX.
-
-## General
-
-### .vimrc
-
-While I use vim, I don't use it as my primary editor/IDE any longer.
-
-### .functions
-
-`tmuxa` will attach to a tmux session based on a pattern.
-
-e.g.: `tmuxa bh` will attach to the first session that contains the letters 'bh'.
-
-### .dockerfunc
-
-Some (probably out of date) helper commands.
-
-### .profile
-
-Standard script loaded by the shell to source the other files.
+`.vscode/settings.json` is **merged** into the live settings, not symlinked —
+VS Code writes machine-local state (paths, connections) into that file. Run
+`.vscode/merge-settings.sh`: dry-run by default, `-d` / `--destructive` **writes**.
