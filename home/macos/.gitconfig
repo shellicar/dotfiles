@@ -1,6 +1,6 @@
 [core]
 	autocrlf = input
-	excludesfile = ~/.gitignore_global
+	excludesfile = ~/dotfiles/.gitignore_global
 	hooksPath = ~/.config/git/hooks
 [user]
 	name = Stephen Hellicar
