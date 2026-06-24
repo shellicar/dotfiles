@@ -1,0 +1,131 @@
+{
+  "[css]": {
+    "editor.defaultFormatter": "vscode.css-language-features"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[shellscript]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format"
+  },
+  "[svelte]": {
+    "editor.defaultFormatter": "svelte.svelte-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "vscode.typescript-language-features"
+  },
+  "[vue]": {
+    "editor.defaultFormatter": "Vue.volar"
+  },
+  "accessibility.signals.terminalBell": {
+    "sound": "on"
+  },
+  "bicep.suppressedWarnings": [
+    "Decompile on paste"
+  ],
+  "chat.disableAIFeatures": true,
+  "debug.onTaskErrors": "debugAnyway",
+  "diffEditor.codeLens": true,
+  "diffEditor.hideUnchangedRegions.enabled": true,
+  "diffEditor.ignoreTrimWhitespace": false,
+  "diffEditor.renderIndicators": true,
+  "diffEditor.renderSideBySide": true,
+  "diffEditor.useInlineViewWhenSpaceIsLimited": false,
+  "editor.autoClosingBrackets": "never",
+  "editor.autoClosingQuotes": "never",
+  "editor.detectIndentation": false,
+  "editor.gotoLocation.multipleDeclarations": "gotoAndPeek",
+  "editor.gotoLocation.multipleDefinitions": "goto",
+  "editor.gotoLocation.multipleReferences": "gotoAndPeek",
+  "editor.indentSize": "tabSize",
+  "editor.inlineSuggest.enabled": true,
+  "editor.suggest.showSnippets": false,
+  "editor.tabSize": 2,
+  "editor.unicodeHighlight.ambiguousCharacters": true,
+  "editor.unicodeHighlight.nonBasicASCII": false,
+  "explorer.autoReveal": "focusNoScroll",
+  "explorer.compactFolders": false,
+  "explorer.confirmDelete": false,
+  "explorer.confirmDragAndDrop": false,
+  "explorer.sortOrder": "filesFirst",
+  "extensions.allowed": {
+    "svelte.svelte-vscode": "stable",
+    "biomejs.biome": "stable",
+    "bradlc.vscode-tailwindcss": "stable",
+    "ciarant.vscode-structurizr": "stable",
+    "DavidAnson.vscode-markdownlint": true,
+    "dbaeumer.vscode-eslint": [
+      "3.0.0"
+    ],
+    "eamodio.gitlens": true,
+    "esbenp.prettier-vscode": true,
+    "github": true,
+    "github.vscode-pull-request-github": "stable",
+    "GraphQL.vscode-graphql": "stable",
+    "GraphQL.vscode-graphql-syntax": "stable",
+    "mhutchie.git-graph": "stable",
+    "microsoft": true,
+    "ms-azuretools.vscode-containers": false,
+    "PKief.material-icon-theme": "stable",
+    "redhat": "stable",
+    "rust-lang.rust-analyzer": [
+      "5.0.0@win32-x64",
+      "5.0.0@darwin-x64"
+    ],
+    "streetsidesoftware.code-spell-checker": "stable",
+    "vitest.explorer": "stable",
+    "Vue.volar": "stable"
+  },
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 5000,
+  "files.eol": "\n",
+  "files.exclude": {
+    "**/node_modules": false
+  },
+  "git.autoRepositoryDetection": "subFolders",
+  "git.branchProtection": [
+    "main"
+  ],
+  "git.confirmSync": false,
+  "git.openRepositoryInParentFolders": "never",
+  "git.suggestSmartCommit": false,
+  "gitlens.telemetry.enabled": false,
+  "gitlens.views.scm.grouped.views": {
+    "branches": false,
+    "commits": true,
+    "contributors": true,
+    "launchpad": false,
+    "remotes": true,
+    "repositories": false,
+    "searchAndCompare": false,
+    "stashes": true,
+    "tags": true,
+    "worktrees": true
+  },
+  "html.autoClosingTags": false,
+  "http.systemCertificates": true,
+  "js/ts.inlayHints.parameterNames.enabled": "all",
+  "js/ts.updateImportsOnFileMove.enabled": "never",
+  "readTime.enabled": true,
+  "remote.autoForwardPortsSource": "hybrid",
+  "scm.defaultViewMode": "tree",
+  "search.quickOpen.includeHistory": false,
+  "svelte.enable-ts-plugin": true,
+  "svelte.plugin.svelte.format.config.printWidth": 160,
+  "svelte.plugin.svelte.format.config.singleQuote": true,
+  "svelte.plugin.svelte.format.config.svelteStrictMode": false,
+  "telemetry.telemetryLevel": "off",
+  "terminal.integrated.enableVisualBell": true,
+  "update.showReleaseNotes": false,
+  "workbench.editor.enablePreview": false,
+  "workbench.editor.labelFormat": "short",
+  "workbench.iconTheme": "material-icon-theme",
+  "workbench.startupEditor": "none",
+  "workbench.tree.indent": 12
+}
