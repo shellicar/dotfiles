@@ -7,3 +7,4 @@ brew "fnm"        # Node version manager
 brew "tmux"       # .tmux.conf and the prompt status hooks
 brew "vim"        # EDITOR, .vimrc, the vi alias
 brew "gnupg"      # GPG-signed commits
+brew "git-lfs"

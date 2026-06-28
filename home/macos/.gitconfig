@@ -38,8 +38,3 @@
 
 [includeIf "hasconfig:remote.*.url:https://hopeventures@dev.azure.com/hopeventures/**"]
   path = ~/dotfiles/.gitconfig.d/hopeventures
-[filter "lfs"]
-	clean = git-lfs clean -- %f
-	smudge = git-lfs smudge -- %f
-	process = git-lfs filter-process
-	required = true
