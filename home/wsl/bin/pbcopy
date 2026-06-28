@@ -1,9 +1,0 @@
-#!/bin/sh
-input=$(cat)
-[ "$input" = "" ] && exit 0
-
-if command -v xclip >/dev/null; then
-  printf "%s" "$input" | xclip -selection clipboard
-else
-  printf "%s" "$input" | clip.exe
-fi

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Clipboard sink for tmux copy bindings. tmux pipes the selection in on stdin;
+# guard against an empty or whitespace-only selection (a stray mouse highlight)
+# so blank text never displaces what's already on the clipboard.
+input=$(cat)
+case "$input" in
+  *[![:space:]]*) ;;  # has a non-whitespace char -> proceed
+  *) exit 0 ;;         # empty or whitespace-only -> leave the clipboard alone
+esac
+
+printf "%s" "$input" | pbcopy
