@@ -1,10 +1,19 @@
 # bash interactive config.
-# Relies on the prompt status helpers (__tmux_*) defined in common.sh,
-# which load.sh sources before this file.
+# The prompt reports pane state to tmux by printf alone (OSC 7 cwd, OSC 2 status
+# glyph) — no tmux subprocess, so it does not use the __tmux_* helpers.
 
 # --- prompt ---
 __prompt_command() {
   local EXIT="$?"  # This needs to be first
+
+  # tmux integration, printf-only (no tmux subprocess): OSC 7 reports the cwd
+  # (populates pane_path); OSC 2 reports command state as a glyph in the pane
+  # title (✅ ok / ❌ failed), read by window-status.sh. The DEBUG trap emits ⏳
+  # while a command runs. Raw $PWD keeps spaces intact.
+  if [[ -n $TMUX ]]; then
+    printf '\e]7;file://%s%s\e\\' "$HOSTNAME" "$PWD"
+    if [ $EXIT != 0 ]; then printf '\e]2;❌\e\\'; else printf '\e]2;✅\e\\'; fi
+  fi
 
   local RCol='\[\e[0m\]'
   local Red='\[\e[0;31m\]'
@@ -18,13 +27,13 @@ __prompt_command() {
 
   if [ $EXIT != 0 ]; then
     PS1+="${Red}\u${RCol}"  # Add red if exit code non 0
-    __tmux_failure
   else
     PS1+="${Gre}\u${RCol}"
-    __tmux_success
   fi
 
   PS1+="${RCol}@${BBlu}\h ${Pur}\W${BYel}$ ${RCol}"
 }
+# DEBUG trap: mark the pane 'running' via OSC 2 (printf, no tmux subprocess).
+_tmux_running() { [[ -n $TMUX ]] && printf '\e]2;⏳\e\\'; }
 PROMPT_COMMAND=__prompt_command
-trap '__tmux_question' DEBUG
+trap '_tmux_running' DEBUG

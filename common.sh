@@ -5,14 +5,6 @@
 alias vi='vim'
 alias gitlog='git log --graph --oneline'
 
-# --- prompt status helpers (used by both shells' prompts) ---
-__tmux_status() {
-  [ -n "$TMUX" ] && tmux set-option -pq @status "$1" && tmux refresh-client -S
-}
-__tmux_question() { __tmux_status '⏳'; }
-__tmux_success()  { __tmux_status '✅'; }
-__tmux_failure()  { __tmux_status '❌'; }
-
 # --- git ---
 git_main() {
   # Fetch and prune branches

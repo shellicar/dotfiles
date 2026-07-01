@@ -41,6 +41,16 @@ colour="$6"
 state="$7"
 role="$8"
 status="$9"
+pane_title="${10}"
+# Fallback when @status is unset: a plain zsh pane reports its state by printf
+# OSC 2 into the pane title instead of via `tmux set-option @status`. Accept the
+# title only when it is one of our status glyphs, so a normal title (hostname, an
+# app's own title) never leaks into the status slot.
+if [ -z "$status" ]; then
+  case "$pane_title" in
+    ⏳|✅|❌) status="$pane_title" ;;
+  esac
+fi
 
 script_dir="$(dirname "$0")"
 

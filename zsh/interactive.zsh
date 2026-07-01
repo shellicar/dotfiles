@@ -1,10 +1,20 @@
 # zsh interactive config.
-# Relies on the prompt status helpers (__tmux_*) defined in common.sh,
-# which load.sh sources before this file.
+# The prompt reports pane state to tmux by printf alone (OSC 7 cwd, OSC 2 status
+# glyph) — no tmux subprocess, so it does not use the __tmux_* helpers in common.sh.
 
 # --- prompt ---
 __prompt_command() {
   local EXIT="$?"  # This needs to be first
+
+  # tmux integration, printf-only (no tmux subprocess): OSC 7 reports the cwd
+  # (populates pane_path, so the status bar and new panes track the shell's dir,
+  # not a child's — find chdirs as it walks); OSC 2 reports command state as a
+  # glyph in the pane title (✅ ok / ❌ failed), which window-status.sh reads.
+  # The preexec hook emits ⏳ while a command runs. Raw $PWD keeps spaces intact.
+  if [[ -n $TMUX ]]; then
+    printf '\e]7;file://%s%s\e\\' "$HOST" "$PWD"
+    if [ $EXIT != 0 ]; then printf '\e]2;❌\e\\'; else printf '\e]2;✅\e\\'; fi
+  fi
 
   local RCol="%f"
   local Red="%F{red}"
@@ -19,16 +29,16 @@ __prompt_command() {
   local dir_part="%1~"
 
   if [ $EXIT != 0 ]; then
-    __tmux_failure
     PROMPT="${Dim}%D{%d/%m %H:%M:%S}${RCol} ${Red}${user_part}${RCol}@${BBlu}${host_part} ${Pur}${dir_part}${BYel}$ ${RCol}"
   else
-    __tmux_success
     PROMPT="${Dim}%D{%d/%m %H:%M:%S}${RCol} ${Gre}${user_part}${RCol}@${BBlu}${host_part} ${Pur}${dir_part}${BYel}$ ${RCol}"
   fi
 }
+# preexec: mark the pane 'running' via OSC 2 (printf, no tmux subprocess).
+_tmux_running() { [[ -n $TMUX ]] && printf '\e]2;⏳\e\\'; }
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd __prompt_command
-add-zsh-hook preexec __tmux_question
+add-zsh-hook preexec _tmux_running
 
 # --- keybindings ---
 bindkey -e
