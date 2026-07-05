@@ -10,6 +10,12 @@ case ":$PATH:" in
   *) export PATH="$PNPM_HOME:$PATH" ;;
 esac
 
+# rust (rustup, ~/.cargo)
+case ":$PATH:" in
+  *":$HOME/.cargo/bin:"*) ;;
+  *) export PATH="$HOME/.cargo/bin:$PATH" ;;
+esac
+
 # ZScaler certs (macOS)
 export NODE_EXTRA_CA_CERTS="$HOMEBREW_PREFIX/etc/ca-certificates/cert.pem"
 export REQUESTS_CA_BUNDLE="$HOMEBREW_PREFIX/etc/ca-certificates/cert.pem"
