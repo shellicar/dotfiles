@@ -12,9 +12,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   [ -z "$remote_ref" ] && continue
   case "$remote_ref" in
     refs/heads/main|refs/heads/master) ;;
-    refs/heads/docs/*|refs/heads/fix/*|refs/heads/security/*|refs/heads/feature/*|refs/heads/epic/*) ;;
+    refs/heads/docs/*|refs/heads/fix/*|refs/heads/hotfix/*|refs/heads/security/*|refs/heads/feature/*|refs/heads/epic/*) ;;
     refs/heads/*)
-      echo "Remote branch '${remote_ref#refs/heads/}' doesn't match allowed prefixes: docs/ fix/ security/ feature/ epic/" >&2
+      echo "Remote branch '${remote_ref#refs/heads/}' doesn't match allowed prefixes: docs/ fix/ hotfix/ security/ feature/ epic/" >&2
       echo "Push to an allowed branch name, or update the policy." >&2
       status=1 ;;
   esac
