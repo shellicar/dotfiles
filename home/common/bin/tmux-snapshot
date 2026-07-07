@@ -22,14 +22,44 @@
 
 const fs = require('fs');
 const { execFileSync } = require('child_process');
+const { parseArgs } = require('node:util');
 
 const HOME = process.env.HOME;
 
-// The snapshot file is named after the tmux server (its socket label), so each
-// server round-trips to its own file and save/restore agree with no argument.
-function snapshotPath() {
+// The snapshot file is named after the server's socket label, so each server
+// round-trips to its own file and save/restore agree by label.
+function snapshotPath(label) {
+  return `${HOME}/.tmux-snapshot-${label}.json`;
+}
+
+// tmux keeps one socket per server in a per-uid directory; the socket filename
+// is the server label. Single source of both the server list and each path.
+function serverDir() {
+  return `/tmp/tmux-${process.getuid()}`;
+}
+
+// The labels of the servers that currently exist: the sockets in serverDir().
+// A missing directory (no server ever started) reads as none.
+function listServers() {
+  let names;
+  try {
+    names = fs.readdirSync(serverDir());
+  } catch {
+    return [];
+  }
+  return names.filter((n) => {
+    try {
+      return fs.statSync(`${serverDir()}/${n}`).isSocket();
+    } catch {
+      return false;
+    }
+  });
+}
+
+// The label of the server we're running inside, from $TMUX's socket path.
+function currentLabel() {
   const socket = process.env.TMUX.split(',')[0]; // e.g. /tmp/tmux-501/shellicar
-  return `${HOME}/.tmux-snapshot-${socket.slice(socket.lastIndexOf('/') + 1)}.json`;
+  return socket.slice(socket.lastIndexOf('/') + 1);
 }
 const SEP = '\x1f'; // US: a field separator that cannot appear in tmux values
 const PARK = '999999'; // parking index for the throwaway window new-session spawns
@@ -53,18 +83,29 @@ function run(cmd, args, allowFail) {
   }
 }
 
-const tmux = (args, allowFail) => run('tmux', args, allowFail);
+// A tmux caller bound to one server by label, so every command targets that
+// named server rather than the ambient one $TMUX points at.
+const serverTmux = (label) => (args, allowFail) => run('tmux', ['-L', label, ...args], allowFail);
 const lines = (s) => (s || '').split('\n').filter(Boolean);
 
 function requireTmux() {
   if (!process.env.TMUX) die('not inside a tmux server');
 }
 
+// The single target label: -L names it explicitly, otherwise it's the server
+// we're running inside — which requires being inside one.
+function resolveLabel(values) {
+  if (values.label !== undefined) return values.label;
+  requireTmux();
+  return currentLabel();
+}
+
 // --- save -------------------------------------------------------------------
 
-function cmdSave() {
-  requireTmux();
-  const file = snapshotPath();
+function saveServer(label) {
+  const tmux = serverTmux(label);
+  const file = snapshotPath(label);
+  note(`saving server '${label}'`);
 
   const fmt = [
     '#{pane_id}', '#{session_name}', '#{window_index}', '#{window_name}',
@@ -108,12 +149,24 @@ function cmdSave() {
 
   const snapshot = {
     generated: new Date().toISOString(),
-    socket: process.env.TMUX.split(',')[0],
+    socket: `${serverDir()}/${label}`,
     panes,
   };
   fs.writeFileSync(file, JSON.stringify(snapshot, null, 2) + '\n');
   process.stdout.write(summarize(panes) + '\n');
   note(`wrote ${panes.length} panes to ${file}`);
+}
+
+// save router: -a sweeps every server, -L names one, else the current server.
+function cmdSave(values) {
+  if (values.all) {
+    if (values.label !== undefined) die('cannot combine -a with -L');
+    const servers = listServers();
+    if (!servers.length) die('no tmux servers found');
+    for (const label of servers) saveServer(label);
+    return;
+  }
+  saveServer(resolveLabel(values));
 }
 
 // A readable tree of what was captured: session → window → panes, each pane
@@ -162,7 +215,7 @@ function groupWindows(panes) {
 // Work out, against the live server, exactly what restore would do. Returns a
 // plan that both the default dry-run and an --apply run consume, so the preview
 // can never diverge from what executes.
-function planRestore(snapshot) {
+function planRestore(snapshot, tmux) {
   const windows = groupWindows(snapshot.panes);
 
   const liveSessions = new Set(lines(tmux(['list-sessions', '-F', '#{session_name}'], true)));
@@ -201,7 +254,7 @@ function describePlan(plan) {
   return out;
 }
 
-function executePlan(plan) {
+function executePlan(plan, tmux) {
   // Create missing sessions detached; park the auto-spawned window so our
   // indexed windows are free, and reap it once the session has real windows
   // (killing it sooner could take the session with it and fire session-closed).
@@ -249,16 +302,19 @@ function executePlan(plan) {
   for (const s of created) tmux(['kill-window', '-t', `${s}:${PARK}`], true);
 }
 
-function cmdRestore(args) {
+function cmdRestore(values) {
+  if (values.all) die('-a is not supported for restore (single server only)');
   // Dry-run is the default: print the plan and change nothing. --apply commits.
-  const apply = args.includes('--apply');
+  const apply = Boolean(values.apply);
+  const label = resolveLabel(values);
+  const tmux = serverTmux(label);
+  note(`restoring server '${label}'`);
 
-  requireTmux();
-  const file = snapshotPath();
+  const file = snapshotPath(label);
   if (!fs.existsSync(file)) die(`no snapshot at ${file}`);
   const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
 
-  const plan = planRestore(snapshot);
+  const plan = planRestore(snapshot, tmux);
 
   if (!apply) {
     process.stdout.write('DRY RUN — no changes will be made (pass --apply to commit)\n');
@@ -268,19 +324,40 @@ function cmdRestore(args) {
     return;
   }
 
-  executePlan(plan);
+  executePlan(plan, tmux);
   note(`restore complete from ${file} — created ${plan.createWindows.length} window(s), skipped ${plan.skipWindows.length}`);
 }
 
 // --- dispatch ---------------------------------------------------------------
 
 function usage() {
-  process.stderr.write('usage: tmux-snapshot save\n');
-  process.stderr.write('       tmux-snapshot restore [--apply]\n');
+  process.stderr.write('usage: tmux-snapshot [-L label | -a] save\n');
+  process.stderr.write('       tmux-snapshot [-L label] restore [--apply]\n');
   process.exit(2);
 }
 
-const [, , sub, ...rest] = process.argv;
-if (sub === 'save') cmdSave();
-else if (sub === 'restore') cmdRestore(rest);
-else usage();
+// parseArgs in strict mode: unknown flags throw and land on usage(). -L/-a and
+// --apply are position-independent, so the subcommand may sit either side.
+function main() {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      allowPositionals: true,
+      options: {
+        label: { type: 'string', short: 'L' },
+        all: { type: 'boolean', short: 'a' },
+        apply: { type: 'boolean' },
+      },
+    });
+  } catch (e) {
+    note(e.message);
+    usage();
+  }
+
+  const sub = parsed.positionals[0];
+  if (sub === 'save') cmdSave(parsed.values);
+  else if (sub === 'restore') cmdRestore(parsed.values);
+  else usage();
+}
+
+main();
