@@ -20,4 +20,5 @@ path_prepend() {
 
 path_prepend "$HOME/bin"
 path_prepend "$HOME/.local/bin"
+path_prepend "$HOME/repos/shellicar/skills/scripts"
 export PATH
