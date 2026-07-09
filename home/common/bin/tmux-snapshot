@@ -64,6 +64,10 @@ function currentLabel() {
 const SEP = '\x1f'; // US: a field separator that cannot appear in tmux values
 const PARK = '999999'; // parking index for the throwaway window new-session spawns
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+// The model as the CLI renders it in its status line: family, version, and a
+// trailing '*' iff the model was overridden from the command line. We only
+// record the model when that '*' is present (an override worth round-tripping).
+const MODEL = /(Haiku|Sonnet|Fable|Opus) (\d+(?:\.\d+)?)(\*)?/g;
 
 function die(msg) {
   process.stderr.write(`tmux-snapshot: ${msg}\n`);
@@ -88,22 +92,50 @@ function run(cmd, args, allowFail) {
 const serverTmux = (label) => (args, allowFail) => run('tmux', ['-L', label, ...args], allowFail);
 const lines = (s) => (s || '').split('\n').filter(Boolean);
 
+// Minimal ANSI, only when stdout is a terminal so piped/redirected output stays
+// clean. Used to make the restore plan easier to scan at a glance.
+const COLOUR = process.stdout.isTTY;
+const paint = (code) => (s) => (COLOUR ? `\x1b[${code}m${s}\x1b[0m` : s);
+const dim = paint('2');
+const bold = paint('1');
+const cyan = paint('36');
+
 function requireTmux() {
   if (!process.env.TMUX) die('not inside a tmux server');
 }
 
-// The single target label: -L names it explicitly, otherwise it's the server
-// we're running inside — which requires being inside one.
-function resolveLabel(values) {
-  if (values.label !== undefined) return values.label;
+// The orphan trap: if this pane's server was orphaned — its socket removed and a
+// fresh server started on the same label — then `-L <label>` reaches that other
+// server, not the one we're inside, and a bare command would silently snapshot
+// the wrong server. $TMUX's second field is our real server's pid; display-message
+// reports the pid the socket resolves to now. A mismatch means we're the orphan.
+// Only meaningful for a bare command (label from $TMUX); an explicit -L is a
+// deliberate target, not "the server I'm in".
+function assertNotOrphan(label, tmux) {
+  const envPid = process.env.TMUX.split(',')[1];
+  const livePid = (tmux(['display-message', '-p', '#{pid}'], true) || '').trim();
+  if (livePid !== envPid) {
+    die(`this pane belongs to an orphaned '${label}' server (pid ${envPid}); the '${label}' socket now points at ${livePid ? `pid ${livePid}` : 'nothing'}. Run from a live pane, or target it explicitly with -L.`);
+  }
+}
+
+// Resolve the target as a { label, tmux } pair. -L names the server explicitly;
+// otherwise it's the one we're inside (requires being inside one). Either way
+// every command binds to the label with -L — tmux uses -L internally regardless,
+// so normalising to it keeps one code path and pins the target exactly. For the
+// bare case we also guard against the orphan trap before handing the target back.
+function resolveTarget(values) {
+  if (values.label !== undefined) return { label: values.label, tmux: serverTmux(values.label) };
   requireTmux();
-  return currentLabel();
+  const label = currentLabel();
+  const tmux = serverTmux(label);
+  assertNotOrphan(label, tmux);
+  return { label, tmux };
 }
 
 // --- save -------------------------------------------------------------------
 
-function saveServer(label) {
-  const tmux = serverTmux(label);
+function saveServer(label, tmux) {
   const file = snapshotPath(label);
   note(`saving server '${label}'`);
 
@@ -131,15 +163,23 @@ function saveServer(label) {
     // source (a marker the CLI writes about its own pid/tty) would be sturdier;
     // deferred for now.
     let sessionId = '';
+    let model = null;
     if (proc === 'claude-sdk-cli') {
-      const found = (tmux(['capture-pane', '-p', '-t', paneId], true) || '').match(UUID);
+      const screen = tmux(['capture-pane', '-p', '-t', paneId], true) || '';
+      const found = screen.match(UUID);
       if (found) sessionId = found[found.length - 1];
+      // Same bottom-most-line bet as the id: the last match on screen is the
+      // status line. Only store it when overridden (group 3, the '*').
+      const models = [...screen.matchAll(MODEL)];
+      const last = models[models.length - 1];
+      if (last && last[3]) model = { family: last[1], version: last[2] };
     }
 
     return {
       session, window_index: windowIndex, window_name: windowName,
       window_layout: windowLayout, pane_index: paneIndex, path, cmd, proc,
       session_id: sessionId,
+      ...(model ? { model } : {}),
       options: {
         '@title': title, '@colour': colour, '@state': state,
         '@role': role, '@status': status,
@@ -163,10 +203,11 @@ function cmdSave(values) {
     if (values.label !== undefined) die('cannot combine -a with -L');
     const servers = listServers();
     if (!servers.length) die('no tmux servers found');
-    for (const label of servers) saveServer(label);
+    for (const label of servers) saveServer(label, serverTmux(label));
     return;
   }
-  saveServer(resolveLabel(values));
+  const { label, tmux } = resolveTarget(values);
+  saveServer(label, tmux);
 }
 
 // A readable tree of what was captured: session → window → panes, each pane
@@ -182,7 +223,8 @@ function summarize(panes) {
     const n = w.panes.length;
     out.push(`  ${w.window_index}  ${w.window_name}  (${n} pane${n > 1 ? 's' : ''})`);
     for (const p of w.panes) {
-      out.push(`       ${p.pane_index}  ${p.proc.padEnd(15)} ${p.path}`);
+      const m = p.model ? `  (model: ${modelArg(p.model)})` : '';
+      out.push(`       ${p.pane_index}  ${p.proc.padEnd(15)} ${p.path}${m}`);
     }
   }
   return out.join('\n');
@@ -237,20 +279,28 @@ function planRestore(snapshot, tmux) {
   return { createSessions, createWindows, skipWindows };
 }
 
+// Reconstruct the CLI's model token from the saved components: the CLI parses
+// `claude-<family>-<version>` and capitalises, so lowercase family and turn the
+// version's dot into a dash (4.8 -> 4-8, 5 -> 5).
+function modelArg(model) {
+  return `claude-${model.family.toLowerCase()}-${model.version.replace('.', '-')}`;
+}
+
 function describePlan(plan) {
   const out = [];
   for (const s of plan.createSessions) out.push(`create session: ${s}`);
   for (const w of plan.createWindows) {
     const n = w.panes.length;
-    out.push(`create window: ${w.session}:${w.window_index} "${w.window_name}" (${n} pane${n > 1 ? 's' : ''})`);
+    out.push(`create window: ${bold(`${w.session}:${w.window_index}`)} "${w.window_name}" (${n} pane${n > 1 ? 's' : ''})`);
     for (const p of w.panes) {
       out.push(`    pane ${p.pane_index}: cwd=${p.path}`);
       if (p.proc === 'claude-sdk-cli' && p.session_id) {
-        out.push(`      run: claude-sdk-cli --resume ${p.session_id}`);
+        const model = p.model ? ` ${cyan(`--model ${modelArg(p.model)}`)}` : '';
+        out.push(`      ${dim('run: claude-sdk-cli --resume')} ${bold(p.session_id)}${model}`);
       }
     }
   }
-  for (const w of plan.skipWindows) out.push(`skip window: ${w.session}:${w.window_index} (exists)`);
+  for (const w of plan.skipWindows) out.push(dim(`skip window: ${w.session}:${w.window_index} (exists)`));
   return out;
 }
 
@@ -293,7 +343,8 @@ function executePlan(plan, tmux) {
       // Claude panes: run the resume command so the conversation comes back.
       // Other panes are left at a shell already sitting in the right cwd.
       if (p.proc === 'claude-sdk-cli' && p.session_id) {
-        tmux(['send-keys', '-t', pt, '-l', `claude-sdk-cli --resume ${p.session_id}`]);
+        const model = p.model ? ` --model ${modelArg(p.model)}` : '';
+        tmux(['send-keys', '-t', pt, '-l', `claude-sdk-cli --resume ${p.session_id}${model}`]);
         tmux(['send-keys', '-t', pt, 'Enter']);
       }
     }
@@ -306,8 +357,7 @@ function cmdRestore(values) {
   if (values.all) die('-a is not supported for restore (single server only)');
   // Dry-run is the default: print the plan and change nothing. --apply commits.
   const apply = Boolean(values.apply);
-  const label = resolveLabel(values);
-  const tmux = serverTmux(label);
+  const { label, tmux } = resolveTarget(values);
   note(`restoring server '${label}'`);
 
   const file = snapshotPath(label);
@@ -328,11 +378,23 @@ function cmdRestore(values) {
   note(`restore complete from ${file} — created ${plan.createWindows.length} window(s), skipped ${plan.skipWindows.length}`);
 }
 
+// restore-server takes the label as a positional (`restore-server weaver`) and
+// drives the same plan/execute path as `restore` — dry-run by default, --apply to
+// commit. It exists to be run from *outside* the target server (the save → kill
+// → restore cycle can't be driven from inside the server it's killing), where the
+// -L flag reads as less obvious than a named label.
+function cmdRestoreServer(values, label) {
+  if (label === undefined) die('restore-server requires a label (e.g. restore-server weaver)');
+  if (values.all) die('-a is not supported for restore-server (single server only)');
+  cmdRestore({ ...values, label });
+}
+
 // --- dispatch ---------------------------------------------------------------
 
 function usage() {
   process.stderr.write('usage: tmux-snapshot [-L label | -a] save\n');
   process.stderr.write('       tmux-snapshot [-L label] restore [--apply]\n');
+  process.stderr.write('       tmux-snapshot restore-server <label> [--apply]\n');
   process.exit(2);
 }
 
@@ -357,6 +419,7 @@ function main() {
   const sub = parsed.positionals[0];
   if (sub === 'save') cmdSave(parsed.values);
   else if (sub === 'restore') cmdRestore(parsed.values);
+  else if (sub === 'restore-server') cmdRestoreServer(parsed.values, parsed.positionals[1]);
   else usage();
 }
 
