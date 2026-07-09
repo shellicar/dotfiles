@@ -1,3 +1,5 @@
+[include]
+	path = ~/dotfiles/.gitconfig.d/common
 [core]
 	autocrlf = input
 	excludesfile = ~/dotfiles/.gitignore_global

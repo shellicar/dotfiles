@@ -1,0 +1,4 @@
+[core]
+	hooksPath = ~/.config/git/hooks
+[alias]
+	lfs-install = !git -c core.hooksPath=.git/hooks lfs install --local
