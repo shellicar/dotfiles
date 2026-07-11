@@ -137,7 +137,6 @@ function resolveTarget(values) {
 
 function saveServer(label, tmux) {
   const file = snapshotPath(label);
-  note(`saving server '${label}'`);
 
   const fmt = [
     '#{pane_id}', '#{session_name}', '#{window_index}', '#{window_name}',
@@ -146,7 +145,17 @@ function saveServer(label, tmux) {
     '#{@role}', '#{@status}',
   ].join(SEP);
 
-  const panes = lines(tmux(['list-panes', '-a', '-F', fmt])).map((line) => {
+  // A stale socket (file present but server dead) makes list-panes fail hard.
+  // allowFail turns that into empty output; a live server always reports at
+  // least one pane, so empty means no server — skip cleanly, don't crash.
+  const raw = tmux(['list-panes', '-a', '-F', fmt], true);
+  if (!raw) {
+    note(`no server running on '${label}', nothing to save`);
+    return;
+  }
+
+  note(`saving server '${label}'`);
+  const panes = lines(raw).map((line) => {
     const [
       paneId, session, windowIndex, windowName, windowLayout, paneIndex,
       paneTty, path, cmd, title, colour, state, role, status,
@@ -293,10 +302,15 @@ function describePlan(plan) {
     const n = w.panes.length;
     out.push(`create window: ${bold(`${w.session}:${w.window_index}`)} "${w.window_name}" (${n} pane${n > 1 ? 's' : ''})`);
     for (const p of w.panes) {
-      out.push(`    pane ${p.pane_index}: cwd=${p.path}`);
+      const exists = fs.existsSync(p.path);
+      out.push(`    pane ${p.pane_index}: cwd=${p.path}${exists ? '' : dim(' (missing — opens in ~)')}`);
       if (p.proc === 'claude-sdk-cli' && p.session_id) {
-        const model = p.model ? ` ${cyan(`--model ${modelArg(p.model)}`)}` : '';
-        out.push(`      ${dim('run: claude-sdk-cli --resume')} ${bold(p.session_id)}${model}`);
+        if (exists) {
+          const model = p.model ? ` ${cyan(`--model ${modelArg(p.model)}`)}` : '';
+          out.push(`      ${dim('run: claude-sdk-cli --resume')} ${bold(p.session_id)}${model}`);
+        } else {
+          out.push(`      ${dim('skip cli: dir missing')}`);
+        }
       }
     }
   }
@@ -316,6 +330,10 @@ function executePlan(plan, tmux) {
     created.push(s);
   }
 
+  // Stage 1: build the structure. Create every window and pane, apply the saved
+  // layout, set the window/pane labels. Panes are created regardless of whether
+  // their saved cwd still exists (tmux falls back to HOME for a missing dir), so
+  // the pane count matches the saved layout and the geometry fits exactly.
   for (const w of plan.createWindows) {
     const tgt = `${w.session}:${w.window_index}`;
 
@@ -339,14 +357,20 @@ function executePlan(plan, tmux) {
       // Pane-scope labels (role/status).
       if (p.options['@role']) tmux(['set-option', '-p', '-t', pt, '@role', p.options['@role']]);
       if (p.options['@status']) tmux(['set-option', '-p', '-t', pt, '@status', p.options['@status']]);
+    }
+  }
 
-      // Claude panes: run the resume command so the conversation comes back.
-      // Other panes are left at a shell already sitting in the right cwd.
-      if (p.proc === 'claude-sdk-cli' && p.session_id) {
-        const model = p.model ? ` --model ${modelArg(p.model)}` : '';
-        tmux(['send-keys', '-t', pt, '-l', `claude-sdk-cli --resume ${p.session_id}${model}`]);
-        tmux(['send-keys', '-t', pt, 'Enter']);
-      }
+  // Stage 2: restore the CLIs, separately from the layout. Only launch --resume
+  // when the pane's saved dir still exists — a missing dir would have landed the
+  // pane in HOME, and spawning claude there is worse than leaving a plain shell.
+  for (const w of plan.createWindows) {
+    for (const p of w.panes) {
+      if (p.proc !== 'claude-sdk-cli' || !p.session_id) continue;
+      if (!fs.existsSync(p.path)) continue;
+      const pt = `${w.session}:${w.window_index}.${p.pane_index}`;
+      const model = p.model ? ` --model ${modelArg(p.model)}` : '';
+      tmux(['send-keys', '-t', pt, '-l', `claude-sdk-cli --resume ${p.session_id}${model}`]);
+      tmux(['send-keys', '-t', pt, 'Enter']);
     }
   }
 
