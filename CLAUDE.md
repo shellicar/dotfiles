@@ -58,7 +58,12 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 
 - `.vscode/settings.json` is **merged** into the live settings, not symlinked —
   VS Code writes machine-local state into that file, so a symlink would pump it
-  back into the repo.
-- `.vscode/merge-settings.sh`: **dry-run is the default (no args); `-d` /
-  `--destructive` WRITES** (it backs up first). The merge has the repo's values
-  winning per key.
+  back into the repo. It is the **single source** for every OS: the per-OS keys
+  (`terminal.integrated.defaultProfile.osx`/`.linux`/`.windows`) are distinct
+  setting IDs that each host self-selects, so only the *destination path* is
+  platform-specific — not the settings.
+- `.vscode/sync.mjs` does the merge. **Dry-run is the default (no args) and
+  doubles as a drift view; `--apply` WRITES** (timestamped backup first).
+  It deep-merges the repo source into the live file, **preserving machine-local
+  keys** (repo values win only on the keys the source defines). OS decides the
+  target path only (macOS, Git Bash, WSL; native Linux is not synced).
