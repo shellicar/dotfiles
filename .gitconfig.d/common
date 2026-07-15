@@ -2,3 +2,19 @@
 	hooksPath = ~/.config/git/hooks
 [alias]
 	lfs-install = !git -c core.hooksPath=.git/hooks lfs install --local
+[push]
+	; harden --force-with-lease: also refuse unless the local ref included the remote-tracking tip you last saw, so a fetch right before the push can't silently refresh the lease and let you clobber
+	useForceIfIncludes = true
+	; don't auto-create/track a remote branch on push — set the upstream deliberately with `git push -u`
+	autoSetupRemote = false
+	; push to the branch's configured upstream and refuse if there is none (fresh branch needs `git push -u`); refuse if the upstream's name differs from the local branch
+	default = simple
+[branch]
+	; adopt an upstream only when the new branch's name matches the remote branch's name — so cutting
+	; a feature branch off origin/main does NOT make it track main (git's default 'true' does)
+	autoSetupMerge = simple
+[alias]
+	; git wt <branch> [base] — create a sibling worktree (<repo>--<leaf>) with the branch cut from a
+	; fresh origin/main (or [base]) and no accidental upstream. --no-track overrides autoSetupMerge so
+	; it stays correct even without the [branch] setting above.
+	wt = "!f() { root=$(git rev-parse --show-toplevel); repo=$(basename \"$root\" | sed 's/--.*//'); git fetch origin --quiet; git worktree add --no-track -b \"$1\" \"$(dirname \"$root\")/$repo--${1##*/}\" \"${2:-origin/main}\"; }; f"
