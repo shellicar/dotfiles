@@ -1,0 +1,509 @@
+#!/bin/sh
+#
+# git cleanup — delete local branches (and their worktrees) whose work is
+# already in the main branch.
+#
+# Invoked as a git subcommand: git finds this file on $PATH as `git-cleanup`,
+# so `git cleanup` runs it. Default is a dry-run report; nothing is deleted
+# without --apply.
+#
+# THE DECISION is the merge check, and only the merge check: are the branch's
+# commits already in main? Walking the branch tip-first, the first commit whose
+# content is found in main is where the branch joins main; anything before it is
+# work not yet in main.
+#
+#   0 commits not in main  → fully merged     → delete (and its worktree)
+#   N commits not in main  → merged + N on top → review (kept)
+#   no join point found    → not merged        → keep
+#
+# GONE IS ONLY AN INDICATOR. The remote branch being deleted says nothing about
+# content; it is a cross-check against the verdict, and only matters when the
+# two disagree:
+#
+#   merged  but NOT gone  → warn: content is in main yet the remote still exists
+#   gone    but NOT merged → warn: remote deleted (likely squashed) yet its
+#                            content cannot be found — look by hand
+#
+# gone never changes the verdict. Strip it away and the merge check reads the
+# same.
+
+set -u
+
+# ── presentation ────────────────────────────────────────────────────────────
+
+if [ -t 1 ]; then
+  GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'
+  DIM='\033[2m'; BOLD='\033[1m'; RESET='\033[0m'
+else
+  GREEN=''; YELLOW=''; RED=''; BLUE=''; DIM=''; BOLD=''; RESET=''
+fi
+
+OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; DIRTY='📝'; EMPTYICON='≡'
+
+say() { printf '%b\n' "$*"; }
+log() { [ "$VERBOSE" = true ] && printf '%b\n' "${DIM}[git cleanup] $*${RESET}" >&2; return 0; }
+
+# ── repository context ──────────────────────────────────────────────────────
+
+ref_exists() { git rev-parse --verify --quiet "$1" >/dev/null 2>&1; }
+
+ensure_in_git_repository() {
+  git rev-parse --git-dir >/dev/null 2>&1 || { echo "Error: not in a git repository" >&2; exit 1; }
+}
+
+get_main_branch() {
+  [ -n "$BASE_OVERRIDE" ] && { echo "$BASE_OVERRIDE"; return 0; }
+  local ref
+  ref=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null) || {
+    echo "Error: cannot determine main branch from origin/HEAD (try -b <branch>)" >&2; exit 1; }
+  echo "$ref" | sed 's@^refs/remotes/origin/@@'
+}
+
+fetch_origin() {
+  [ "$NO_FETCH" = true ] && { log "skipping fetch (--no-fetch)"; return 0; }
+  log "fetching origin --prune ..."
+  git fetch --prune origin >/dev/null 2>&1 || \
+    echo "Warning: could not fetch from origin; proceeding with local data." >&2
+}
+
+# ── the merge check (the verdict) ───────────────────────────────────────────
+
+# The stripped-diff CONTENT of a change: the diff with its ---/+++/@@/index
+# header lines removed, then hashed for indexing. This is git-check.sh's
+# comparison — the actual diff content, NOT a patch-id.
+content_hash() {
+  git diff "$1" "$2" | sed -e '/^--- /d' -e '/^+++ /d' -e '/^@@/d' -e '/^index /d' | shasum | awk '{print $1}'
+}
+
+# content_hash is a pure function of two immutable git SHAs — once a commit
+# exists its diff against another commit never changes, so a cache entry
+# never goes stale and needs no invalidation. Repo-local, under .git/, so it
+# survives across runs but never leaks between repos.
+content_hash_cached() {
+  local a=$1 b=$2 key file h
+  key=$(printf '%s %s' "$a" "$b" | shasum | awk '{print $1}')
+  file="$CACHE_DIR/$key"
+  [ -f "$file" ] && { cat "$file"; return; }
+  h=$(content_hash "$a" "$b")
+  printf '%s' "$h" > "$file"
+  printf '%s' "$h"
+}
+
+# One bulk fetch of every merged PR's head branch + merge commit, instead of
+# a gh API call per branch (~0.5s network round-trip each — 50 branches would
+# be 25s of pure latency). Populated once, in the same tab-separated table
+# PR_MERGE_TABLE looks up from.
+fetch_pr_merges() {
+  PR_MERGE_TABLE=''
+  command -v gh >/dev/null 2>&1 || return 0
+  PR_MERGE_TABLE=$(gh pr list --state merged --json headRefName,mergeCommit --limit 1000 \
+    --jq '.[] | select(.mergeCommit != null) | [.headRefName, .mergeCommit.oid] | @tsv' 2>/dev/null)
+}
+
+# The squash/merge commit of a merged PR for this branch, looked up from the
+# table fetch_pr_merges built once up front. Empty if none.
+pr_merge_commit() {
+  printf '%s\n' "$PR_MERGE_TABLE" | awk -F'\t' -v b="$1" '$1==b{print $2; exit}'
+}
+
+# How many main commits, back from the tip, we actually need indexed this
+# run: the largest base..origin/$MAIN distance among branches that fail BOTH
+# the ancestor check AND the PR check (only those ever fall through to the
+# content walk). Not a fixed constant — the true maximum this run needs, and
+# 0 (skip entirely) if every branch resolves via ancestor or PR.
+compute_max_walk_depth() {
+  local branch base pr_mc dist max=0
+  for branch in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
+    [ "$branch" = "$MAIN" ] && continue
+    base=$(git merge-base "$branch" "origin/$MAIN" 2>/dev/null) || continue
+    git merge-base --is-ancestor "$branch" "origin/$MAIN" 2>/dev/null && continue
+    pr_mc=$(pr_merge_commit "$branch")
+    [ -n "$pr_mc" ] && ref_exists "$pr_mc" && continue
+    dist=$(git rev-list --count "$base..origin/$MAIN" 2>/dev/null) || continue
+    [ "$dist" -gt "$max" ] && max=$dist
+  done
+  echo "$max"
+}
+
+# ONE shared index of main's commit-content hashes, built once for the whole
+# run at the size compute_max_walk_depth actually needs — not per branch, not
+# a fixed 500. Every pending branch's own range is a prefix of this same set
+# (both count back from origin/$MAIN's tip), so one walk covers all of them.
+build_shared_main_index() {
+  local depth c p
+  depth=$(compute_max_walk_depth)
+  MAIN_IDX=$(mktemp) || { echo "Error: mktemp failed" >&2; exit 1; }
+  trap 'rm -f "$MAIN_IDX"' EXIT INT TERM
+  [ "$depth" -eq 0 ] && return 0
+  git rev-list -n "$depth" "origin/$MAIN" | while read -r c; do
+    p=$(git rev-parse "$c^" 2>/dev/null) || continue
+    content_hash_cached "$p" "$c"
+  done | sort -u > "$MAIN_IDX"
+}
+
+# Walk the branch tip-first; the first commit whose cumulative content
+# (merge-base..C) is found in main is the join point. Echoes the number of
+# commits sitting after that join point (0 = fully merged), or -1 if no join
+# point is found within WALK_DEPTH.
+#
+# PR checked FIRST — it's authoritative and one API call (batched, see
+# fetch_pr_merges), versus walking potentially hundreds of commits. The
+# content walk is the fallback, against the shared MAIN_IDX built once
+# up front by build_shared_main_index — no per-branch walk of main at all.
+commits_not_in_main() {
+  local branch=$1 base c h i pr_mc pr_join
+  base=$(git merge-base "$branch" "origin/$MAIN" 2>/dev/null) || { echo -1; return; }
+  # Fully contained in main (0 unique commits — includes a branch sitting at main).
+  git merge-base --is-ancestor "$branch" "origin/$MAIN" && { echo 0; return; }
+
+  pr_mc=$(pr_merge_commit "$branch")
+  if [ -n "$pr_mc" ] && ref_exists "$pr_mc"; then
+    pr_join=$(git merge-base "$pr_mc" "origin/$MAIN" 2>/dev/null)
+    if [ -n "$pr_join" ] && git merge-base --is-ancestor "$pr_join" "origin/$MAIN" 2>/dev/null; then
+      i=0
+      for c in $(git rev-list -n "$WALK_DEPTH" "$base..$branch"); do
+        [ "$c" = "$pr_join" ] && { echo "$i"; return; }
+        i=$((i + 1))
+      done
+      # PR merged, but its merge commit isn't among the branch's own recent
+      # tip commits (e.g. squashed) — trust the PR: fully merged.
+      echo 0; return
+    fi
+  fi
+
+  # Only WALK_DEPTH diffs against the branch's OWN history, tip-first, each
+  # checked against the shared index built once for the whole run.
+  i=0
+  for c in $(git rev-list -n "$WALK_DEPTH" "$base..$branch"); do
+    h=$(content_hash_cached "$base" "$c")
+    if [ -s "$MAIN_IDX" ] && grep -qxF "$h" "$MAIN_IDX"; then
+      echo "$i"; return
+    fi
+    i=$((i + 1))
+  done
+  echo -1
+}
+
+# ── the gone indicator (cross-check only) ───────────────────────────────────
+
+branch_has_upstream() { git config --get "branch.$1.remote" >/dev/null; }
+
+# Had an upstream that is now gone (remote branch deleted). No upstream at all
+# is not "gone" — it is a local-only branch.
+branch_upstream_gone() {
+  local remote merge
+  remote=$(git config --get "branch.$1.remote") || return 1
+  merge=$(git config --get "branch.$1.merge") || return 1
+  ref_exists "refs/remotes/$remote/${merge#refs/heads/}" && return 1
+  return 0
+}
+
+# ── worktrees ───────────────────────────────────────────────────────────────
+
+worktree_of() {
+  printf '%s\n' "$WT_MAP" | awk -F'\t' -v b="$1" '$1==b{print $2; exit}'
+}
+worktree_dirty() { [ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]; }
+
+# Reason a worktree must not be touched, or empty. Dirty ALWAYS blocks — there is
+# no case where uncommitted work is worth risking. Current worktree blocks too.
+worktree_block_reason() {
+  [ -z "$1" ] && return 0
+  [ "$1" = "$CUR_WT" ] && { echo "the worktree you are in"; return 0; }
+  worktree_dirty "$1" && { echo "worktree has uncommitted changes"; return 0; }
+  return 0
+}
+
+# Remove worktree first, then branch. force=true uses -D (needed when the
+# branch's tip commits only exist merged/squashed elsewhere, so git's own
+# reachability check can't see it). force=false uses plain -d — for a branch
+# that never diverged from main (0 commits ahead), git can already tell
+# there's nothing to lose; no force needed, and using it would hide that.
+remove_branch() {
+  local branch=$1 wt=$2 force=$3
+  if [ -n "$wt" ]; then
+    git worktree remove "$wt" >/dev/null 2>&1 || { echo "worktree remove failed"; return 1; }
+  fi
+  if [ "$force" = true ]; then
+    git branch -D "$branch" >/dev/null 2>&1 || { echo "branch delete failed"; return 1; }
+  else
+    git branch -d "$branch" >/dev/null 2>&1 || { echo "branch delete failed"; return 1; }
+  fi
+  echo removed
+  return 0
+}
+
+# ── the single pass ─────────────────────────────────────────────────────────
+
+process_branch() {
+  local branch=$1 wt ahead noun last meta not_in_main gone noun2 icon desc note outcome
+
+  [ "$branch" = "$MAIN" ] && return 0
+  wt=$(worktree_of "$branch")
+
+  ahead=$(git rev-list --count "origin/$MAIN..$branch" 2>/dev/null || echo '?')
+  [ "$ahead" = 1 ] && noun=commit || noun=commits
+  last=$(git log -1 --format=%cr "$branch" 2>/dev/null)
+  meta="${DIM}[$ahead $noun, $last]${RESET}"
+
+  # Verdict (content) and indicator (gone) computed independently.
+  not_in_main=$(commits_not_in_main "$branch")
+  gone=false; branch_upstream_gone "$branch" && gone=true
+  [ "$not_in_main" -gt 1 ] && noun2=commits || noun2=commit
+
+  if [ "$not_in_main" = 0 ]; then
+    if [ "$ahead" = 0 ]; then
+      # Never diverged from main — NOT a squash-merge detection, just a
+      # branch identical to main. Git's own ancestor check already knows
+      # this on its own; a different class, a different flag, plain -d.
+      icon="${BLUE}${EMPTYICON}${RESET}"
+      desc='never diverged from main'
+      do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_EMPTY" '--empty' false 'EMPTY_COUNT'
+      return 0
+    fi
+    # Fully in main — the squash-merge delete case.
+    icon="${GREEN}${OK}${RESET}"
+    if [ "$gone" = true ]; then
+      desc='merged'
+    else
+      # Content is in main, but the remote branch still exists.
+      desc='merged, but remote not gone — check the PR'
+    fi
+    do_delete "$branch" "$wt" "$icon" "$desc" "$meta" true '--apply' true 'MERGED_COUNT'
+    return 0
+  fi
+
+  if [ "$not_in_main" -gt 0 ]; then
+    # Merged up to the join point, but N commits sit on top of it.
+    note="merged, $not_in_main $noun2 on top not in main"
+    [ "$gone" = true ] && note="$note [gone]"
+    local block; block=$(worktree_block_reason "$wt")
+    if [ -n "$block" ]; then
+      say "  ${NOACCESS} $branch $meta ${DIM}($note — $block, blocked)${RESET}"
+      return 0
+    fi
+    REVIEW_COUNT=$((REVIEW_COUNT + 1))
+    [ -n "$wt" ] && note="$note, worktree"
+    say "  🟡 $branch $meta ${DIM}($note)${RESET}"
+    local rbase rjoin
+    rbase=$(git merge-base "$branch" "origin/$MAIN")
+    rjoin=$(git rev-list "$rbase..$branch" | sed -n "$((not_in_main + 1))p")
+    do_rescue "$branch" "$rjoin" "$not_in_main" "$wt"
+    return 0
+  fi
+
+  # not_in_main == -1: content not found in main.
+  if [ "$gone" = true ]; then
+    # Indicator says merged (remote deleted), content cannot confirm it.
+    icon="${RED}${WARN}${RESET}"; desc='gone, but content not found in main'
+    do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_GONE" '--gone' true 'SUSPECT_COUNT'
+    return 0
+  fi
+
+  # Plain unmerged work.
+  HIDDEN_COUNT=$((HIDDEN_COUNT + 1))
+  if [ "$SHOW_ALL" = true ]; then
+    note='unmerged'; branch_has_upstream "$branch" || note='unmerged, local-only'
+    [ -n "$wt" ] && note="$note, worktree"
+    say "  ${DIM}${KEEP} $branch${RESET} $meta ${DIM}($note)${RESET}"
+  fi
+}
+
+# Print, gate on worktree safety, and delete only when this class is selected
+# AND --apply is given. --apply is a single gate at the bottom, never a
+# separate mode: the plan text is identical whether or not it is set, and
+# only the final action is conditional on it.
+do_delete() {
+  local branch=$1 wt=$2 icon=$3 desc=$4 meta=$5 flag_set=$6 flag=$7 force=${8:-true} class=${9:-} outcome what block
+
+  block=$(worktree_block_reason "$wt")
+  if [ -n "$block" ]; then
+    say "  ${NOACCESS} $branch $meta ${DIM}($desc — $block, blocked)${RESET}"; return 0
+  fi
+
+  case "$class" in
+    MERGED_COUNT) MERGED_COUNT=$((MERGED_COUNT + 1)) ;;
+    EMPTY_COUNT) EMPTY_COUNT=$((EMPTY_COUNT + 1)) ;;
+    SUSPECT_COUNT) SUSPECT_COUNT=$((SUSPECT_COUNT + 1)) ;;
+  esac
+
+  what='delete branch'; [ -n "$wt" ] && what='remove worktree + branch'
+
+  if [ "$flag_set" != true ]; then
+    say "  $icon $branch $meta ${DIM}($desc — would $what, run $flag)${RESET}"
+    return 0
+  fi
+
+  if [ "$APPLY" != true ]; then
+    say "  $icon $branch $meta ${DIM}($desc — would $what, run --apply)${RESET}"
+    return 0
+  fi
+
+  outcome=$(remove_branch "$branch" "$wt" "$force")
+  if [ "$outcome" = removed ]; then
+    REMOVED_COUNT=$((REMOVED_COUNT + 1))
+    say "  $icon $branch $meta ${DIM}($desc — removed)${RESET}"
+  else
+    say "  ${YELLOW}${WARN}${RESET}$branch $meta ${DIM}($desc — $outcome, skipped)${RESET}"
+  fi
+}
+
+# ── rescue (move the stray commits off, then drop the original) ──────────────
+
+# Replay the stray commits (join..branch) onto a new branch rescue/<branch>, then
+# delete the original. The replay happens in an isolated scratch worktree, so a
+# failed attempt never touches your branches or checkouts. Try main first; on
+# conflict fall back to the PR merge commit; if both conflict, leave it for you.
+do_rescue() {
+  local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" tmp base_used pr_mc rc outcome block
+
+  git show-ref --verify --quiet "refs/heads/$dst" && { say "     ${DIM}↳ rescue skipped — $dst already exists${RESET}"; return 0; }
+  block=$(worktree_block_reason "$wt")
+  [ -n "$block" ] && { say "     ${NOACCESS} rescue blocked — $block"; return 0; }
+  if [ "$RESCUE" != true ]; then
+    say "     ${DIM}↳ would rescue $n onto main → $dst   (run --rescue)${RESET}"; return 0
+  fi
+  if [ "$APPLY" != true ]; then
+    say "     ${DIM}↳ would rescue $n onto main → $dst   (run --apply)${RESET}"; return 0
+  fi
+
+  tmp=$(mktemp -d) || return 1
+  git worktree add -q --detach "$tmp" "origin/$MAIN" 2>/dev/null || {
+    say "     ${YELLOW}↳ rescue setup failed${RESET}"; return 1; }
+
+  base_used=main
+  ( cd "$tmp" && git switch -q -c "$dst" "$branch" && git rebase -q --onto "origin/$MAIN" "$join" ) 2>/dev/null
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    ( cd "$tmp" && git rebase --abort >/dev/null 2>&1; git switch -q --detach 2>/dev/null; git branch -D "$dst" >/dev/null 2>&1 )
+    pr_mc=$(pr_merge_commit "$branch")
+    if [ -n "$pr_mc" ]; then
+      base_used="PR merge ${pr_mc}"
+      ( cd "$tmp" && git switch -q -c "$dst" "$branch" && git rebase -q --onto "$pr_mc" "$join" ) 2>/dev/null
+      rc=$?
+      [ "$rc" -ne 0 ] && ( cd "$tmp" && git rebase --abort >/dev/null 2>&1; git switch -q --detach 2>/dev/null; git branch -D "$dst" >/dev/null 2>&1 )
+    fi
+  fi
+
+  git worktree remove "$tmp" >/dev/null 2>&1 || git worktree prune >/dev/null 2>&1
+
+  if [ "$rc" -ne 0 ]; then
+    say "     ${YELLOW}↳ conflicts on both bases — left for manual${RESET}"; return 1
+  fi
+
+  # Stray is now preserved on $dst; the original's merged part is in main.
+  outcome=$(remove_branch "$branch" "$wt")
+  if [ "$outcome" = removed ]; then
+    RESCUED_COUNT=$((RESCUED_COUNT + 1))
+    say "     ${GREEN}↳ rescued $n → $dst (onto $base_used); original removed${RESET}"
+  else
+    say "     ${YELLOW}↳ rescued to $dst, but original $outcome${RESET}"
+  fi
+}
+
+# ── argument parsing ────────────────────────────────────────────────────────
+
+usage() {
+  cat <<EOF
+Usage: git cleanup [options]
+
+Deletes local branches (and their worktrees) whose commits are already in the
+main branch. The merge check is the verdict; 'gone' (remote branch deleted) is
+only an indicator, surfaced when it disagrees with the content.
+
+  merged (0 commits on top)  → deleted by --apply
+  merged + N commits on top  → rescued (stray commits moved off), then deleted, by --rescue
+  gone but content not found → warned; deleted by --gone if you trust it
+  unmerged                   → kept
+
+Options:
+  --apply          delete the fully-merged branches (and their worktrees)
+  --rescue         for 'merged + N on top' branches, replay the N stray commits
+                   onto main as rescue/<branch>, then delete the original
+                   (falls back to the PR merge commit; skips on conflict)
+  --gone           also delete 'gone' branches whose content can't be found
+                   (trusting the remote-deleted indicator)
+  --empty          also delete branches that never diverged from main (0
+                   commits ahead) — not a squash-merge detection, just plain -d
+  -a, --all        also list the plain unmerged / idle branches (hidden by default)
+  --depth N        commits to walk back from each tip for the join point (default 5)
+  -b, --base REF   compare against REF instead of the detected main branch
+  --no-fetch       skip the initial 'git fetch --prune origin'
+  -v, --verbose    log progress to stderr
+  -h, --help       show this help
+
+Default (no flag) is a dry-run report. A branch whose worktree is dirty, or that
+you are standing in, is never touched.
+EOF
+}
+
+APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=5
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --apply) APPLY=true ;;
+    --rescue) RESCUE=true ;;
+    --gone) APPLY_GONE=true ;;
+    --empty) APPLY_EMPTY=true ;;
+    -a|--all) SHOW_ALL=true ;;
+    --depth) shift; [ $# -gt 0 ] || { echo "Error: --depth requires a number" >&2; exit 1; }; WALK_DEPTH=$1 ;;
+    -b|--base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 1; }; BASE_OVERRIDE=$1 ;;
+    --no-fetch) NO_FETCH=true ;;
+    -v|--verbose) VERBOSE=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; usage >&2; exit 1 ;;
+  esac
+  shift
+done
+
+ensure_in_git_repository
+command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
+CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
+mkdir -p "$CACHE_DIR"
+MAIN=$(get_main_branch)
+log "main branch: $MAIN"
+ref_exists "origin/$MAIN" || { echo "Error: origin/$MAIN does not exist (fetch origin, or pass -b <branch>)" >&2; exit 1; }
+fetch_origin
+log "fetching merged PRs ..."
+fetch_pr_merges
+log "indexing main ..."
+build_shared_main_index
+log "checking branches ..."
+
+WT_MAP=$(git worktree list --porcelain | awk '
+  /^worktree /   { p = substr($0, 10) }
+  /^branch refs\/heads\// { print substr($0, 19) "\t" p }
+')
+DETACHED=$(git worktree list --porcelain | awk '
+  /^worktree /   { p = substr($0, 10) }
+  /^detached/    { print p }
+')
+CUR_WT=$(git rev-parse --show-toplevel 2>/dev/null)
+
+MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0
+
+printf '%b\n' "${BOLD}Branches${RESET} ${DIM}(main: $MAIN)${RESET}"
+for branch in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
+  process_branch "$branch"
+done
+
+if [ -n "$DETACHED" ]; then
+  printf '\n%b\n' "${BOLD}Detached worktrees${RESET} ${DIM}(no branch — judge by hand)${RESET}"
+  printf '%s\n' "$DETACHED" | while IFS= read -r p; do
+    [ "$p" = "$CUR_WT" ] && continue
+    say "  ${KEEP} $(basename "$p") ${DIM}($p)${RESET}"
+  done
+fi
+
+printf '\n'
+say "${GREEN}${OK} merged, ready to delete: $MERGED_COUNT${RESET}  ${DIM}→ --apply${RESET}"
+say "${BLUE}${EMPTYICON} never diverged from main: $EMPTY_COUNT${RESET}  ${DIM}→ --empty${RESET}"
+say "${DIM}${KEEP} merged with commits on top: $REVIEW_COUNT${RESET}  ${DIM}→ --rescue${RESET}"
+[ "$RESCUED_COUNT" -gt 0 ] && say "${GREEN}↳ rescued: $RESCUED_COUNT${RESET}"
+say "${RED}${WARN}gone but content not found: $SUSPECT_COUNT${RESET}  ${DIM}→ --gone to trust${RESET}"
+say "${DIM}$HIDDEN_COUNT unmerged/idle hidden  → -a to show${RESET}"
+if [ "$APPLY" = true ]; then
+  say "${DIM}removed $REMOVED_COUNT this run${RESET}"
+else
+  say "${DIM}dry run — nothing deleted${RESET}"
+fi

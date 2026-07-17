@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// tmux-snapshot — capture the current tmux server's layout to JSON and rehydrate
+// tmux-snapshot: capture the current tmux server's layout to JSON and rehydrate
 // it later. Per pane it records session/window/pane identity, the exact window
-// layout, the cwd, the foreground command, a resolved process label, the claude
-// session id (when applicable), and the five custom user-options the status bar
-// renders from.
+// layout, the cwd, the foreground command, an allowlisted launcher (when the
+// pane is running one), and the five custom user-options the status bar renders
+// from.
 //
 // Node, not shell: restore is plan-then-execute (compute every action first,
 // then either print it as the default dry-run, or run it under --apply), which
@@ -11,9 +11,11 @@
 // sidesteps the IFS field-collapse traps entirely, since tmux args are passed
 // as an array, never re-split.
 //
-// Process label: a pane's foreground is often a `node` wrapper (claude-sdk-cli
-// launched via launcher.mjs), so the real CLI is a descendant. We scan the
-// pane's tty (ps -t) rather than walk one level of children, which misses it.
+// Launcher detection: a pane's foreground is often a `node <script>` wrapper, so
+// the real launcher is a descendant. We scan the pane's tty (ps -t) rather than
+// walk one level of children, which misses it, and match the .mjs basename
+// against the LAUNCHERS allowlist. Args are dropped on purpose: restore re-runs
+// the script bare and lets it re-establish its own per-session state.
 //
 // Every tmux read is pinned to an explicit pane/window id; nothing relies on the
 // "current" pane, which follows focus.
@@ -26,10 +28,44 @@ const { parseArgs } = require('node:util');
 
 const HOME = process.env.HOME;
 
-// The snapshot file is named after the server's socket label, so each server
-// round-trips to its own file and save/restore agree by label.
-function snapshotPath(label) {
-  return `${HOME}/.tmux-snapshot-${label}.json`;
+// Each server label gets its own directory under XDG data. Inside it, a proper
+// double buffer: the new snapshot is drawn into a back-buffer temp while the
+// front stays untouched, the front is copied aside to previous, then the temp is
+// atomically renamed over the front. The front is never absent or half-written.
+// No stat to pick a slot, no symlink.
+function snapshotBase() {
+  const base = process.env.XDG_DATA_HOME || `${HOME}/.local/share`;
+  return `${base}/tmux/snapshot`;
+}
+function snapshotDir(label) {
+  return `${snapshotBase()}/${label}`;
+}
+function saveSnapshot(label, snapshot) {
+  const dir = snapshotDir(label);
+  fs.mkdirSync(dir, { recursive: true });
+  const front = `${dir}/current.json`;
+  const back = `${dir}/previous.json`;
+  const draw = `${dir}/.writing.${process.pid}.json`; // per-process temp, so concurrent saves never share a file
+  fs.writeFileSync(draw, JSON.stringify(snapshot, null, 2) + '\n');
+  // Copy the current front aside to previous (the front stays intact), then
+  // rename the finished back buffer over it: current.json is never absent and
+  // never half-written, so a reader always sees one complete frame.
+  try { fs.copyFileSync(front, back); } catch { /* no prior frame yet */ }
+  fs.renameSync(draw, front);
+  return front;
+}
+// Read the front buffer, falling back to the retained previous frame only if the
+// front is unreadable. Front first, no stat to decide.
+function readSnapshot(label) {
+  const dir = snapshotDir(label);
+  for (const name of ['current.json', 'previous.json']) {
+    const p = `${dir}/${name}`;
+    try {
+      const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (s && Array.isArray(s.panes)) return { path: p, snapshot: s };
+    } catch { /* try previous */ }
+  }
+  return null;
 }
 
 // tmux keeps one socket per server in a per-uid directory; the socket filename
@@ -63,11 +99,13 @@ function currentLabel() {
 }
 const SEP = '\x1f'; // US: a field separator that cannot appear in tmux values
 const PARK = '999999'; // parking index for the throwaway window new-session spawns
-const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
-// The model as the CLI renders it in its status line: family, version, and a
-// trailing '*' iff the model was overridden from the command line. We only
-// record the model when that '*' is present (an override worth round-tripping).
-const MODEL = /(Haiku|Sonnet|Fable|Opus) (\d+(?:\.\d+)?)(\*)?/g;
+
+// The launchers restore re-runs bare (no args): a pane whose foreground node
+// process runs one of these .mjs scripts is relaunched by basename, since the
+// script re-establishes its own per-session state. Everything else restores to
+// a plain shell. Kept as a small allowlist so unrelated commands (a stray dev
+// server, swe.mjs with its args) are never resurrected.
+const LAUNCHERS = new Set(['start-v2.mjs']);
 
 function die(msg) {
   process.stderr.write(`tmux-snapshot: ${msg}\n`);
@@ -98,7 +136,6 @@ const COLOUR = process.stdout.isTTY;
 const paint = (code) => (s) => (COLOUR ? `\x1b[${code}m${s}\x1b[0m` : s);
 const dim = paint('2');
 const bold = paint('1');
-const cyan = paint('36');
 
 function requireTmux() {
   if (!process.env.TMUX) die('not inside a tmux server');
@@ -135,11 +172,23 @@ function resolveTarget(values) {
 
 // --- save -------------------------------------------------------------------
 
-function saveServer(label, tmux) {
-  const file = snapshotPath(label);
+// The allowlisted launcher running on a pane's tty, or null. We scan every
+// process on the tty (ps -t) because the launcher is usually a `node <script>`
+// wrapper, and match the .mjs basename against LAUNCHERS. Args are ignored on
+// purpose: restore re-runs the script bare.
+function detectLauncher(paneTty) {
+  const shortTty = paneTty.replace(/^\/dev\//, '');
+  const out = run('ps', ['-t', shortTty, '-o', 'command='], true) || '';
+  for (const line of out.split('\n')) {
+    const m = line.match(/([^/\s]+\.mjs)\b/);
+    if (m && LAUNCHERS.has(m[1])) return m[1];
+  }
+  return null;
+}
 
+function saveServer(label, tmux) {
   const fmt = [
-    '#{pane_id}', '#{session_name}', '#{window_index}', '#{window_name}',
+    '#{session_name}', '#{window_index}', '#{window_name}',
     '#{window_layout}', '#{pane_index}', '#{pane_tty}', '#{pane_current_path}',
     '#{pane_current_command}', '#{@title}', '#{@colour}', '#{@state}',
     '#{@role}', '#{@status}',
@@ -154,41 +203,27 @@ function saveServer(label, tmux) {
     return;
   }
 
+  const rows = lines(raw);
+
+  // Fresh-server guard: a lone session/window/pane is an empty server just
+  // started (or a crash that left nothing). Saving it would overwrite the last
+  // known-good snapshot with nothing worth restoring, so skip.
+  if (rows.length === 1) {
+    note(`server '${label}' has a single pane (fresh/empty), not saving`);
+    return;
+  }
+
   note(`saving server '${label}'`);
-  const panes = lines(raw).map((line) => {
+  const panes = rows.map((line) => {
     const [
-      paneId, session, windowIndex, windowName, windowLayout, paneIndex,
+      session, windowIndex, windowName, windowLayout, paneIndex,
       paneTty, path, cmd, title, colour, state, role, status,
     ] = line.split(SEP);
 
-    // If any process on the pane's tty is claude-sdk-cli, label it that.
-    const shortTty = paneTty.replace(/^\/dev\//, '');
-    const comm = run('ps', ['-t', shortTty, '-o', 'comm='], true);
-    const proc = /claude-sdk-cli/.test(comm) ? 'claude-sdk-cli' : cmd;
-
-    // Session id for claude panes: scrape the CLI's own status line, which
-    // renders the id at the foot of the pane. The last UUID on screen is that
-    // line; ids printed earlier in the transcript sit above it. A structural
-    // source (a marker the CLI writes about its own pid/tty) would be sturdier;
-    // deferred for now.
-    let sessionId = '';
-    let model = null;
-    if (proc === 'claude-sdk-cli') {
-      const screen = tmux(['capture-pane', '-p', '-t', paneId], true) || '';
-      const found = screen.match(UUID);
-      if (found) sessionId = found[found.length - 1];
-      // Same bottom-most-line bet as the id: the last match on screen is the
-      // status line. Only store it when overridden (group 3, the '*').
-      const models = [...screen.matchAll(MODEL)];
-      const last = models[models.length - 1];
-      if (last && last[3]) model = { family: last[1], version: last[2] };
-    }
-
     return {
       session, window_index: windowIndex, window_name: windowName,
-      window_layout: windowLayout, pane_index: paneIndex, path, cmd, proc,
-      session_id: sessionId,
-      ...(model ? { model } : {}),
+      window_layout: windowLayout, pane_index: paneIndex, path, cmd,
+      launcher: detectLauncher(paneTty),
       options: {
         '@title': title, '@colour': colour, '@state': state,
         '@role': role, '@status': status,
@@ -201,7 +236,7 @@ function saveServer(label, tmux) {
     socket: `${serverDir()}/${label}`,
     panes,
   };
-  fs.writeFileSync(file, JSON.stringify(snapshot, null, 2) + '\n');
+  const file = saveSnapshot(label, snapshot);
   process.stdout.write(summarize(panes) + '\n');
   note(`wrote ${panes.length} panes to ${file}`);
 }
@@ -232,8 +267,8 @@ function summarize(panes) {
     const n = w.panes.length;
     out.push(`  ${w.window_index}  ${w.window_name}  (${n} pane${n > 1 ? 's' : ''})`);
     for (const p of w.panes) {
-      const m = p.model ? `  (model: ${modelArg(p.model)})` : '';
-      out.push(`       ${p.pane_index}  ${p.proc.padEnd(15)} ${p.path}${m}`);
+      const l = p.launcher ? `  (launcher: ${p.launcher})` : '';
+      out.push(`       ${p.pane_index}  ${p.cmd.padEnd(15)} ${p.path}${l}`);
     }
   }
   return out.join('\n');
@@ -288,13 +323,6 @@ function planRestore(snapshot, tmux) {
   return { createSessions, createWindows, skipWindows };
 }
 
-// Reconstruct the CLI's model token from the saved components: the CLI parses
-// `claude-<family>-<version>` and capitalises, so lowercase family and turn the
-// version's dot into a dash (4.8 -> 4-8, 5 -> 5).
-function modelArg(model) {
-  return `claude-${model.family.toLowerCase()}-${model.version.replace('.', '-')}`;
-}
-
 function describePlan(plan) {
   const out = [];
   for (const s of plan.createSessions) out.push(`create session: ${s}`);
@@ -303,14 +331,10 @@ function describePlan(plan) {
     out.push(`create window: ${bold(`${w.session}:${w.window_index}`)} "${w.window_name}" (${n} pane${n > 1 ? 's' : ''})`);
     for (const p of w.panes) {
       const exists = fs.existsSync(p.path);
-      out.push(`    pane ${p.pane_index}: cwd=${p.path}${exists ? '' : dim(' (missing — opens in ~)')}`);
-      if (p.proc === 'claude-sdk-cli' && p.session_id) {
-        if (exists) {
-          const model = p.model ? ` ${cyan(`--model ${modelArg(p.model)}`)}` : '';
-          out.push(`      ${dim('run: claude-sdk-cli --resume')} ${bold(p.session_id)}${model}`);
-        } else {
-          out.push(`      ${dim('skip cli: dir missing')}`);
-        }
+      out.push(`    pane ${p.pane_index}: cwd=${p.path}${exists ? '' : dim(' (missing, opens in ~)')}`);
+      if (p.launcher) {
+        if (exists) out.push(`      ${dim('run:')} ${bold(p.launcher)}`);
+        else out.push(`      ${dim(`skip ${p.launcher}: dir missing`)}`);
       }
     }
   }
@@ -360,16 +384,17 @@ function executePlan(plan, tmux) {
     }
   }
 
-  // Stage 2: restore the CLIs, separately from the layout. Only launch --resume
-  // when the pane's saved dir still exists — a missing dir would have landed the
-  // pane in HOME, and spawning claude there is worse than leaving a plain shell.
+  // Stage 2: relaunch the allowlisted launchers, separately from the layout.
+  // Only launch when the pane's saved dir still exists: a missing dir would have
+  // landed the pane in HOME, and starting the launcher there is worse than
+  // leaving a plain shell. The launcher runs bare and re-establishes its own
+  // per-session state.
   for (const w of plan.createWindows) {
     for (const p of w.panes) {
-      if (p.proc !== 'claude-sdk-cli' || !p.session_id) continue;
+      if (!p.launcher) continue;
       if (!fs.existsSync(p.path)) continue;
       const pt = `${w.session}:${w.window_index}.${p.pane_index}`;
-      const model = p.model ? ` --model ${modelArg(p.model)}` : '';
-      tmux(['send-keys', '-t', pt, '-l', `claude-sdk-cli --resume ${p.session_id}${model}`]);
+      tmux(['send-keys', '-t', pt, '-l', p.launcher]);
       tmux(['send-keys', '-t', pt, 'Enter']);
     }
   }
@@ -384,9 +409,9 @@ function cmdRestore(values) {
   const { label, tmux } = resolveTarget(values);
   note(`restoring server '${label}'`);
 
-  const file = snapshotPath(label);
-  if (!fs.existsSync(file)) die(`no snapshot at ${file}`);
-  const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const found = readSnapshot(label);
+  if (!found) die(`no snapshot for '${label}' in ${snapshotDir(label)}`);
+  const { path: file, snapshot } = found;
 
   const plan = planRestore(snapshot, tmux);
 

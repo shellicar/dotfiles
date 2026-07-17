@@ -1,0 +1,34 @@
+#!/bin/sh
+# tmux-snapshot-watch: periodic save for one tmux server, launched by it via
+# run-shell -b. Every @snapshot-save-interval seconds (default 300; 0 disables)
+# it saves the server. It exits when the tmux server that spawned it is gone:
+# once the parent dies we get reparented to pid 1, and that is the signal to
+# stand down. Concurrent saves are safe (tmux-snapshot writes a per-process temp
+# then renames), so no cross-process lock is needed here.
+
+label="${1:?usage: tmux-snapshot-watch <label>}"
+
+snapshot="$(dirname "$0")/tmux-snapshot"
+[ -x "$snapshot" ] || snapshot=tmux-snapshot
+
+sleeppid=
+trap 'kill "$sleeppid" 2>/dev/null; exit 0' INT TERM
+
+while :; do
+	interval="$(tmux -L "$label" show-options -gqv @snapshot-save-interval 2>/dev/null)"
+	[ -n "$interval" ] || interval=300
+	[ "$interval" -gt 0 ] 2>/dev/null || exit 0
+
+	# Interruptible sleep: a signal reaches the trap at once, instead of being
+	# deferred until a plain foreground sleep returns.
+	sleep "$interval" &
+	sleeppid=$!
+	wait "$sleeppid"
+
+	# Our parent was the tmux server that spawned us. If it's gone we've been
+	# reparented to pid 1 - stand down rather than save a server we no longer
+	# belong to.
+	[ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" = 1 ] && exit 0
+
+	"$snapshot" -L "$label" save >/dev/null 2>&1
+done
