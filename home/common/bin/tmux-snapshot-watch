@@ -1,18 +1,57 @@
 #!/bin/sh
 # tmux-snapshot-watch: periodic save for one tmux server, launched by it via
 # run-shell -b. Every @snapshot-save-interval seconds (default 300; 0 disables)
-# it saves the server. It exits when the tmux server that spawned it is gone:
-# once the parent dies we get reparented to pid 1, and that is the signal to
-# stand down. Concurrent saves are safe (tmux-snapshot writes a per-process temp
-# then renames), so no cross-process lock is needed here.
+# it saves the server.
+#
+# Single instance is an mkdir lock, not a pgrep scan: mkdir is atomic, so when
+# two watchers race (a double reload, config sourced twice) exactly one wins
+# and one loses - never both losing, which a "scan and stand down if I see
+# another" check can: A sees B, B sees A, both quit, nothing left ticking.
+# The lock lives in the same per-label snapshot directory.
+#
+# It exits when the tmux server that spawned it is gone: once the parent dies
+# we get reparented to pid 1, and that is the signal to stand down.
+#
+# The lock is only about cadence - making sure exactly one watcher ticks per
+# label. It has nothing to do with save safety: tmux-snapshot writes a
+# per-process temp then renames, so concurrent saves were never able to
+# corrupt the file even before this lock existed.
 
 label="${1:?usage: tmux-snapshot-watch <label>}"
 
 snapshot="$(dirname "$0")/tmux-snapshot"
 [ -x "$snapshot" ] || snapshot=tmux-snapshot
 
+base="${XDG_DATA_HOME:-$HOME/.local/share}"
+dir="$base/tmux/snapshot/$label"
+lock="$dir/watch.lock"
+pidfile="$lock/pid"
+
+mkdir -p "$dir"
+
+# Single instance: take the lockdir. If it already exists, yield to a live owner;
+# reclaim it only when the recorded pid is dead (a kill -9 that skipped the trap).
+if ! mkdir "$lock" 2>/dev/null; then
+	owner="$(cat "$pidfile" 2>/dev/null)"
+	if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+		exit 0
+	fi
+	rm -f "$pidfile"
+	rmdir "$lock" 2>/dev/null
+	mkdir "$lock" 2>/dev/null || exit 0
+fi
+echo "$$" >"$pidfile"
+
 sleeppid=
-trap 'kill "$sleeppid" 2>/dev/null; exit 0' INT TERM
+cleanup() {
+	[ -n "$sleeppid" ] && kill "$sleeppid" 2>/dev/null
+	rm -f "$pidfile"
+	rmdir "$lock" 2>/dev/null
+}
+# Signal handlers exit explicitly so a TERM/INT terminates promptly and cleanly;
+# the EXIT trap covers the normal stand-down paths below.
+trap 'cleanup; exit 0' INT TERM
+trap cleanup EXIT
 
 while :; do
 	interval="$(tmux -L "$label" show-options -gqv @snapshot-save-interval 2>/dev/null)"
@@ -24,6 +63,7 @@ while :; do
 	sleep "$interval" &
 	sleeppid=$!
 	wait "$sleeppid"
+	sleeppid=
 
 	# Our parent was the tmux server that spawned us. If it's gone we've been
 	# reparented to pid 1 - stand down rather than save a server we no longer
