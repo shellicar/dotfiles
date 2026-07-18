@@ -38,7 +38,7 @@ else
   GREEN=''; YELLOW=''; RED=''; BLUE=''; DIM=''; BOLD=''; RESET=''
 fi
 
-OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; DIRTY='📝'; EMPTYICON='≡'
+OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; DIRTY='📝'; EMPTYICON='≡'; WOULDREMOVE='\342\235\227'
 
 say() { printf '%b\n' "$*"; }
 log() { [ "$VERBOSE" = true ] && printf '%b\n' "${DIM}[git cleanup] $*${RESET}" >&2; return 0; }
@@ -112,8 +112,9 @@ pr_merge_commit() {
 # content walk). Not a fixed constant — the true maximum this run needs, and
 # 0 (skip entirely) if every branch resolves via ancestor or PR.
 compute_max_walk_depth() {
-  local branch base pr_mc dist max=0
-  for branch in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
+  local branch base pr_mc dist max=0 branches
+  branches=${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}
+  for branch in $branches; do
     [ "$branch" = "$MAIN" ] && continue
     base=$(git merge-base "$branch" "origin/$MAIN" 2>/dev/null) || continue
     git merge-base --is-ancestor "$branch" "origin/$MAIN" 2>/dev/null && continue
@@ -133,7 +134,6 @@ build_shared_main_index() {
   local depth c p
   depth=$(compute_max_walk_depth)
   MAIN_IDX=$(mktemp) || { echo "Error: mktemp failed" >&2; exit 1; }
-  trap 'rm -f "$MAIN_IDX"' EXIT INT TERM
   [ "$depth" -eq 0 ] && return 0
   git rev-list -n "$depth" "origin/$MAIN" | while read -r c; do
     p=$(git rev-parse "$c^" 2>/dev/null) || continue
@@ -203,6 +203,7 @@ branch_upstream_gone() {
 worktree_of() {
   printf '%s\n' "$WT_MAP" | awk -F'\t' -v b="$1" '$1==b{print $2; exit}'
 }
+
 worktree_dirty() { [ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]; }
 
 # Reason a worktree must not be touched, or empty. Dirty ALWAYS blocks — there is
@@ -244,7 +245,18 @@ process_branch() {
   ahead=$(git rev-list --count "origin/$MAIN..$branch" 2>/dev/null || echo '?')
   [ "$ahead" = 1 ] && noun=commit || noun=commits
   last=$(git log -1 --format=%cr "$branch" 2>/dev/null)
-  meta="${DIM}[$ahead $noun, $last]${RESET}"
+  # Flag anything a week or older — weeks/months/years are always old; "N
+  # days ago" only counts once N reaches 7 (git shows day-granularity up to
+  # ~13 days before switching to weeks).
+  age_color="$DIM"
+  case "$last" in
+    *' week'*|*' month'*|*' year'*) age_color="$YELLOW" ;;
+    *' day'*)
+      days_num=$(printf '%s' "$last" | awk '{print $1}')
+      case "$days_num" in ''|*[!0-9]*) ;; *) [ "$days_num" -ge 7 ] && age_color="$YELLOW" ;; esac
+      ;;
+  esac
+  meta="${DIM}[$ahead $noun, ${RESET}${age_color}${last}${RESET}${DIM}]${RESET}"
 
   # Verdict (content) and indicator (gone) computed independently.
   not_in_main=$(commits_not_in_main "$branch")
@@ -335,7 +347,9 @@ do_delete() {
   fi
 
   if [ "$APPLY" != true ]; then
-    say "  $icon $branch $meta ${DIM}($desc — would $what, run --apply)${RESET}"
+    # This class's own flag is already set (flag_set passed the check above) —
+    # --apply is the only thing standing between this branch and removal.
+    say "  ${RED}${WOULDREMOVE}${RESET} $branch $meta ${DIM}($desc — would $what, run --apply)${RESET}"
     return 0
   fi
 
@@ -364,7 +378,9 @@ do_rescue() {
     say "     ${DIM}↳ would rescue $n onto main → $dst   (run --rescue)${RESET}"; return 0
   fi
   if [ "$APPLY" != true ]; then
-    say "     ${DIM}↳ would rescue $n onto main → $dst   (run --apply)${RESET}"; return 0
+    # --rescue is already set (the check above passed) — --apply is the only
+    # thing standing between this branch and actually being rescued.
+    say "     ${RED}${WOULDREMOVE}${RESET} would rescue $n onto main → $dst   (run --apply)"; return 0
   fi
 
   tmp=$(mktemp -d) || return 1
@@ -425,6 +441,9 @@ Options:
                    (trusting the remote-deleted indicator)
   --empty          also delete branches that never diverged from main (0
                    commits ahead) — not a squash-merge detection, just plain -d
+  --branch BRANCH  check (and, with the other flags, act on) only this
+                   branch, instead of walking every local branch — repeat
+                   the flag to filter to several
   -a, --all        also list the plain unmerged / idle branches (hidden by default)
   --depth N        commits to walk back from each tip for the join point (default 5)
   -b, --base REF   compare against REF instead of the detected main branch
@@ -437,7 +456,7 @@ you are standing in, is never touched.
 EOF
 }
 
-APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=5
+APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=5; ONLY_BRANCHES=''
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -445,6 +464,7 @@ while [ $# -gt 0 ]; do
     --rescue) RESCUE=true ;;
     --gone) APPLY_GONE=true ;;
     --empty) APPLY_EMPTY=true ;;
+    --branch) shift; [ $# -gt 0 ] || { echo "Error: --branch requires a branch name" >&2; exit 1; }; ONLY_BRANCHES="$ONLY_BRANCHES $1" ;;
     -a|--all) SHOW_ALL=true ;;
     --depth) shift; [ $# -gt 0 ] || { echo "Error: --depth requires a number" >&2; exit 1; }; WALK_DEPTH=$1 ;;
     -b|--base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 1; }; BASE_OVERRIDE=$1 ;;
@@ -483,9 +503,18 @@ CUR_WT=$(git rev-parse --show-toplevel 2>/dev/null)
 MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0
 
 printf '%b\n' "${BOLD}Branches${RESET} ${DIM}(main: $MAIN)${RESET}"
-for branch in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
-  process_branch "$branch"
-done
+if [ -n "$ONLY_BRANCHES" ]; then
+  for branch in $ONLY_BRANCHES; do
+    ref_exists "refs/heads/$branch" || { echo "Error: no local branch named '$branch'" >&2; exit 1; }
+  done
+  for branch in $ONLY_BRANCHES; do
+    process_branch "$branch"
+  done
+else
+  for branch in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
+    process_branch "$branch"
+  done
+fi
 
 if [ -n "$DETACHED" ]; then
   printf '\n%b\n' "${BOLD}Detached worktrees${RESET} ${DIM}(no branch — judge by hand)${RESET}"
