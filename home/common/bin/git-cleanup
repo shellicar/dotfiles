@@ -408,7 +408,9 @@ do_rescue() {
   fi
 
   # Stray is now preserved on $dst; the original's merged part is in main.
-  outcome=$(remove_branch "$branch" "$wt")
+  # force=true: the original's tip is deliberately not an ancestor of main
+  # (that's why it needed rescuing) so plain -d would always refuse it.
+  outcome=$(remove_branch "$branch" "$wt" true)
   if [ "$outcome" = removed ]; then
     RESCUED_COUNT=$((RESCUED_COUNT + 1))
     say "     ${GREEN}↳ rescued $n → $dst (onto $base_used); original removed${RESET}"
@@ -525,14 +527,26 @@ if [ -n "$DETACHED" ]; then
 fi
 
 printf '\n'
+# Summary rule — three kinds of line, three reasons:
+#  - the four category counts (merged/empty/review/suspect) always print,
+#    zero or not: this is a fixed report card, and a line that vanishes at
+#    zero is ambiguous — "nothing here" or "never checked"?
+#  - the hidden/unmerged line always prints too, but its wording depends on
+#    -a: with -a nothing is actually hidden, so it must say so, not repeat
+#    a stale "hidden" claim.
+#  - the removed/rescued line only prints under --apply: it reports what
+#    this run did, not a category, and a dry run never does anything.
 say "${GREEN}${OK} merged, ready to delete: $MERGED_COUNT${RESET}  ${DIM}→ --apply${RESET}"
 say "${BLUE}${EMPTYICON} never diverged from main: $EMPTY_COUNT${RESET}  ${DIM}→ --empty${RESET}"
 say "${DIM}${KEEP} merged with commits on top: $REVIEW_COUNT${RESET}  ${DIM}→ --rescue${RESET}"
-[ "$RESCUED_COUNT" -gt 0 ] && say "${GREEN}↳ rescued: $RESCUED_COUNT${RESET}"
 say "${RED}${WARN}gone but content not found: $SUSPECT_COUNT${RESET}  ${DIM}→ --gone to trust${RESET}"
-say "${DIM}$HIDDEN_COUNT unmerged/idle hidden  → -a to show${RESET}"
+if [ "$SHOW_ALL" = true ]; then
+  say "${DIM}$HIDDEN_COUNT unmerged/idle shown above${RESET}"
+else
+  say "${DIM}$HIDDEN_COUNT unmerged/idle hidden  → -a to show${RESET}"
+fi
 if [ "$APPLY" = true ]; then
-  say "${DIM}removed $REMOVED_COUNT this run${RESET}"
+  say "${DIM}removed $REMOVED_COUNT, rescued $RESCUED_COUNT this run${RESET}"
 else
   say "${DIM}dry run — nothing deleted${RESET}"
 fi
