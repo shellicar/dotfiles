@@ -2,6 +2,7 @@
 	hooksPath = ~/.config/git/hooks
 [alias]
 	lfs-install = !git -c core.hooksPath=.git/hooks lfs install --local
+	wt-create = "!f() { root=$(git rev-parse --show-toplevel) || exit 1; repo=$(basename \"$root\" | sed 's/--.*//'); leaf=$(printf '%s' \"$1\" | tr '/' '-'); dest=\"$(dirname \"$root\")/$repo--$leaf\"; git fetch origin --quiet 1>&2 || exit 1; git worktree add --no-track -b \"$1\" \"$dest\" \"${2:-origin/main}\" 1>&2 || exit 1; if [ -f \"$dest/package.json\" ] && grep -q '\"packageManager\": *\"pnpm@' \"$dest/package.json\"; then (cd \"$dest\" && pnpm install --frozen-lockfile) 1>&2 || exit 1; fi; echo \"$dest\"; }; f"
 [push]
 	; harden --force-with-lease: also refuse unless the local ref included the remote-tracking tip you last saw, so a fetch right before the push can't silently refresh the lease and let you clobber
 	useForceIfIncludes = true

@@ -47,15 +47,13 @@ git_main() {
   fi
 }
 
-# wt <branch> [base] — create a sibling worktree (<repo>--<leaf>) with the branch
-# cut from a fresh origin/main (or [base]) and no accidental upstream, then cd into
-# it. A git alias can't cd the caller (runs in a subprocess), so this lives here.
+# wt <branch> [base] — create a sibling worktree (<repo>--<leaf>) via the "git
+# wt-create" alias (fetch, worktree add, pnpm install if applicable), then cd into
+# it. A git alias can't cd the caller (runs in a subprocess), so the cd lives here.
 wt() {
-  root=$(git rev-parse --show-toplevel) || return
-  repo=$(basename "$root" | sed 's/--.*//')
-  dest="$(dirname "$root")/$repo--${1##*/}"
-  git fetch origin --quiet
-  git worktree add --no-track -b "$1" "$dest" "${2:-origin/main}" && cd "$dest"
+  [ -n "$1" ] || { echo "usage: wt <branch> [base]" >&2; return 1; }
+  dest=$(git wt-create "$@") || return
+  cd "$dest" || return
 }
 
 # --- tmux ---
