@@ -10,6 +10,7 @@ REPOS="
 $HOME/dotfiles
 $HOME/.claude
 $HOME/repos/shellicar/skills
+$HOME/repos/shellicar/skills-v2
 $HOME/repos/fleet/claude-fleet-eagers
 $HOME/repos/shellicar/claude-fleet-eagers
 "
