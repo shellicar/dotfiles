@@ -41,7 +41,7 @@ generate_key() {
   echo "  Expiry:  your choice (0 = no expiry)"
   echo ""
 
-  gpg --full-generate-key
+  gpg --no-options --full-generate-key
 
   echo ""
   echo "Your keys:"
