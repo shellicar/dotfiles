@@ -1,0 +1,98 @@
+#!/bin/sh
+#
+# git discard-safe — walk every worktree and discard an uncommitted change to
+# a tracked file ONLY when the working-tree content of that file is
+# byte-identical to that same path on origin/main (blob-hash compared,
+# including both sides being absent — deleted locally, also absent on main).
+#
+# Losing a change like that costs nothing: main already carries that exact
+# content, so discarding it just re-syncs the file to the worktree's own
+# last commit (HEAD). This is what unblocks git-cleanup's dirty-worktree
+# gate for worktrees whose only "dirty" state is redundant with main.
+#
+# NEVER touched: a change whose content differs from main, a rename, a merge
+# conflict, or any of the explicitly ignored paths below. Default is a
+# dry-run report; nothing is discarded without --apply.
+
+set -u
+
+IGNORE_PATHS=".claude/cli-session .claude/sdk-config.json .claude/CLAUDE.md"
+
+is_ignored() {
+  path=$1
+  for ignore in $IGNORE_PATHS; do
+    [ "$path" = "$ignore" ] && return 0
+  done
+  return 1
+}
+
+APPLY=false
+[ "${1:-}" = "--apply" ] && APPLY=true
+
+get_main_branch() {
+  ref=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null) || {
+    echo "Error: cannot determine main branch from origin/HEAD" >&2; exit 1; }
+  echo "$ref" | sed 's@^refs/remotes/origin/@@'
+}
+
+MAIN=$(get_main_branch)
+
+git worktree list --porcelain | awk '
+  /^worktree / { path = substr($0, 10) }
+  /^bare/      { bare = 1 }
+  /^$/         { if (path != "" && bare != 1) print path; path = ""; bare = 0 }
+  END          { if (path != "" && bare != 1) print path }
+' | while IFS= read -r wt; do
+  discarded=0
+  kept=0
+
+  git -C "$wt" status --porcelain | while IFS= read -r line; do
+    xy=$(printf '%s' "$line" | cut -c1-2)
+    path=$(printf '%s' "$line" | cut -c4-)
+
+    [ "$xy" = '??' ] && continue
+
+    if printf '%s' "$xy" | grep -q 'U'; then
+      printf '  ~ %s: unmerged/conflict — skipped, review by hand\n' "$path"
+      continue
+    fi
+    if printf '%s' "$xy" | grep -q 'R'; then
+      printf '  ~ %s: rename — skipped, review by hand\n' "$path"
+      continue
+    fi
+    if is_ignored "$path"; then
+      continue
+    fi
+
+    main_blob=$(git -C "$wt" rev-parse -q --verify "origin/$MAIN:$path" 2>/dev/null)
+    if [ -f "$wt/$path" ]; then
+      work_blob=$(git -C "$wt" hash-object "$wt/$path")
+    else
+      work_blob=""
+    fi
+
+    if [ "$work_blob" = "$main_blob" ]; then
+      if [ "$APPLY" = true ]; then
+        git -C "$wt" restore --source=HEAD --staged --worktree -- "$path"
+        printf '  \342\234\223 %s: discarded (matched main)\n' "$path"
+      else
+        printf '  \342\234\223 %s: would discard (matches main) \342\200\224 run --apply\n' "$path"
+      fi
+    else
+      printf '  \342\234\227 %s: kept (differs from main)\n' "$path"
+    fi
+  done > /tmp/git-discard-safe.$$
+
+  if [ -s /tmp/git-discard-safe.$$ ]; then
+    printf '\n%s\n' "$wt"
+    cat /tmp/git-discard-safe.$$
+  fi
+  rm -f /tmp/git-discard-safe.$$
+done
+
+printf '\n'
+if [ "$APPLY" = true ]; then
+  echo "done — re-run 'git cleanup' to see which worktrees unblocked"
+else
+  echo "dry run — nothing discarded, run --apply to act"
+fi
