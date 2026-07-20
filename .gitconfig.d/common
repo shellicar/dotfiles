@@ -13,8 +13,3 @@
 	; adopt an upstream only when the new branch's name matches the remote branch's name — so cutting
 	; a feature branch off origin/main does NOT make it track main (git's default 'true' does)
 	autoSetupMerge = simple
-[alias]
-	; git wt <branch> [base] — create a sibling worktree (<repo>--<leaf>) with the branch cut from a
-	; fresh origin/main (or [base]) and no accidental upstream. --no-track overrides autoSetupMerge so
-	; it stays correct even without the [branch] setting above.
-	wt = "!f() { root=$(git rev-parse --show-toplevel); repo=$(basename \"$root\" | sed 's/--.*//'); git fetch origin --quiet; git worktree add --no-track -b \"$1\" \"$(dirname \"$root\")/$repo--${1##*/}\" \"${2:-origin/main}\"; }; f"
