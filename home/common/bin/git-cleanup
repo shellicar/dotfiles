@@ -247,16 +247,20 @@ process_branch() {
   last=$(git log -1 --format=%cr "$branch" 2>/dev/null)
   # Flag anything a week or older — weeks/months/years are always old; "N
   # days ago" only counts once N reaches 7 (git shows day-granularity up to
-  # ~13 days before switching to weeks).
+  # ~13 days before switching to weeks). GREEN, not a warning colour: a
+  # branch untouched this long is a signal it's likely safe to clean up,
+  # not a signal to worry about it.
   age_color="$DIM"
   case "$last" in
-    *' week'*|*' month'*|*' year'*) age_color="$YELLOW" ;;
+    *' week'*|*' month'*|*' year'*) age_color="$GREEN" ;;
     *' day'*)
       days_num=$(printf '%s' "$last" | awk '{print $1}')
-      case "$days_num" in ''|*[!0-9]*) ;; *) [ "$days_num" -ge 7 ] && age_color="$YELLOW" ;; esac
+      case "$days_num" in ''|*[!0-9]*) ;; *) [ "$days_num" -ge 7 ] && age_color="$GREEN" ;; esac
       ;;
   esac
-  meta="${DIM}[$ahead $noun, ${RESET}${age_color}${last}${RESET}${DIM}]${RESET}"
+  # The commit count stays full-brightness (not dimmed) — it's the number
+  # that actually matters when deciding whether a branch is worth a look.
+  meta="${DIM}[${RESET}$ahead $noun${DIM}, ${RESET}${age_color}${last}${RESET}${DIM}]${RESET}"
 
   # Verdict (content) and indicator (gone) computed independently.
   not_in_main=$(commits_not_in_main "$branch")
