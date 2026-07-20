@@ -29,7 +29,12 @@
 [includeIf "hasconfig:remote.*.url:https://github.com/shellicar/**"]
   path = ~/dotfiles/.gitconfig.d/shellicar
 [includeIf "hasconfig:remote.*.url:https://github.com/Hellicar-Solutions/**"]
+  path = ~/dotfiles/.gitconfig.d/hellicar-solutions
+
+[includeIf "hasconfig:remote.*.url:https://dev.azure.com/shellicar/**"]
   path = ~/dotfiles/.gitconfig.d/shellicar
+[includeIf "hasconfig:remote.*.url:https://dev.azure.com/Hellicar-Solutions/**"]
+  path = ~/dotfiles/.gitconfig.d/hellicar-solutions
 
 [includeIf "hasconfig:remote.*.url:https://eagersautomotive@dev.azure.com/eagersautomotive/**"]
   path = ~/dotfiles/.gitconfig.d/eagers
