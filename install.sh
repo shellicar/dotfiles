@@ -16,7 +16,9 @@
 set -eu
 
 DOTFILES="${DOTFILES:-$HOME/dotfiles}"
+. "$DOTFILES/resolve-os.sh"
 OS="${DOTFILES_OS:-$("$DOTFILES/get-os.sh")}"
+BASE_OS=$(resolve_os "$OS")
 
 # Directories symlinked whole rather than file-by-file.
 is_whole_dir() {
@@ -74,6 +76,10 @@ link_one() {
 
 link_tree() {
   src_root="$1"
+  # Optional overlay root: paths that also exist under it are left for that
+  # tier to link, so a base tier and its overlay don't fight over the same
+  # destination on every run.
+  overlay_root="${2:-}"
   [ -d "$src_root" ] || return 0
 
   # Walk immediate entries (incl. dotfiles). Whole-dir entries get one symlink;
@@ -81,12 +87,15 @@ link_tree() {
   for src in "$src_root"/* "$src_root"/.[!.]*; do
     [ -e "$src" ] || continue
     rel="${src#"$src_root"/}"
+    [ -n "$overlay_root" ] && [ -e "$overlay_root/$rel" ] && continue
 
     if [ -d "$src" ] && is_whole_dir "$rel"; then
       link_one "$src" "$HOME/$rel"
     elif [ -d "$src" ]; then
       find "$src" -type f | while IFS= read -r f; do
-        link_one "$f" "$HOME/${f#"$src_root"/}"
+        subrel="${f#"$src_root"/}"
+        [ -n "$overlay_root" ] && [ -e "$overlay_root/$subrel" ] && continue
+        link_one "$f" "$HOME/$subrel"
       done
     else
       link_one "$src" "$HOME/$rel"
@@ -96,5 +105,8 @@ link_tree() {
 
 echo "Installing dotfiles ($OS)..."
 link_tree "$DOTFILES/home/common"
+# BASE_OS is a family base (e.g. linux for WSL). Link it first so the
+# OS-specific tree below can still override individual files in it.
+[ "$BASE_OS" != "$OS" ] && link_tree "$DOTFILES/home/$BASE_OS" "$DOTFILES/home/$OS"
 link_tree "$DOTFILES/home/$OS"
 echo "Done."

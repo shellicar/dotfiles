@@ -5,7 +5,8 @@
 set -eu
 
 DIR=$(cd "$(dirname "$0")" && pwd)
-os=$("$DIR/get-os.sh")
+. "$DIR/resolve-os.sh"
+os=$(resolve_os "$("$DIR/get-os.sh")")
 
 target="$DIR/setup/$os/setup.sh"
 if [ ! -x "$target" ]; then
