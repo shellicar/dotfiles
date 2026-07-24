@@ -22,4 +22,5 @@ path_prepend "$HOME/bin"
 path_prepend "$HOME/.local/bin"
 path_prepend "$HOME/repos/shellicar/skills/scripts"
 path_prepend "$HOME/repos/shellicar/skills-v2/scripts"
+path_prepend "$PNPM_BIN"
 export PATH
