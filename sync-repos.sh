@@ -20,12 +20,11 @@ $HOME/repos/shellicar/claude-fleet-eagers
 for repo in $REPOS; do
   [ -z "$repo" ] && continue
 
+  [ -d "$repo" ] || continue
+
   printf '\n=== %s ===\n' "$repo"
 
-  if ! cd "$repo" 2>/dev/null; then
-    echo "  Cannot enter directory — skipping"
-    continue
-  fi
+  cd "$repo" || continue
 
   if ! git fetch --quiet 2>&1; then
     echo "  Fetch failed — skipping"
@@ -48,11 +47,34 @@ for repo in $REPOS; do
 
   elif [ "$behind" -gt 0 ]; then
     echo "  Behind by $behind — pulling (rebase)"
-    if ! git pull --rebase --quiet 2>&1; then
-      git rebase --abort 2>/dev/null
-      echo "  Pull failed (conflict or dirty tree) — aborted"
-    else
+    if git pull --rebase --quiet 2>&1; then
       echo "  Done"
+    else
+      git rebase --abort 2>/dev/null
+      stashed=0
+      if [ -n "$(git status --porcelain)" ]; then
+        echo "  Rebase failed — stashing local changes and retrying"
+        if git stash push --quiet --include-untracked; then
+          stashed=1
+        else
+          echo "  Stash failed — giving up"
+        fi
+      fi
+      if [ "$stashed" -eq 1 ] || [ -z "$(git status --porcelain)" ]; then
+        if git pull --rebase --quiet 2>&1; then
+          echo "  Done"
+        else
+          git rebase --abort 2>/dev/null
+          echo "  Pull failed again (conflict) — aborted"
+        fi
+      fi
+      if [ "$stashed" -eq 1 ]; then
+        if git stash pop --quiet; then
+          echo "  Stash restored"
+        else
+          echo "  Stash pop failed — resolve manually (stash kept)"
+        fi
+      fi
     fi
 
   elif [ "$ahead" -gt 0 ]; then
