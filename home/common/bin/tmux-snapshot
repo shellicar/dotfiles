@@ -348,7 +348,7 @@ function executePlan(plan, tmux) {
   // (killing it sooner could take the session with it and fire session-closed).
   const created = [];
   for (const s of plan.createSessions) {
-    tmux(['new-session', '-d', '-s', s]);
+    tmux(['new-session', '-d', '-s', s, '-x', '270', '-y', '85']);
     const ph = lines(tmux(['list-windows', '-t', `=${s}`, '-F', '#{window_id}']))[0];
     tmux(['move-window', '-s', ph, '-t', `${s}:${PARK}`]);
     created.push(s);
