@@ -5,7 +5,7 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 
 # pnpm. path.sh prepends PNPM_BIN to PATH.
 export PNPM_HOME="$HOME/Library/pnpm"
-export PNPM_BIN="$PNPM_HOME"
+export PNPM_BIN="$PNPM_HOME/bin"
 
 # rust (rustup, ~/.cargo)
 case ":$PATH:" in

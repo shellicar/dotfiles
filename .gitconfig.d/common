@@ -14,3 +14,16 @@
 	; adopt an upstream only when the new branch's name matches the remote branch's name — so cutting
 	; a feature branch off origin/main does NOT make it track main (git's default 'true' does)
 	autoSetupMerge = simple
+
+[lfs "https://dev.azure.com/"]
+	locksverify = true
+[lfs "https://shellicar@dev.azure.com/"]
+	locksverify = true
+[lfs "https://Hellicar-Solutions@dev.azure.com/"]
+	locksverify = true
+[lfs "https://eagersautomotive@dev.azure.com/"]
+	locksverify = true
+[lfs "https://hopeventures@dev.azure.com/"]
+	locksverify = true
+[lfs "https://github.com/"]
+	locksverify = false
