@@ -1,0 +1,12 @@
+; WSL is Debian/Ubuntu underneath, so it shares the linux git config
+; (common include, aliases, excludesfile, ...). WSL-only bits below.
+[include]
+	path = ~/dotfiles/home/linux/.gitconfig
+
+[credential]
+	; the Windows-side credential manager, reachable over the /mnt/c mount —
+	; only resolves under WSL, which is why it can't live in the linux config
+	helper = /mnt/c/Program\\ Files/Git/mingw64/bin/git-credential-manager.exe
+[credential "https://dev.azure.com"]
+	; the credential manager needs the full path to tell Azure DevOps orgs apart
+	useHttpPath = true

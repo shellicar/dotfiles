@@ -3,48 +3,15 @@
 [core]
 	autocrlf = input
 	excludesfile = ~/dotfiles/.gitignore_global
-[user]
-	name = Stephen Hellicar
-	useConfigOnly = true
 [difftool "sourcetree"]
 	cmd = opendiff \"$LOCAL\" \"$REMOTE\"
 	path = 
 [mergetool "sourcetree"]
 	cmd = /Applications/Sourcetree.app/Contents/Resources/opendiff-w.sh \"$LOCAL\" \"$REMOTE\" -ancestor \"$BASE\" -merge \"$MERGED\"
 	trustExitCode = true
-[alias]
-	check-remotes = ! git branch -vv | cut -c 3- | awk '$3 !~/\\[/ { print $1 }' && git branch -vv | cut -c 3- | grep ': gone]' | awk '{print $1}' 
-	glog = log --graph --all --decorate --oneline
 [credential]
 	credentialStore = keychain
 	gitHubAuthModes = browser
 	helper = /usr/local/share/gcm-core/git-credential-manager
 [credential "https://dev.azure.com"]
 	useHttpPath = true
-[init]
-	defaultBranch = main
-[commit]
-	gpgsign = true
-
-[includeIf "hasconfig:remote.*.url:https://github.com/shellicar/**"]
-  path = ~/dotfiles/.gitconfig.d/shellicar
-[includeIf "hasconfig:remote.*.url:https://github.com/Hellicar-Solutions/**"]
-  path = ~/dotfiles/.gitconfig.d/hellicar-solutions
-
-[includeIf "hasconfig:remote.*.url:https://dev.azure.com/shellicar/**"]
-  path = ~/dotfiles/.gitconfig.d/shellicar
-[includeIf "hasconfig:remote.*.url:https://shellicar@dev.azure.com/shellicar/**"]
-  path = ~/dotfiles/.gitconfig.d/shellicar
-[includeIf "hasconfig:remote.*.url:https://dev.azure.com/Hellicar-Solutions/**"]
-  path = ~/dotfiles/.gitconfig.d/hellicar-solutions
-[includeIf "hasconfig:remote.*.url:https://Hellicar-Solutions@dev.azure.com/Hellicar-Solutions/**"]
-  path = ~/dotfiles/.gitconfig.d/hellicar-solutions
-
-[includeIf "hasconfig:remote.*.url:https://eagersautomotive@dev.azure.com/eagersautomotive/**"]
-  path = ~/dotfiles/.gitconfig.d/eagers
-
-[includeIf "hasconfig:remote.*.url:https://hopeventures@dev.azure.com/hopeventures/**"]
-  path = ~/dotfiles/.gitconfig.d/hopeventures
-
-[includeIf "hasconfig:remote.*.url:https://Flightrac@dev.azure.com/Flightrac/**"]
-  path = ~/dotfiles/.gitconfig.d/flightrac

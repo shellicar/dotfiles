@@ -1,6 +1,8 @@
 [core]
 	hooksPath = ~/.config/git/hooks
 [alias]
+	check-remotes = ! git branch -vv | cut -c 3- | awk '$3 !~/\\[/ { print $1 }' && git branch -vv | cut -c 3- | grep ': gone]' | awk '{print $1}' 
+	glog = log --graph --all --decorate --oneline
 	lfs-install = !git -c core.hooksPath=.git/hooks lfs install --local
 	wt-create = "!f() { root=$(git rev-parse --show-toplevel) || exit 1; repo=$(basename \"$root\" | sed 's/--.*//'); leaf=$(printf '%s' \"$1\" | sed 's#^[^/]*/##' | tr '/' '-'); dest=\"$(dirname \"$root\")/$repo--$leaf\"; git fetch origin --quiet 1>&2 || exit 1; git worktree add --no-track -b \"$1\" \"$dest\" \"${2:-origin/main}\" 1>&2 || exit 1; if [ -f \"$dest/package.json\" ] && grep -q '\"packageManager\": *\"pnpm@' \"$dest/package.json\"; then (cd \"$dest\" && pnpm install --frozen-lockfile) 1>&2 || exit 1; fi; echo \"$dest\"; }; f"
 [push]
@@ -15,15 +17,73 @@
 	; a feature branch off origin/main does NOT make it track main (git's default 'true' does)
 	autoSetupMerge = simple
 
+[fetch]
+	; delete remote-tracking refs whose upstream branch is gone, so `git branch -vv`
+	; reflects what the remote actually has
+	prune = true
+
+[merge]
+	; include the common ancestor between the conflict markers, so each side reads as a
+	; change against the base rather than as two opaque blobs; zdiff3 lifts lines common
+	; to both sides out of the conflict region
+	conflictStyle = zdiff3
+
+[diff]
+	; histogram places conflicts and hunks better than the default myers, especially in
+	; list-shaped files like package.json
+	algorithm = histogram
+	; distinguish moved lines from genuinely added or removed ones when reading a diff
+	colorMoved = zebra
+	; a moved block is usually re-indented on arrival, and by default that defeats move
+	; detection entirely, so ignore indentation when matching
+	colorMovedWS = allow-indentation-change
+[rerere]
+	; record how a conflict was resolved and replay it when the same conflict reappears —
+	; pays for itself on a long rebase that hits the same collision repeatedly.
+	; a wrong resolution is inherited silently: `git rerere forget <path>` clears it
+	enabled = true
+[rebase]
+	; move local branches that point into the rebased range along with it, instead of
+	; leaving them behind on the abandoned commits
+	updateRefs = true
+
 [lfs "https://dev.azure.com/"]
-	locksverify = true
-[lfs "https://shellicar@dev.azure.com/"]
-	locksverify = true
-[lfs "https://Hellicar-Solutions@dev.azure.com/"]
-	locksverify = true
-[lfs "https://eagersautomotive@dev.azure.com/"]
-	locksverify = true
-[lfs "https://hopeventures@dev.azure.com/"]
+	; url matching ignores the userinfo component, so this covers every org and every
+	; user@dev.azure.com variant — no per-org entry is needed
 	locksverify = true
 [lfs "https://github.com/"]
 	locksverify = false
+
+[init]
+	defaultBranch = main
+[user]
+	name = Stephen Hellicar
+	; refuse to fall back to a guessed or default identity — the email must come from one
+	; of the includeIf files below, so an unrecognised remote fails loudly instead of
+	; committing under the wrong name
+	useConfigOnly = true
+[commit]
+	gpgsign = true
+
+[includeIf "hasconfig:remote.*.url:https://github.com/shellicar/**"]
+	path = ~/dotfiles/.gitconfig.d/shellicar
+[includeIf "hasconfig:remote.*.url:https://github.com/Hellicar-Solutions/**"]
+	path = ~/dotfiles/.gitconfig.d/hellicar-solutions
+
+[includeIf "hasconfig:remote.*.url:https://dev.azure.com/shellicar/**"]
+	path = ~/dotfiles/.gitconfig.d/shellicar
+[includeIf "hasconfig:remote.*.url:https://shellicar@dev.azure.com/shellicar/**"]
+	path = ~/dotfiles/.gitconfig.d/shellicar
+[includeIf "hasconfig:remote.*.url:https://dev.azure.com/Hellicar-Solutions/**"]
+	path = ~/dotfiles/.gitconfig.d/hellicar-solutions
+[includeIf "hasconfig:remote.*.url:https://Hellicar-Solutions@dev.azure.com/Hellicar-Solutions/**"]
+	path = ~/dotfiles/.gitconfig.d/hellicar-solutions
+
+[includeIf "hasconfig:remote.*.url:https://eagersautomotive@dev.azure.com/eagersautomotive/**"]
+	path = ~/dotfiles/.gitconfig.d/eagers
+
+[includeIf "hasconfig:remote.*.url:https://hopeventures@dev.azure.com/hopeventures/**"]
+	path = ~/dotfiles/.gitconfig.d/hopeventures
+
+[includeIf "hasconfig:remote.*.url:https://Flightrac@dev.azure.com/Flightrac/**"]
+	path = ~/dotfiles/.gitconfig.d/flightrac
