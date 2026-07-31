@@ -45,3 +45,6 @@
 
 [includeIf "hasconfig:remote.*.url:https://hopeventures@dev.azure.com/hopeventures/**"]
   path = ~/dotfiles/.gitconfig.d/hopeventures
+
+[includeIf "hasconfig:remote.*.url:https://Flightrac@dev.azure.com/Flightrac/**"]
+  path = ~/dotfiles/.gitconfig.d/flightrac
