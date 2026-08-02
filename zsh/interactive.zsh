@@ -1,19 +1,34 @@
 # zsh interactive config.
 # The prompt reports pane state to tmux by printf alone (OSC 7 cwd, OSC 2 status
-# glyph) — no tmux subprocess, so it does not use the __tmux_* helpers in common.sh.
+# glyph and project folder), so there is no tmux subprocess and it does not use
+# the __tmux_* helpers in common.sh.
 
 # --- prompt ---
+# Folder shown in the tmux window status: the nearest enclosing .git root, or the
+# cwd itself when there is none. Walked with builtins alone, and recomputed only
+# when the cwd changes, so the prompt stays free of subprocesses.
+__tmux_folder() {
+  [[ $PWD == "$__tmux_folder_pwd" ]] && return
+  __tmux_folder_pwd=$PWD
+  local d=$PWD
+  while [[ $d != / && ! -e $d/.git ]]; do d=${d:h}; done
+  [[ $d == / ]] && d=$PWD
+  __tmux_folder_name=${${d:t}:-/}
+}
+
 __prompt_command() {
   local EXIT="$?"  # This needs to be first
 
   # tmux integration, printf-only (no tmux subprocess): OSC 7 reports the cwd
   # (populates pane_path, so the status bar and new panes track the shell's dir,
-  # not a child's — find chdirs as it walks); OSC 2 reports command state as a
-  # glyph in the pane title (✅ ok / ❌ failed), which window-status.sh reads.
-  # The preexec hook emits ⏳ while a command runs. Raw $PWD keeps spaces intact.
+  # not a child's, since find chdirs as it walks); OSC 2 carries "<glyph> <folder>",
+  # the command state (✅ ok / ❌ failed) alongside the project folder, which
+  # .tmux.conf splits back into its two fields. The preexec hook re-sends the
+  # same pair with ⏳ while a command runs. Raw $PWD keeps spaces intact.
   if [[ -n $TMUX ]]; then
     printf '\e]7;file://%s%s\e\\' "$HOST" "$PWD"
-    if [ $EXIT != 0 ]; then printf '\e]2;❌\e\\'; else printf '\e]2;✅\e\\'; fi
+    __tmux_folder
+    if [ $EXIT != 0 ]; then printf '\e]2;❌ %s\e\\' "$__tmux_folder_name"; else printf '\e]2;✅ %s\e\\' "$__tmux_folder_name"; fi
   fi
 
   local RCol="%f"
@@ -35,7 +50,7 @@ __prompt_command() {
   fi
 }
 # preexec: mark the pane 'running' via OSC 2 (printf, no tmux subprocess).
-_tmux_running() { [[ -n $TMUX ]] && printf '\e]2;⏳\e\\'; }
+_tmux_running() { [[ -n $TMUX ]] && printf '\e]2;⏳ %s\e\\' "$__tmux_folder_name"; }
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd __prompt_command
 add-zsh-hook preexec _tmux_running
