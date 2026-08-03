@@ -44,9 +44,10 @@ say() { printf '%b\n' "$*"; }
 log() { [ "$VERBOSE" = true ] && printf '%b\n' "${DIM}[git cleanup] $*${RESET}" >&2; return 0; }
 
 # A phase label printed before the phase runs, so a slow run shows where it is
-# instead of sitting blank, then completed in place with its result.
-step() { printf '%b' "  ${DIM}$*${RESET} "; }
-step_done() { printf '%b\n' "${DIM}$*${RESET}"; }
+# instead of sitting blank, then completed in place with its result. Under -v the
+# label ends its own line, or the log output lands in the middle of it.
+step() { printf '%b' "  ${DIM}$*${RESET} "; [ "$VERBOSE" = true ] && printf '\n'; return 0; }
+step_done() { [ "$VERBOSE" = true ] && printf '    '; printf '%b\n' "${DIM}$*${RESET}"; return 0; }
 
 # ── repository context ──────────────────────────────────────────────────────
 
@@ -98,15 +99,98 @@ content_hash_cached() {
   printf '%s\n' "$h"
 }
 
-# One bulk fetch of every merged PR's head branch + merge commit, instead of
-# a gh API call per branch (~0.5s network round-trip each — 50 branches would
-# be 25s of pure latency). Populated once, in the same tab-separated table
-# PR_MERGE_TABLE looks up from.
+# The PR host origin points at. Decided by the remote, not by which CLI happens
+# to be installed, so a machine with both does not guess wrong.
+pr_host() {
+  case "$(git config --get remote.origin.url 2>/dev/null)" in
+    *dev.azure.com*) echo azure ;;
+    *github.com*) echo github ;;
+    *) return 1 ;;
+  esac
+}
+
+# org/project/repo of an Azure DevOps remote, tab separated. Both remote forms
+# normalise to the same triple:
+#   https://{org}@dev.azure.com/{org}/{project}/_git/{repo}
+#   git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
+ado_coordinates() {
+  local url path
+  url=$(git config --get remote.origin.url 2>/dev/null) || return 1
+  case "$url" in
+    *ssh.dev.azure.com:v3/*) path=${url#*ssh.dev.azure.com:v3/} ;;
+    *) path=$(printf '%s' "${url#*dev.azure.com/}" | sed 's@/_git/@/@') ;;
+  esac
+  path=${path%.git}
+  printf '%s\t%s\t%s\n' "$(printf '%s' "$path" | cut -d/ -f1)" "$(printf '%s' "$path" | cut -d/ -f2)" "$(printf '%s' "$path" | cut -d/ -f3)"
+}
+
+# One bulk fetch of every merged PR's source branch + merge commit, instead of
+# an API call per branch (~0.5s network round-trip each — 50 branches would be
+# 25s of pure latency). Populated once, in the tab-separated table
+# PR_MERGE_TABLE looks up from. Azure DevOps reports the source branch as a full
+# ref, so it is stripped to match the plain branch names on the other side.
+# az answers an auth failure with a blanket 'az logout; az login', which tears
+# down every other tenant's credentials to fix one org. This is the scoped form.
+# The tenant is derived rather than configured, so it cannot drift from the
+# subscription beside it.
+ado_login_hint() {
+  local t
+  [ "${2:-}" = force ] || grep -qE 'Interactive authentication is needed|TF400813|az login' "$CACHE_DIR/az-error" 2>/dev/null || return 0
+  # With a profile the browser picks the identity, so naming a tenant would only
+  # constrain it wrongly. Without one, the tenant is what narrows the login.
+  if [ -n "$AZ_CONFIG" ]; then
+    PR_HINT="  ${DIM}run: AZURE_CONFIG_DIR=$AZ_CONFIG az login --scope $ADO_RESOURCE/.default${RESET}"
+    return 0
+  fi
+  t=$(az account list --query "[?id=='$1'].tenantId | [0]" -o tsv 2>/dev/null) || return 0
+  [ -n "$t" ] && PR_HINT="  ${DIM}run: az login --tenant $t --scope $ADO_RESOURCE/.default${RESET}"
+  return 0
+}
+
 fetch_pr_merges() {
-  PR_MERGE_TABLE=''
-  command -v gh >/dev/null 2>&1 || return 0
-  PR_MERGE_TABLE=$(gh pr list --state merged --json headRefName,mergeCommit --limit 1000 \
-    --jq '.[] | select(.mergeCommit != null) | [.headRefName, .mergeCommit.oid] | @tsv' 2>/dev/null)
+  PR_MERGE_TABLE=''; PR_SOURCE='no PR host'; PR_HINT=''; AZ_CONFIG=''
+  local host coords raw sub org project repo token
+  host=$(pr_host) || return 0
+  case "$host" in
+    azure)
+      command -v az >/dev/null 2>&1 || { PR_SOURCE='azure devops, az missing'; return 0; }
+      sub=$(git config --get cleanup.subscription) || { PR_SOURCE='azure devops, no subscription configured'; return 0; }
+      coords=$(ado_coordinates) || return 0
+      PR_SOURCE='azure devops'
+      org=$(printf '%s' "$coords" | cut -f1); project=$(printf '%s' "$coords" | cut -f2); repo=$(printf '%s' "$coords" | cut -f3)
+      # One az profile holds one login per subscription, so a second identity on the
+      # same subscription evicts the first. A profile per org keeps both alive.
+      AZ_CONFIG=$(git config --get cleanup.azconfig) || AZ_CONFIG=''
+      case "$AZ_CONFIG" in "~/"*) AZ_CONFIG="$HOME/${AZ_CONFIG#\~/}" ;; esac
+      [ -n "$AZ_CONFIG" ] && export AZURE_CONFIG_DIR="$AZ_CONFIG"
+      log "ado org=[$org] project=[$project] repo=[$repo] sub=[$sub] azconfig=[$AZ_CONFIG]"
+      # az rest authenticates as the default account and ignores the account
+      # flags, which 403s against an org in another tenant, so the token is
+      # fetched here and attached explicitly.
+      # --subscription, never --tenant: a subscription resolves both the tenant and
+      # the identity signed in for it, where --tenant names only the target and
+      # leaves az using the default account's credentials. AAD then rejects them
+      # with AADSTS50020 when that user is foreign to the tenant.
+      token=$(az account get-access-token --subscription "$sub" --resource "$ADO_RESOURCE" --query accessToken -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, no token for subscription'; log "ado token error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub" force; return 0; }
+      # $top is an OData parameter, single-quoted so no shell expands it away.
+      # Without it the API returns its default first page of 101, not the lot.
+      raw=$(az rest --method get --skip-authorization-header --headers "Authorization=Bearer $token" --url "https://dev.azure.com/$org/$project/_apis/git/repositories/$repo/pullrequests" --uri-parameters searchCriteria.status=completed '$top=1000' api-version=7.1 --query 'value[?lastMergeCommit.commitId!=null].[sourceRefName, lastMergeCommit.commitId]' -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, query failed'; log "ado query error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub"; return 0; }
+      # An expired session gets Azure DevOps's HTML sign-in page with a 200, so az
+      # exits 0, skips --query because the body is not JSON, and prints the page.
+      # Rows are therefore validated, not trusted: branch, tab, 40 hex characters.
+      PR_MERGE_TABLE=$(printf '%s' "$raw" | sed 's@^refs/heads/@@' | awk -F'\t' 'NF==2 && $2 ~ /^[0-9a-f]{40}$/')
+      log "ado rows=$(printf '%s' "$PR_MERGE_TABLE" | grep -c .) of $(printf '%s' "$raw" | grep -c .) lines"
+      if [ -z "$PR_MERGE_TABLE" ] && [ -n "$raw" ]; then
+        PR_SOURCE='azure devops, not signed in'
+        ado_login_hint "$sub" force
+      fi
+      ;;
+    github)
+      command -v gh >/dev/null 2>&1 || { PR_SOURCE='github, gh missing'; return 0; }
+      PR_SOURCE='github'
+      PR_MERGE_TABLE=$(gh pr list --state merged --json headRefName,mergeCommit --limit 1000 --jq '.[] | select(.mergeCommit != null) | [.headRefName, .mergeCommit.oid] | @tsv' 2>/dev/null) || { PR_SOURCE='github, query failed'; return 0; }
+      ;;
+  esac
 }
 
 # The squash/merge commit of a merged PR for this branch, looked up from the
@@ -511,6 +595,15 @@ Options:
 
 Default (no flag) is a dry-run report. A branch whose worktree is dirty, or that
 you are standing in, is never touched.
+
+Azure DevOps repos read git config 'cleanup.subscription' for a subscription in
+the org's tenant, which is what resolves the identity to authenticate as. Set it
+beside user.email in the includeIf'd file for the org. Without it the PR check is
+skipped rather than run under whichever account happens to be default.
+
+Where two orgs need different identities on the same subscription, add
+'cleanup.azconfig' pointing at a private az profile directory. One profile holds
+one login per subscription, so without this the second login evicts the first.
 EOF
 }
 
@@ -518,6 +611,9 @@ APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; RESCUE=false; SHOW_ALL=false; 
 
 # The evaluation cap. Both must be exceeded before a branch is left unevaluated.
 MAX_DISTANCE=100; MAX_AGE_DAYS=30
+
+# The Azure DevOps resource ID: the token audience az rest has to ask for.
+ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -559,7 +655,8 @@ if [ "$NO_FETCH" = true ]; then step_done 'skipped (--no-fetch)'; else step_done
 
 step 'merged PRs ...'
 fetch_pr_merges
-step_done "$(printf '%s' "$PR_MERGE_TABLE" | grep -c .) found"
+step_done "$(printf '%s' "$PR_MERGE_TABLE" | grep -c .) found ($PR_SOURCE)"
+[ -n "$PR_HINT" ] && say "$PR_HINT"
 
 step 'indexing main ...'
 build_shared_main_index

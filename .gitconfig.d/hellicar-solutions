@@ -1,3 +1,5 @@
 [user]
   email = stephen.hellicar@hellicar-solutions.com.au
   signingkey = 36C65E2BFC3E9417
+[cleanup]
+	subscription = 383d501b-3906-496b-ac90-e336189d628f

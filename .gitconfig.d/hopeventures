@@ -1,3 +1,5 @@
 [user]
   email = stephen.hellicar@hopeventuresau.onmicrosoft.com
 	signingkey = EBE1CF1E190946CE
+[cleanup]
+	subscription = 8c39c8f0-3f9c-40f0-a6e7-35b976b03c58

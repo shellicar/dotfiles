@@ -1,3 +1,5 @@
 [user]
   email = stephen.hellicar@flightrac.com
   signingkey = 0057D3A6EE8D81F9
+[cleanup]
+	subscription = df6bdcee-4c42-4ff0-8ab6-265b0aa2efc8
