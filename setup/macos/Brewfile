@@ -4,6 +4,7 @@
 brew "git"        # newer than the system git
 brew "coreutils"  # provides gls (the `ls` alias)
 brew "fnm"        # Node version manager
+brew "pnpm"       # native install, not corepack
 brew "tmux"       # .tmux.conf and the prompt status hooks
 brew "vim"        # EDITOR, .vimrc, the vi alias
 brew "gnupg"      # GPG-signed commits

@@ -18,5 +18,12 @@ if ! command -v fnm >/dev/null 2>&1 && [ ! -x "$HOME/.fnm/fnm" ]; then
   curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
 fi
 
-# 3. Link the configs into $HOME.
+# 3. pnpm (native, not corepack) is not in apt either -- install via its own
+#    script. Installs to $PNPM_HOME (os/linux.env.sh), or ~/.local/share/pnpm
+#    if that isn't set yet in this shell.
+if ! command -v pnpm >/dev/null 2>&1 && [ ! -x "${PNPM_HOME:-$HOME/.local/share/pnpm}/pnpm" ]; then
+  curl -fsSL https://get.pnpm.io/install.sh | sh -
+fi
+
+# 4. Link the configs into $HOME.
 "$DOTFILES/install.sh"

@@ -16,10 +16,10 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 # 2. Declared dependencies.
 brew bundle --file="$DIR/Brewfile"
 
-# 3. Node toolchain (fnm is installed by the Brewfile). Pick a version to taste:
+# 3. Node toolchain (fnm and pnpm are installed by the Brewfile). Pick a
+#    Node version to taste:
 # fnm install --lts
 # fnm default <version>
-# corepack enable
 
 # 4. Link the configs into $HOME.
 "$DOTFILES/install.sh"
