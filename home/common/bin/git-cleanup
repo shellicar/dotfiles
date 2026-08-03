@@ -38,10 +38,15 @@ else
   GREEN=''; YELLOW=''; RED=''; BLUE=''; DIM=''; BOLD=''; RESET=''
 fi
 
-OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; DIRTY='📝'; EMPTYICON='≡'; WOULDREMOVE='\342\235\227'
+OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; DIRTY='📝'; EMPTYICON='≡'; UNKNOWN='?'; WOULDREMOVE='\342\235\227'
 
 say() { printf '%b\n' "$*"; }
 log() { [ "$VERBOSE" = true ] && printf '%b\n' "${DIM}[git cleanup] $*${RESET}" >&2; return 0; }
+
+# A phase label printed before the phase runs, so a slow run shows where it is
+# instead of sitting blank, then completed in place with its result.
+step() { printf '%b' "  ${DIM}$*${RESET} "; }
+step_done() { printf '%b\n' "${DIM}$*${RESET}"; }
 
 # ── repository context ──────────────────────────────────────────────────────
 
@@ -110,11 +115,30 @@ pr_merge_commit() {
   printf '%s\n' "$PR_MERGE_TABLE" | awk -F'\t' -v b="$1" '$1==b{print $2; exit}'
 }
 
+# Past the cap the content walk is skipped: main has moved far enough that the
+# branch's paths have likely been restructured out from under the comparison, so
+# the walk is both the expensive check and the futile one. Distance AND age,
+# never either alone — a recent branch on a fast repo is far back but still
+# comparable, and an old branch on a quiet repo is only a few commits to check.
+# An explicitly named --branch is never capped: naming it says what --old says.
+branch_beyond_cap() {
+  [ "$EVALUATE_OLD" = true ] && return 1
+  [ -n "$ONLY_BRANCHES" ] && return 1
+  local dist last
+  dist=$(git rev-list --count "origin/$MAIN" "^$1" 2>/dev/null) || return 1
+  [ "$dist" -gt "$MAX_DISTANCE" ] || return 1
+  last=$(git log -1 --format=%ct "$1" 2>/dev/null) || return 1
+  [ $(( NOW - last )) -gt $(( MAX_AGE_DAYS * 86400 )) ]
+}
+
+# Commits main has moved past the branch's fork, for the inconclusive report.
+distance_from_main() { git rev-list --count "origin/$MAIN" "^$1" 2>/dev/null || echo '?'; }
+
 # How many main commits, back from the tip, we actually need indexed this
 # run: the largest base..origin/$MAIN distance among branches that fail BOTH
-# the ancestor check AND the PR check (only those ever fall through to the
-# content walk). Not a fixed constant — the true maximum this run needs, and
-# 0 (skip entirely) if every branch resolves via ancestor or PR.
+# the ancestor check AND the PR check and are within the evaluation cap (only
+# those ever fall through to the content walk). Not a fixed constant — the true
+# maximum this run needs, and 0 (skip entirely) if none qualify.
 compute_max_walk_depth() {
   local branch base pr_mc dist max=0 branches
   branches=${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}
@@ -124,6 +148,7 @@ compute_max_walk_depth() {
     git merge-base --is-ancestor "$branch" "origin/$MAIN" 2>/dev/null && continue
     pr_mc=$(pr_merge_commit "$branch")
     [ -n "$pr_mc" ] && ref_exists "$pr_mc" && continue
+    branch_beyond_cap "$branch" && continue
     dist=$(git rev-list --count "$base..origin/$MAIN" 2>/dev/null) || continue
     [ "$dist" -gt "$max" ] && max=$dist
   done
@@ -149,8 +174,9 @@ build_shared_main_index() {
 
 # Walk the branch tip-first; the first commit whose cumulative content
 # (merge-base..C) is found in main is the join point. Echoes the number of
-# commits sitting after that join point (0 = fully merged), or -1 if no join
-# point is found within WALK_DEPTH.
+# commits sitting after that join point (0 = fully merged), -1 if no join point
+# is found within WALK_DEPTH, or -2 if the branch is past the evaluation cap and
+# the content walk was never run.
 #
 # PR checked FIRST — it's authoritative and one API call (batched, see
 # fetch_pr_merges), versus walking potentially hundreds of commits. The
@@ -176,6 +202,9 @@ commits_not_in_main() {
       echo 0; return
     fi
   fi
+
+  # Cheap checks done and unresolved; only the expensive one is left.
+  branch_beyond_cap "$branch" && { echo -2; return; }
 
   # Only WALK_DEPTH diffs against the branch's OWN history, tip-first, each
   # checked against the shared index built once for the whole run.
@@ -243,13 +272,12 @@ remove_branch() {
 # ── the single pass ─────────────────────────────────────────────────────────
 
 process_branch() {
-  local branch=$1 wt ahead noun last meta not_in_main gone noun2 icon desc note outcome
+  local branch=$1 wt ahead last meta not_in_main gone noun2 icon desc note outcome
 
   [ "$branch" = "$MAIN" ] && return 0
   wt=$(worktree_of "$branch")
 
   ahead=$(git rev-list --count "origin/$MAIN..$branch" 2>/dev/null || echo '?')
-  [ "$ahead" = 1 ] && noun=commit || noun=commits
   last=$(git log -1 --format=%cr "$branch" 2>/dev/null)
   # Flag anything a week or older — weeks/months/years are always old; "N
   # days ago" only counts once N reaches 7 (git shows day-granularity up to
@@ -266,7 +294,7 @@ process_branch() {
   esac
   # The commit count stays full-brightness (not dimmed) — it's the number
   # that actually matters when deciding whether a branch is worth a look.
-  meta="${DIM}[${RESET}$ahead $noun${DIM}, ${RESET}${age_color}${last}${RESET}${DIM}]${RESET}"
+  meta="${DIM}[${RESET}$ahead ahead${DIM}, ${RESET}${age_color}${last}${RESET}${DIM}]${RESET}"
 
   # Verdict (content) and indicator (gone) computed independently.
   not_in_main=$(commits_not_in_main "$branch")
@@ -311,6 +339,19 @@ process_branch() {
     rbase=$(git merge-base "$branch" "origin/$MAIN")
     rjoin=$(git rev-list "$rbase..$branch" | sed -n "$((not_in_main + 1))p")
     do_rescue "$branch" "$rjoin" "$not_in_main" "$wt"
+    return 0
+  fi
+
+  # Beyond the cap: the cheap checks came back unresolved and the content walk
+  # was not run, so nothing is known either way. Not folded into unmerged, and
+  # not offered to --gone, which means 'searched and not found', not 'not
+  # searched'.
+  if [ "$not_in_main" = -2 ]; then
+    INCONCLUSIVE_COUNT=$((INCONCLUSIVE_COUNT + 1))
+    note="$(distance_from_main "$branch") behind, not evaluated"
+    [ "$gone" = true ] && note="$note [gone]"
+    [ -n "$wt" ] && note="$note, worktree"
+    say "  ${YELLOW}${UNKNOWN}${RESET} $branch $meta ${DIM}($note — run --old)${RESET}"
     return 0
   fi
 
@@ -444,6 +485,7 @@ only an indicator, surfaced when it disagrees with the content.
   merged + N commits on top  → rescued (stray commits moved off), then deleted, by --rescue
   gone but content not found → warned; deleted by --gone if you trust it
   unmerged                   → kept
+  too far behind             → inconclusive, not evaluated; evaluated by --old
 
 Options:
   --apply          delete the fully-merged branches (and their worktrees)
@@ -459,6 +501,9 @@ Options:
                    the flag to filter to several
   -a, --all        also list the plain unmerged / idle branches (hidden by default)
   --depth N        commits to walk back from each tip for the join point (default 5)
+  --old            also evaluate branches left inconclusive by the cap: more
+                   than $MAX_DISTANCE commits behind main AND untouched for
+                   $MAX_AGE_DAYS days
   -b, --base REF   compare against REF instead of the detected main branch
   --no-fetch       skip the initial 'git fetch --prune origin'
   -v, --verbose    log progress to stderr
@@ -469,7 +514,10 @@ you are standing in, is never touched.
 EOF
 }
 
-APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=5; ONLY_BRANCHES=''
+APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=5; ONLY_BRANCHES=''; EVALUATE_OLD=false
+
+# The evaluation cap. Both must be exceeded before a branch is left unevaluated.
+MAX_DISTANCE=100; MAX_AGE_DAYS=30
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -480,6 +528,7 @@ while [ $# -gt 0 ]; do
     --branch) shift; [ $# -gt 0 ] || { echo "Error: --branch requires a branch name" >&2; exit 1; }; ONLY_BRANCHES="$ONLY_BRANCHES $1" ;;
     -a|--all) SHOW_ALL=true ;;
     --depth) shift; [ $# -gt 0 ] || { echo "Error: --depth requires a number" >&2; exit 1; }; WALK_DEPTH=$1 ;;
+    --old) EVALUATE_OLD=true ;;
     -b|--base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 1; }; BASE_OVERRIDE=$1 ;;
     --no-fetch) NO_FETCH=true ;;
     -v|--verbose) VERBOSE=true ;;
@@ -493,15 +542,28 @@ ensure_in_git_repository
 command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
 CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
+NOW=$(date +%s)
 MAIN=$(get_main_branch)
-log "main branch: $MAIN"
 ref_exists "origin/$MAIN" || { echo "Error: origin/$MAIN does not exist (fetch origin, or pass -b <branch>)" >&2; exit 1; }
+
+if [ "$EVALUATE_OLD" = true ]; then
+  CAP_NOTE='cap off (--old)'
+else
+  CAP_NOTE="cap ${MAX_DISTANCE} behind + ${MAX_AGE_DAYS}d"
+fi
+printf '%b\n' "${BOLD}git cleanup${RESET} ${DIM}$MAIN · $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -c .) branches · $CAP_NOTE${RESET}"
+
+step 'fetch origin ...'
 fetch_origin
-log "fetching merged PRs ..."
+if [ "$NO_FETCH" = true ]; then step_done 'skipped (--no-fetch)'; else step_done 'done'; fi
+
+step 'merged PRs ...'
 fetch_pr_merges
-log "indexing main ..."
+step_done "$(printf '%s' "$PR_MERGE_TABLE" | grep -c .) found"
+
+step 'indexing main ...'
 build_shared_main_index
-log "checking branches ..."
+step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 
 WT_MAP=$(git worktree list --porcelain | awk '
   /^worktree /   { p = substr($0, 10) }
@@ -513,9 +575,9 @@ DETACHED=$(git worktree list --porcelain | awk '
 ')
 CUR_WT=$(git rev-parse --show-toplevel 2>/dev/null)
 
-MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0
+MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0; INCONCLUSIVE_COUNT=0
 
-printf '%b\n' "${BOLD}Branches${RESET} ${DIM}(main: $MAIN)${RESET}"
+printf '\n%b\n' "${BOLD}Branches${RESET}"
 if [ -n "$ONLY_BRANCHES" ]; then
   for branch in $ONLY_BRANCHES; do
     ref_exists "refs/heads/$branch" || { echo "Error: no local branch named '$branch'" >&2; exit 1; }
@@ -539,9 +601,9 @@ fi
 
 printf '\n'
 # Summary rule — three kinds of line, three reasons:
-#  - the four category counts (merged/empty/review/suspect) always print,
-#    zero or not: this is a fixed report card, and a line that vanishes at
-#    zero is ambiguous — "nothing here" or "never checked"?
+#  - the five category counts (merged/empty/review/suspect/inconclusive) always
+#    print, zero or not: this is a fixed report card, and a line that vanishes
+#    at zero is ambiguous — "nothing here" or "never checked"?
 #  - the hidden/unmerged line always prints too, but its wording depends on
 #    -a: with -a nothing is actually hidden, so it must say so, not repeat
 #    a stale "hidden" claim.
@@ -551,6 +613,7 @@ say "${GREEN}${OK} merged, ready to delete: $MERGED_COUNT${RESET}  ${DIM}→ --a
 say "${BLUE}${EMPTYICON} never diverged from main: $EMPTY_COUNT${RESET}  ${DIM}→ --empty${RESET}"
 say "${DIM}${KEEP} merged with commits on top: $REVIEW_COUNT${RESET}  ${DIM}→ --rescue${RESET}"
 say "${RED}${WARN}gone but content not found: $SUSPECT_COUNT${RESET}  ${DIM}→ --gone to trust${RESET}"
+say "${YELLOW}${UNKNOWN}${RESET} inconclusive, too far behind: $INCONCLUSIVE_COUNT${RESET}  ${DIM}→ --old${RESET}"
 if [ "$SHOW_ALL" = true ]; then
   say "${DIM}$HIDDEN_COUNT unmerged/idle shown above${RESET}"
 else
