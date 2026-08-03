@@ -1,0 +1,75 @@
+#!/bin/sh
+# Rebase the current branch onto the default branch and force-push it.
+#   git catchup           print the plan, touch nothing
+#   git catchup --apply   do it
+# Preflight first: local and its remote must be the same commit. If they differ,
+# nothing starts — a rebase that fails at push time leaves local history rewritten
+# and diverged from a remote holding someone else's work.
+# The preflight is the only protection. --force-with-lease compares against the
+# remote-tracking ref, which the fetch has just moved, so the lease agrees with a
+# commit pushed by someone else and would allow the overwrite (git-push(1)).
+
+set -eu
+
+apply=0
+for arg in "$@"; do
+  case "$arg" in
+    --apply) apply=1 ;;
+    *) echo "usage: git-catchup [--apply]" >&2; exit 2 ;;
+  esac
+done
+
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repo" >&2; exit 2; }
+
+main=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo "cannot determine the default branch from origin/HEAD" >&2; exit 2; }
+main=${main#origin/}
+
+branch=$(git symbolic-ref --quiet --short HEAD) || { echo "detached HEAD" >&2; exit 2; }
+[ "$branch" != "$main" ] || { echo "on $main — nothing to rebase" >&2; exit 2; }
+
+[ -z "$(git status --porcelain)" ] || { echo "working tree is dirty" >&2; exit 1; }
+
+git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
+
+target=$(git rev-parse --verify --quiet "origin/$main") || { echo "no origin/$main" >&2; exit 1; }
+upstream=$(git rev-parse --verify --quiet '@{u}') || { echo "$branch has no upstream" >&2; exit 1; }
+
+local_head=$(git rev-parse HEAD)
+if [ "$local_head" != "$upstream" ]; then
+  echo "$branch and its remote are not the same commit — resolve that first" >&2
+  echo "  local  $local_head" >&2
+  echo "  remote $upstream" >&2
+  exit 1
+fi
+
+if git merge-base --is-ancestor "$target" HEAD; then
+  echo "already up to date with origin/$main — nothing to do"
+  exit 0
+fi
+
+# The fork point, not the merge-base. Plain 'git rebase origin/$main' replays
+# everything since the merge-base, so a branch stacked on another branch replays
+# that branch's commits too and force-pushes them back rewritten. The oldest
+# commit no other ref can reach is the first one that is ours; its parent is
+# where we forked.
+others=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes | grep -vxF "refs/heads/$branch" | grep -vxF "refs/remotes/origin/$branch" || true)
+oldest=$(git rev-list "$target..HEAD" --not $others | tail -1)
+[ -n "$oldest" ] || { echo "no commits on $branch that another branch does not already have" >&2; exit 1; }
+base=$(git rev-parse --verify --quiet "$oldest^") || { echo "cannot resolve the fork point of $branch" >&2; exit 1; }
+git merge-base --is-ancestor "$base" HEAD || { echo "fork point $base is not an ancestor of $branch" >&2; exit 1; }
+
+if [ "$apply" -eq 0 ]; then
+  echo "would rebase $branch onto origin/$main and force-push it"
+  echo "  branch      $branch at $local_head"
+  echo "  onto        origin/$main at $target"
+  echo "  fork point  $base"
+  echo "  commits     $(git rev-list --count "$base..HEAD") to replay"
+  git log --oneline --no-decorate "$base..HEAD"
+  echo "run: git-catchup --apply"
+  exit 0
+fi
+
+git rebase --onto "$target" "$base" || exit 1
+
+git push --quiet --force-with-lease
+echo "$branch rebased onto origin/$main and pushed"

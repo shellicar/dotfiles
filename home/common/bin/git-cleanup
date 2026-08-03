@@ -83,10 +83,14 @@ content_hash_cached() {
   local a=$1 b=$2 key file h
   key=$(printf '%s %s' "$a" "$b" | shasum | awk '{print $1}')
   file="$CACHE_DIR/$key"
-  [ -f "$file" ] && { cat "$file"; return; }
-  h=$(content_hash "$a" "$b")
-  printf '%s' "$h" > "$file"
-  printf '%s' "$h"
+  if [ -f "$file" ]; then
+    h=$(cat "$file")
+  else
+    h=$(content_hash "$a" "$b")
+    printf '%s\n' "$h" > "$file"
+  fi
+  # The newline matters: the main index is line-oriented, matched with grep -x.
+  printf '%s\n' "$h"
 }
 
 # One bulk fetch of every merged PR's head branch + merge commit, instead of
@@ -133,7 +137,9 @@ compute_max_walk_depth() {
 build_shared_main_index() {
   local depth c p
   depth=$(compute_max_walk_depth)
-  MAIN_IDX=$(mktemp) || { echo "Error: mktemp failed" >&2; exit 1; }
+  # Repo-local and truncated per run, so nothing is left behind in $TMPDIR.
+  MAIN_IDX="$CACHE_DIR/main-index"
+  : > "$MAIN_IDX" || { echo "Error: cannot write $MAIN_IDX" >&2; exit 1; }
   [ "$depth" -eq 0 ] && return 0
   git rev-list -n "$depth" "origin/$MAIN" | while read -r c; do
     p=$(git rev-parse "$c^" 2>/dev/null) || continue
@@ -389,6 +395,7 @@ do_rescue() {
 
   tmp=$(mktemp -d) || return 1
   git worktree add -q --detach "$tmp" "origin/$MAIN" 2>/dev/null || {
+    rmdir "$tmp" 2>/dev/null
     say "     ${YELLOW}↳ rescue setup failed${RESET}"; return 1; }
 
   base_used=main
