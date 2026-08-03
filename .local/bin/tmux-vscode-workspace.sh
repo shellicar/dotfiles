@@ -2,7 +2,7 @@
 # Retarget this tmux server's dedicated VS Code workspace to the focused pane's repo.
 #
 # Identity = the per-server .code-workspace file (one per tmux server).
-# Content  = the folder listed inside it.
+# Content  = the folders listed inside it, added to and never removed.
 #
 # Rewriting the file live-updates the already-open window in place. On every focus
 # the server's window is raised to the front so it is the visible VS Code window.
@@ -50,13 +50,23 @@ WS_DIR="$HOME/.vscode-tmux"
 mkdir -p "$WS_DIR"
 WS_FILE="$WS_DIR/$SERVER.code-workspace"
 
+# Folders are append-only: removing one restarts the extension host, which prompts
+# for confirmation when an extension editor such as a preview is open. An
+# unparseable file has already lost its folder list, so rebuild from this repo.
+EXISTING='[]'
+if [ -f "$WS_FILE" ]; then
+  EXISTING=$("$JQ" -c 'if (.folders | type) == "array" then .folders else [] end' "$WS_FILE" 2>/dev/null) || EXISTING='[]'
+  [ -z "$EXISTING" ] && EXISTING='[]'
+fi
+
 NEW=$("$JQ" -n \
+  --argjson existing "$EXISTING" \
   --arg folder "$DIR" \
   --arg title "$TITLE" \
   --arg active "$ACTIVE" \
   --arg inactive "$INACTIVE" \
   '{
-     folders: [ { path: $folder } ],
+     folders: (($existing + [ { path: $folder } ]) | reduce .[] as $f ([]; if any(.[]; .path == $f.path) then . else . + [$f] end)),
      settings: {
        "window.title": $title,
        "workbench.colorCustomizations": {
@@ -69,6 +79,8 @@ NEW=$("$JQ" -n \
    }')
 
 # Retarget: rewrite the workspace file only when something actually changed.
+# Written through a rename so a reader never sees a half-written file. VS Code
+# behaves the same whether the file is replaced or truncated in place.
 if [ ! -f "$WS_FILE" ] || [ "$NEW" != "$(cat "$WS_FILE")" ]; then
   printf '%s\n' "$NEW" > "$WS_FILE.tmp"
   mv "$WS_FILE.tmp" "$WS_FILE"
