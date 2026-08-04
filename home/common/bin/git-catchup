@@ -1,7 +1,7 @@
 #!/bin/sh
 # Rebase the current branch onto the default branch and force-push it.
 #   git catchup           print the plan, touch nothing
-#   git catchup --apply   do it
+#   git catchup --apply   print the plan, pause 5 seconds, then do it
 # Preflight first: local and its remote must be the same commit. If they differ,
 # nothing starts — a rebase that fails at push time leaves local history rewritten
 # and diverged from a remote holding someone else's work.
@@ -58,16 +58,21 @@ oldest=$(git rev-list "$target..HEAD" --not $others | tail -1)
 base=$(git rev-parse --verify --quiet "$oldest^") || { echo "cannot resolve the fork point of $branch" >&2; exit 1; }
 git merge-base --is-ancestor "$base" HEAD || { echo "fork point $base is not an ancestor of $branch" >&2; exit 1; }
 
+echo "plan: rebase $branch onto origin/$main and force-push it"
+echo "  branch      $branch at $local_head"
+echo "  onto        origin/$main at $target"
+echo "  fork point  $base"
+echo "  commits     $(git rev-list --count "$base..HEAD") to replay"
+git log --oneline --no-decorate "$base..HEAD"
+
 if [ "$apply" -eq 0 ]; then
-  echo "would rebase $branch onto origin/$main and force-push it"
-  echo "  branch      $branch at $local_head"
-  echo "  onto        origin/$main at $target"
-  echo "  fork point  $base"
-  echo "  commits     $(git rev-list --count "$base..HEAD") to replay"
-  git log --oneline --no-decorate "$base..HEAD"
   echo "run: git-catchup --apply"
   exit 0
 fi
+
+echo
+echo "starting in 5 seconds, ctrl-c to abort"
+sleep 5
 
 git rebase --onto "$target" "$base" || exit 1
 
