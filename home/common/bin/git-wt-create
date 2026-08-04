@@ -1,0 +1,91 @@
+#!/bin/sh
+#
+# git wt-create: create a sibling worktree for a branch and print its path.
+#
+# Invoked as a git subcommand: git finds this file on $PATH as `git-wt-create`,
+# so `git wt-create` runs it. The `wt` shell function wraps it to cd into the
+# result, which a subprocess cannot do for its caller.
+#
+#   git wt-create <branch> [base]
+#
+# STDOUT IS THE PATH and nothing else, because `wt` captures it to cd. Every
+# other command here is redirected to stderr for that reason: `git worktree add`
+# reports "HEAD is now at" on stdout, which would otherwise be appended to the
+# path the caller tries to enter.
+#
+# Resolving <branch> mirrors `git checkout <branch>`: an existing branch is
+# checked out, and only a name that exists nowhere becomes a new branch. Which
+# case applies is what decides the upstream, so nothing needs naming twice.
+#
+#   exists locally     check it out, upstream left alone
+#   exists on origin   new branch from origin/<branch>, tracking it
+#   exists nowhere     new branch from [base], else origin/HEAD, tracking nothing
+#
+# [base] therefore only applies to the third case, and is refused rather than
+# ignored in the other two. A branch that already exists has a history, so a
+# base quietly dropped would leave the caller believing they cut from it.
+#
+# --track and --no-track are always passed explicitly so branch.autoSetupMerge
+# cannot change what this does, and a bare [base] is resolved to origin/<base>
+# here rather than through git's DWIM, which checkout.guess can switch off.
+# --prune matters for the same reason: a stale origin/<branch> left behind by a
+# deleted remote branch would otherwise select the wrong case.
+#
+# The worktree is a sibling of the repo root named <repo>--<leaf>. The leaf is
+# the branch name minus its first segment with remaining slashes flattened, so
+# feature/api/auth gives <repo>--api-auth. Stripping --.* off the repo directory
+# name means a worktree cut from a worktree is still named off the original repo
+# instead of compounding into <repo>--a--b.
+
+set -eu
+
+[ -n "${1:-}" ] || { echo "usage: git wt-create <branch> [base]" >&2; exit 2; }
+
+branch=$1
+base=${2:-}
+
+root=$(git rev-parse --show-toplevel) || { echo "not a git repo" >&2; exit 2; }
+repo=$(basename "$root" | sed 's/--.*//')
+leaf=$(printf '%s' "$branch" | sed 's#^[^/]*/##' | tr '/' '-')
+dest="$(dirname "$root")/$repo--$leaf"
+
+git fetch origin --quiet --prune >&2 || { echo "fetch failed" >&2; exit 1; }
+
+if git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+  mode=local
+  where=locally
+elif git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+  mode=remote
+  where="on origin"
+else
+  mode=new
+fi
+
+if [ "$mode" != new ] && [ -n "$base" ]; then
+  echo "$branch already exists $where" >&2
+  echo "run: git wt-create $branch" >&2
+  exit 2
+fi
+
+case $mode in
+  local)
+    git worktree add "$dest" "$branch" >&2 || exit 1
+    ;;
+  remote)
+    git worktree add --track -b "$branch" "$dest" "origin/$branch" >&2 || exit 1
+    ;;
+  new)
+    if [ -z "$base" ]; then
+      base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo "cannot determine the default branch from origin/HEAD" >&2; exit 2; }
+    elif git rev-parse --verify --quiet "refs/remotes/origin/$base" >/dev/null; then
+      base="origin/$base"
+    fi
+    git worktree add --no-track -b "$branch" "$dest" "$base" >&2 || exit 1
+    ;;
+esac
+
+if [ -f "$dest/package.json" ] && grep -q '"packageManager": *"pnpm@' "$dest/package.json"; then
+  (cd "$dest" && pnpm install --frozen-lockfile) >&2 || exit 1
+fi
+
+echo "$dest"
