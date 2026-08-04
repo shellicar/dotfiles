@@ -325,6 +325,26 @@ worktree_of() {
 
 worktree_dirty() { [ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]; }
 
+# The ignored files a worktree removal takes with it. Neither git status
+# --porcelain nor git worktree remove counts them, so a worktree whose only
+# extra content is ignored reads as clean and is removed with that content
+# still inside it. Fully-ignored directories collapse to a single entry, so the
+# list stays short, and it is capped regardless.
+worktree_ignored() {
+  local all count list
+  all=$(git -C "$1" status --porcelain --ignored 2>/dev/null | sed -n 's/^!! //p')
+  [ -z "$all" ] && return 0
+  count=$(printf '%s\n' "$all" | grep -c .)
+  list=$(printf '%s\n' "$all" | head -6 | awk '{ if (NR > 1) printf ", "; printf "%s", $0 } END { print "" }')
+  [ "$count" -gt 6 ] && list="$list, +$((count - 6)) more"
+  printf '%s ignored entries: %s\n' "$count" "$list"
+}
+
+say_ignored() {
+  [ -n "$1" ] && say "     ${DIM}↳ also deletes $1${RESET}"
+  return 0
+}
+
 # Reason a worktree must not be touched, or empty. Dirty ALWAYS blocks — there is
 # no case where uncommitted work is worth risking. Current worktree blocks too.
 worktree_block_reason() {
@@ -466,7 +486,7 @@ plan_add() {
 }
 
 do_delete() {
-  local branch=$1 wt=$2 icon=$3 desc=$4 meta=$5 flag_set=$6 flag=$7 class=${8:-} what block
+  local branch=$1 wt=$2 icon=$3 desc=$4 meta=$5 flag_set=$6 flag=$7 class=${8:-} what block ignored
 
   block=$(worktree_block_reason "$wt")
   if [ -n "$block" ]; then
@@ -479,10 +499,16 @@ do_delete() {
     SUSPECT_COUNT) SUSPECT_COUNT=$((SUSPECT_COUNT + 1)) ;;
   esac
 
-  what='delete branch'; [ -n "$wt" ] && what='remove worktree + branch'
+  what='delete branch'
+  ignored=''
+  if [ -n "$wt" ]; then
+    what='remove worktree + branch'
+    ignored=$(worktree_ignored "$wt")
+  fi
 
   if [ "$flag_set" != true ]; then
     say "  $icon $branch $meta ${DIM}($desc — would $what, run $flag)${RESET}"
+    say_ignored "$ignored"
     return 0
   fi
 
@@ -490,11 +516,13 @@ do_delete() {
     # This class's own flag is already set (flag_set passed the check above) —
     # --apply is the only thing standing between this branch and removal.
     say "  ${RED}${WOULDREMOVE}${RESET} $branch $meta ${DIM}($desc — would $what, run --apply)${RESET}"
+    say_ignored "$ignored"
     return 0
   fi
 
   plan_add delete "$branch" - - "${wt:--}"
   say "  ${RED}${WOULDREMOVE}${RESET} $branch $meta ${DIM}($desc — will $what)${RESET}"
+  say_ignored "$ignored"
 }
 
 # ── rescue (move the stray commits off, then drop the original) ──────────────
@@ -507,21 +535,24 @@ do_delete() {
 # The gates are decisions, so they stay in the pass. run_rescue is the doing
 # half and runs from the plan.
 do_rescue() {
-  local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" block
+  local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" block ignored
 
   git show-ref --verify --quiet "refs/heads/$dst" && { say "     ${DIM}↳ rescue skipped — $dst already exists${RESET}"; return 0; }
   block=$(worktree_block_reason "$wt")
   [ -n "$block" ] && { say "     ${NOACCESS} rescue blocked — $block"; return 0; }
+  ignored=''
+  [ -n "$wt" ] && ignored=$(worktree_ignored "$wt")
   if [ "$RESCUE" != true ]; then
-    say "     ${DIM}↳ would rescue $n onto main → $dst   (run --rescue)${RESET}"; return 0
+    say "     ${DIM}↳ would rescue $n onto main → $dst   (run --rescue)${RESET}"; say_ignored "$ignored"; return 0
   fi
   if [ "$APPLY" != true ]; then
     # --rescue is already set (the check above passed) — --apply is the only
     # thing standing between this branch and actually being rescued.
-    say "     ${RED}${WOULDREMOVE}${RESET} would rescue $n onto main → $dst   (run --apply)"; return 0
+    say "     ${RED}${WOULDREMOVE}${RESET} would rescue $n onto main → $dst   (run --apply)"; say_ignored "$ignored"; return 0
   fi
   plan_add rescue "$branch" "$join" "$n" "${wt:--}"
   say "     ${RED}${WOULDREMOVE}${RESET} will rescue $n onto main → $dst"
+  say_ignored "$ignored"
 }
 
 run_rescue() {
