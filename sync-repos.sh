@@ -48,7 +48,7 @@ for repo in $REPOS; do
   elif [ "$behind" -gt 0 ]; then
     echo "  Behind by $behind — pulling (rebase)"
     if git pull --rebase --quiet 2>&1; then
-      echo "  Done"
+      echo "  ✅ Done"
     else
       git rebase --abort 2>/dev/null
       stashed=0
@@ -62,7 +62,7 @@ for repo in $REPOS; do
       fi
       if [ "$stashed" -eq 1 ] || [ -z "$(git status --porcelain)" ]; then
         if git pull --rebase --quiet 2>&1; then
-          echo "  Done"
+          echo "  ✅ Done"
         else
           git rebase --abort 2>/dev/null
           echo "  ⚠️ Pull failed again (conflict) — aborted"
@@ -70,7 +70,7 @@ for repo in $REPOS; do
       fi
       if [ "$stashed" -eq 1 ]; then
         if git stash pop --quiet; then
-          echo "  Stash restored"
+          echo "  ✅ Stash restored"
         else
           echo "  ❌ Stash pop failed — resolve manually (stash kept)"
         fi
@@ -82,7 +82,7 @@ for repo in $REPOS; do
     if ! git push --quiet 2>&1; then
       echo "  ❌ Push failed"
     else
-      echo "  Done"
+      echo "  ✅ Done"
     fi
   fi
 
