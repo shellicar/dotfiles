@@ -334,21 +334,18 @@ worktree_block_reason() {
   return 0
 }
 
-# Remove worktree first, then branch. force=true uses -D (needed when the
-# branch's tip commits only exist merged/squashed elsewhere, so git's own
-# reachability check can't see it). force=false uses plain -d — for a branch
-# that never diverged from main (0 commits ahead), git can already tell
-# there's nothing to lose; no force needed, and using it would hide that.
+# Remove worktree first, then branch. Always -D, because the caller has already
+# proved the branch tip is reachable from origin/$MAIN and that is the guarantee
+# that matters. Plain -d checks something else: the branch's upstream if that ref
+# still resolves, and otherwise HEAD. With the remote branch gone it falls back to
+# whichever worktree you happen to be standing in, so it refuses branches that are
+# provably safe.
 remove_branch() {
-  local branch=$1 wt=$2 force=$3
+  local branch=$1 wt=$2
   if [ -n "$wt" ]; then
     git worktree remove "$wt" >/dev/null 2>&1 || { echo "worktree remove failed"; return 1; }
   fi
-  if [ "$force" = true ]; then
-    git branch -D "$branch" >/dev/null 2>&1 || { echo "branch delete failed"; return 1; }
-  else
-    git branch -d "$branch" >/dev/null 2>&1 || { echo "branch delete failed"; return 1; }
-  fi
+  git branch -D "$branch" >/dev/null 2>&1 || { echo "branch delete failed"; return 1; }
   echo removed
   return 0
 }
@@ -389,10 +386,10 @@ process_branch() {
     if [ "$ahead" = 0 ]; then
       # Never diverged from main — NOT a squash-merge detection, just a
       # branch identical to main. Git's own ancestor check already knows
-      # this on its own; a different class, a different flag, plain -d.
+      # this on its own; a different class and a different flag.
       icon="${BLUE}${EMPTYICON}${RESET}"
       desc='never diverged from main'
-      do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_EMPTY" '--empty' false 'EMPTY_COUNT'
+      do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_EMPTY" '--empty' 'EMPTY_COUNT'
       return 0
     fi
     # Fully in main — the squash-merge delete case.
@@ -403,7 +400,7 @@ process_branch() {
       # Content is in main, but the remote branch still exists.
       desc='merged, but remote not gone — check the PR'
     fi
-    do_delete "$branch" "$wt" "$icon" "$desc" "$meta" true '--apply' true 'MERGED_COUNT'
+    do_delete "$branch" "$wt" "$icon" "$desc" "$meta" true '--apply' 'MERGED_COUNT'
     return 0
   fi
 
@@ -443,7 +440,7 @@ process_branch() {
   if [ "$gone" = true ]; then
     # Indicator says merged (remote deleted), content cannot confirm it.
     icon="${RED}${WARN}${RESET}"; desc='gone, but content not found in main'
-    do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_GONE" '--gone' true 'SUSPECT_COUNT'
+    do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_GONE" '--gone' 'SUSPECT_COUNT'
     return 0
   fi
 
@@ -456,12 +453,20 @@ process_branch() {
   fi
 }
 
-# Print, gate on worktree safety, and delete only when this class is selected
-# AND --apply is given. --apply is a single gate at the bottom, never a
-# separate mode: the plan text is identical whether or not it is set, and
-# only the final action is conditional on it.
+# Print, gate on worktree safety, and record the action when this class is
+# selected AND --apply is given. Nothing is deleted here: the pass decides and
+# prints, run_plan carries out what was printed.
+
+# Append one action to the plan. Fields are tab separated and never empty ('-'
+# stands in for an absent worktree or an unused rescue field), because tab is
+# IFS whitespace and consecutive tabs would otherwise collapse into one.
+plan_add() {
+  PLAN="${PLAN}$1${TAB}$2${TAB}$3${TAB}$4${TAB}$5
+"
+}
+
 do_delete() {
-  local branch=$1 wt=$2 icon=$3 desc=$4 meta=$5 flag_set=$6 flag=$7 force=${8:-true} class=${9:-} outcome what block
+  local branch=$1 wt=$2 icon=$3 desc=$4 meta=$5 flag_set=$6 flag=$7 class=${8:-} what block
 
   block=$(worktree_block_reason "$wt")
   if [ -n "$block" ]; then
@@ -488,13 +493,8 @@ do_delete() {
     return 0
   fi
 
-  outcome=$(remove_branch "$branch" "$wt" "$force")
-  if [ "$outcome" = removed ]; then
-    REMOVED_COUNT=$((REMOVED_COUNT + 1))
-    say "  $icon $branch $meta ${DIM}($desc — removed)${RESET}"
-  else
-    say "  ${YELLOW}${WARN}${RESET}$branch $meta ${DIM}($desc — $outcome, skipped)${RESET}"
-  fi
+  plan_add delete "$branch" - - "${wt:--}"
+  say "  ${RED}${WOULDREMOVE}${RESET} $branch $meta ${DIM}($desc — will $what)${RESET}"
 }
 
 # ── rescue (move the stray commits off, then drop the original) ──────────────
@@ -503,8 +503,11 @@ do_delete() {
 # delete the original. The replay happens in an isolated scratch worktree, so a
 # failed attempt never touches your branches or checkouts. Try main first; on
 # conflict fall back to the PR merge commit; if both conflict, leave it for you.
+#
+# The gates are decisions, so they stay in the pass. run_rescue is the doing
+# half and runs from the plan.
 do_rescue() {
-  local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" tmp base_used pr_mc rc outcome block
+  local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" block
 
   git show-ref --verify --quiet "refs/heads/$dst" && { say "     ${DIM}↳ rescue skipped — $dst already exists${RESET}"; return 0; }
   block=$(worktree_block_reason "$wt")
@@ -517,6 +520,12 @@ do_rescue() {
     # thing standing between this branch and actually being rescued.
     say "     ${RED}${WOULDREMOVE}${RESET} would rescue $n onto main → $dst   (run --apply)"; return 0
   fi
+  plan_add rescue "$branch" "$join" "$n" "${wt:--}"
+  say "     ${RED}${WOULDREMOVE}${RESET} will rescue $n onto main → $dst"
+}
+
+run_rescue() {
+  local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" tmp base_used pr_mc rc outcome
 
   tmp=$(mktemp -d) || return 1
   git worktree add -q --detach "$tmp" "origin/$MAIN" 2>/dev/null || {
@@ -544,15 +553,42 @@ do_rescue() {
   fi
 
   # Stray is now preserved on $dst; the original's merged part is in main.
-  # force=true: the original's tip is deliberately not an ancestor of main
-  # (that's why it needed rescuing) so plain -d would always refuse it.
-  outcome=$(remove_branch "$branch" "$wt" true)
+  outcome=$(remove_branch "$branch" "$wt")
   if [ "$outcome" = removed ]; then
     RESCUED_COUNT=$((RESCUED_COUNT + 1))
     say "     ${GREEN}↳ rescued $n → $dst (onto $base_used); original removed${RESET}"
   else
     say "     ${YELLOW}↳ rescued to $dst, but original $outcome${RESET}"
   fi
+}
+
+# ── execute (do exactly what the plan said) ─────────────────────────────
+
+# Decides nothing. Every choice was made in the pass above and is already on
+# screen; this walks the recorded actions and carries them out in order.
+run_plan() {
+  local action branch join n wt outcome
+  while IFS="$TAB" read -r action branch join n wt; do
+    [ -z "$action" ] && continue
+    [ "$wt" = - ] && wt=''
+    case "$action" in
+      delete)
+        outcome=$(remove_branch "$branch" "$wt")
+        if [ "$outcome" = removed ]; then
+          REMOVED_COUNT=$((REMOVED_COUNT + 1))
+          say "  ${GREEN}${OK}${RESET} $branch removed"
+        else
+          say "  ${YELLOW}${WARN}${RESET}$branch: $outcome, skipped"
+        fi
+        ;;
+      rescue)
+        say "  $branch"
+        run_rescue "$branch" "$join" "$n" "$wt"
+        ;;
+    esac
+  done <<EOF
+$PLAN
+EOF
 }
 
 # ── argument parsing ────────────────────────────────────────────────────────
@@ -579,7 +615,7 @@ Options:
   --gone           also delete 'gone' branches whose content can't be found
                    (trusting the remote-deleted indicator)
   --empty          also delete branches that never diverged from main (0
-                   commits ahead) — not a squash-merge detection, just plain -d
+                   commits ahead) — not a squash-merge detection
   --branch BRANCH  check (and, with the other flags, act on) only this
                    branch, instead of walking every local branch — repeat
                    the flag to filter to several
@@ -639,6 +675,7 @@ command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for
 CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
 NOW=$(date +%s)
+TAB=$(printf '\t')
 MAIN=$(get_main_branch)
 ref_exists "origin/$MAIN" || { echo "Error: origin/$MAIN does not exist (fetch origin, or pass -b <branch>)" >&2; exit 1; }
 
@@ -672,7 +709,7 @@ DETACHED=$(git worktree list --porcelain | awk '
 ')
 CUR_WT=$(git rev-parse --show-toplevel 2>/dev/null)
 
-MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0; INCONCLUSIVE_COUNT=0
+MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0; INCONCLUSIVE_COUNT=0; PLAN=''
 
 printf '\n%b\n' "${BOLD}Branches${RESET}"
 if [ -n "$ONLY_BRANCHES" ]; then
@@ -716,8 +753,16 @@ if [ "$SHOW_ALL" = true ]; then
 else
   say "${DIM}$HIDDEN_COUNT unmerged/idle hidden  → -a to show${RESET}"
 fi
-if [ "$APPLY" = true ]; then
-  say "${DIM}removed $REMOVED_COUNT, rescued $RESCUED_COUNT this run${RESET}"
-else
+if [ "$APPLY" != true ]; then
   say "${DIM}dry run — nothing deleted${RESET}"
+elif [ -z "$PLAN" ]; then
+  say "${DIM}nothing to do${RESET}"
+else
+  printf '\n'
+  say "${BOLD}starting in 5 seconds, ctrl-c to abort${RESET}"
+  sleep 5
+  printf '\n'
+  run_plan
+  printf '\n'
+  say "${DIM}removed $REMOVED_COUNT, rescued $RESCUED_COUNT this run${RESET}"
 fi
