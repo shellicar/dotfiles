@@ -1,10 +1,10 @@
 #!/bin/sh
 # Spread origin/main into every worktree of the current repo.
 # Dry run by default; --apply to act; --stash to stash dirty trees first.
-#   git spread                 what would happen
-#   git spread --apply         rebase each worktree onto origin/main
+#   git spread                 print the plan, touch nothing
+#   git spread --apply         print the plan, pause 5 seconds, then carry it out
 #   git spread --stash         dry run, counting dirty trees as stashable
-#   git spread --stash --apply stash -u, rebase, pop
+#   git spread --stash --apply as --apply, stashing dirty trees first
 # Per worktree: main fast-forwards only; others rebase onto origin/main;
 # a conflicted rebase is aborted and reported, never left half-done.
 # Upstreams: a branch that has genuinely diverged from its own remote is
@@ -22,13 +22,28 @@ for arg in "$@"; do
   esac
 done
 
+TAB=$(printf '\t')
+PLAN=''
+
+# One planned action per line. Fields are tab separated and none can be empty,
+# and the worktree path goes last so it absorbs anything unusual in the path.
+plan_add() {
+  PLAN="${PLAN}$1${TAB}$2${TAB}$3${TAB}$4${TAB}$5
+"
+}
+
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repo" >&2; exit 2; }
 
 echo "fetching origin (prune)..."
 git fetch --quiet --prune origin || { echo "❌ fetch failed" >&2; exit 1; }
 target=$(git rev-parse --verify --quiet origin/main) || { echo "❌ no origin/main" >&2; exit 1; }
 
-git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}' | while IFS= read -r wt; do
+# Fed by here-doc, not by a pipe: a while loop downstream of a pipe runs in a
+# subshell, and the plan it built would be discarded at 'done'.
+WORKTREES=$(git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}')
+
+while IFS= read -r wt; do
+  [ -z "$wt" ] && continue
   branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD)
   if [ -z "$branch" ]; then
     printf '⚠️  %s: detached HEAD — skipping\n' "$wt"
@@ -67,20 +82,49 @@ git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}' | while 
     continue
   fi
 
-  verb="rebase onto"
-  [ "$branch" = "main" ] && verb="fast-forward to"
+  verb="rebase onto"; action=rebase
+  [ "$branch" = "main" ] && { verb="fast-forward to"; action=ff; }
 
-  if [ "$apply" -eq 0 ]; then
-    extra=""
-    [ -n "$dirty" ] && extra=" (would stash first)"
-    [ "$push_after" -eq 1 ] && extra="$extra + force-push (with lease)"
-    printf '▶️  %s [%s]: would %s origin/main (behind %s, ahead %s)%s\n' \
-      "$wt" "$branch" "$verb" "$behind" "$ahead" "$extra"
-    continue
-  fi
+  stash_first=0
+  [ -n "$dirty" ] && stash_first=1
+
+  extra=""
+  [ "$stash_first" -eq 1 ] && extra=" (stash first)"
+  [ "$push_after" -eq 1 ] && extra="$extra + force-push (with lease)"
+
+  word=would
+  [ "$apply" -eq 1 ] && word=will
+  printf '▶️  %s [%s]: %s %s origin/main (behind %s, ahead %s)%s\n' \
+    "$wt" "$branch" "$word" "$verb" "$behind" "$ahead" "$extra"
+
+  [ "$apply" -eq 1 ] && plan_add "$action" "$branch" "$stash_first" "$push_after" "$wt"
+done <<EOF
+$WORKTREES
+EOF
+
+if [ "$apply" -eq 0 ]; then
+  echo
+  echo "run: git spread --apply"
+  exit 0
+fi
+
+if [ -z "$PLAN" ]; then
+  echo
+  echo "nothing to do"
+  exit 0
+fi
+
+echo
+echo "starting in 5 seconds, ctrl-c to abort"
+sleep 5
+echo
+
+# Decides nothing. Every choice was made in the pass above and is on screen.
+while IFS="$TAB" read -r action branch stash_first push_after wt; do
+  [ -z "$action" ] && continue
 
   stashed=0
-  if [ -n "$dirty" ]; then
+  if [ "$stash_first" -eq 1 ]; then
     if git -C "$wt" stash push --quiet --include-untracked; then
       stashed=1
     else
@@ -89,7 +133,7 @@ git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}' | while 
     fi
   fi
 
-  if [ "$branch" = "main" ]; then
+  if [ "$action" = ff ]; then
     if git -C "$wt" merge --ff-only --quiet "$target" 2>/dev/null; then
       printf '✅ %s [main]: fast-forwarded\n' "$wt"
     else
@@ -119,4 +163,6 @@ git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}' | while 
       printf '❌ %s [%s]: stash pop failed — resolve manually (stash kept)\n' "$wt" "$branch"
     fi
   fi
-done
+done <<EOF
+$PLAN
+EOF
