@@ -1,3 +1,5 @@
 [user]
   email = hellicars@eagersa.com.au
 	signingkey = 2872861C384F9075
+[cleanup]
+	subscription = 355daa83-8aa8-474b-88e4-124d741a706b
