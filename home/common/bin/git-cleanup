@@ -57,13 +57,12 @@ ensure_in_git_repository() {
   git rev-parse --git-dir >/dev/null 2>&1 || { echo "Error: not in a git repository" >&2; exit 1; }
 }
 
-get_main_branch() {
+get_main_branch() (
   [ -n "$BASE_OVERRIDE" ] && { echo "$BASE_OVERRIDE"; return 0; }
-  local ref
   ref=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null) || {
     echo "Error: cannot determine main branch from origin/HEAD (try -b <branch>)" >&2; exit 1; }
   echo "$ref" | sed 's@^refs/remotes/origin/@@'
-}
+)
 
 fetch_origin() {
   [ "$NO_FETCH" = true ] && { log "skipping fetch (--no-fetch)"; return 0; }
@@ -85,8 +84,8 @@ content_hash() {
 # exists its diff against another commit never changes, so a cache entry
 # never goes stale and needs no invalidation. Repo-local, under .git/, so it
 # survives across runs but never leaks between repos.
-content_hash_cached() {
-  local a=$1 b=$2 key file h
+content_hash_cached() (
+  a=$1 b=$2
   key=$(printf '%s %s' "$a" "$b" | shasum | awk '{print $1}')
   file="$CACHE_DIR/$key"
   if [ -f "$file" ]; then
@@ -97,7 +96,7 @@ content_hash_cached() {
   fi
   # The newline matters: the main index is line-oriented, matched with grep -x.
   printf '%s\n' "$h"
-}
+)
 
 # The PR host origin points at. Decided by the remote, not by which CLI happens
 # to be installed, so a machine with both does not guess wrong.
@@ -113,8 +112,7 @@ pr_host() {
 # normalise to the same triple:
 #   https://{org}@dev.azure.com/{org}/{project}/_git/{repo}
 #   git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
-ado_coordinates() {
-  local url path
+ado_coordinates() (
   url=$(git config --get remote.origin.url 2>/dev/null) || return 1
   case "$url" in
     *ssh.dev.azure.com:v3/*) path=${url#*ssh.dev.azure.com:v3/} ;;
@@ -122,7 +120,7 @@ ado_coordinates() {
   esac
   path=${path%.git}
   printf '%s\t%s\t%s\n' "$(printf '%s' "$path" | cut -d/ -f1)" "$(printf '%s' "$path" | cut -d/ -f2)" "$(printf '%s' "$path" | cut -d/ -f3)"
-}
+)
 
 # One bulk fetch of every merged PR's source branch + merge commit, instead of
 # an API call per branch (~0.5s network round-trip each — 50 branches would be
@@ -205,15 +203,14 @@ pr_merge_commit() {
 # never either alone — a recent branch on a fast repo is far back but still
 # comparable, and an old branch on a quiet repo is only a few commits to check.
 # An explicitly named --branch is never capped: naming it says what --old says.
-branch_beyond_cap() {
+branch_beyond_cap() (
   [ "$EVALUATE_OLD" = true ] && return 1
   [ -n "$ONLY_BRANCHES" ] && return 1
-  local dist last
   dist=$(git rev-list --count "origin/$MAIN" "^$1" 2>/dev/null) || return 1
   [ "$dist" -gt "$MAX_DISTANCE" ] || return 1
   last=$(git log -1 --format=%ct "$1" 2>/dev/null) || return 1
   [ $(( NOW - last )) -gt $(( MAX_AGE_DAYS * 86400 )) ]
-}
+)
 
 # Commits main has moved past the branch's fork, for the inconclusive report.
 distance_from_main() { git rev-list --count "origin/$MAIN" "^$1" 2>/dev/null || echo '?'; }
@@ -223,8 +220,8 @@ distance_from_main() { git rev-list --count "origin/$MAIN" "^$1" 2>/dev/null || 
 # the ancestor check AND the PR check and are within the evaluation cap (only
 # those ever fall through to the content walk). Not a fixed constant — the true
 # maximum this run needs, and 0 (skip entirely) if none qualify.
-compute_max_walk_depth() {
-  local branch base pr_mc dist max=0 branches
+compute_max_walk_depth() (
+  max=0
   branches=${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}
   for branch in $branches; do
     [ "$branch" = "$MAIN" ] && continue
@@ -237,7 +234,7 @@ compute_max_walk_depth() {
     [ "$dist" -gt "$max" ] && max=$dist
   done
   echo "$max"
-}
+)
 
 # ONE shared index of main's commit-content hashes, built once for the whole
 # run at the size compute_max_walk_depth actually needs — not per branch, not
@@ -266,8 +263,8 @@ build_shared_main_index() {
 # fetch_pr_merges), versus walking potentially hundreds of commits. The
 # content walk is the fallback, against the shared MAIN_IDX built once
 # up front by build_shared_main_index — no per-branch walk of main at all.
-commits_not_in_main() {
-  local branch=$1 base c h i pr_mc pr_join
+commits_not_in_main() (
+  branch=$1
   base=$(git merge-base "$branch" "origin/$MAIN" 2>/dev/null) || { echo -1; return; }
   # Fully contained in main (0 unique commits — includes a branch sitting at main).
   git merge-base --is-ancestor "$branch" "origin/$MAIN" && { echo 0; return; }
@@ -301,7 +298,7 @@ commits_not_in_main() {
     i=$((i + 1))
   done
   echo -1
-}
+)
 
 # ── the gone indicator (cross-check only) ───────────────────────────────────
 
@@ -309,13 +306,12 @@ branch_has_upstream() { git config --get "branch.$1.remote" >/dev/null; }
 
 # Had an upstream that is now gone (remote branch deleted). No upstream at all
 # is not "gone" — it is a local-only branch.
-branch_upstream_gone() {
-  local remote merge
+branch_upstream_gone() (
   remote=$(git config --get "branch.$1.remote") || return 1
   merge=$(git config --get "branch.$1.merge") || return 1
   ref_exists "refs/remotes/$remote/${merge#refs/heads/}" && return 1
   return 0
-}
+)
 
 # ── worktrees ───────────────────────────────────────────────────────────────
 
@@ -330,15 +326,14 @@ worktree_dirty() { [ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]; }
 # extra content is ignored reads as clean and is removed with that content
 # still inside it. Fully-ignored directories collapse to a single entry, so the
 # list stays short, and it is capped regardless.
-worktree_ignored() {
-  local all count list
+worktree_ignored() (
   all=$(git -C "$1" status --porcelain --ignored 2>/dev/null | sed -n 's/^!! //p')
   [ -z "$all" ] && return 0
   count=$(printf '%s\n' "$all" | grep -c .)
   list=$(printf '%s\n' "$all" | head -6 | awk '{ if (NR > 1) printf ", "; printf "%s", $0 } END { print "" }')
   [ "$count" -gt 6 ] && list="$list, +$((count - 6)) more"
   printf '%s ignored entries: %s\n' "$count" "$list"
-}
+)
 
 say_ignored() {
   [ -n "$1" ] && say "     ${DIM}↳ also deletes $1${RESET}"
@@ -360,15 +355,15 @@ worktree_block_reason() {
 # still resolves, and otherwise HEAD. With the remote branch gone it falls back to
 # whichever worktree you happen to be standing in, so it refuses branches that are
 # provably safe.
-remove_branch() {
-  local branch=$1 wt=$2
+remove_branch() (
+  branch=$1 wt=$2
   if [ -n "$wt" ]; then
     git worktree remove "$wt" >/dev/null 2>&1 || { echo "worktree remove failed"; return 1; }
   fi
   git branch -D "$branch" >/dev/null 2>&1 || { echo "branch delete failed"; return 1; }
   echo removed
   return 0
-}
+)
 
 # ── the single pass ─────────────────────────────────────────────────────────
 
