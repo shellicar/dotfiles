@@ -6,3 +6,4 @@ tmux
 vim
 gnupg
 xclip
+shellcheck
