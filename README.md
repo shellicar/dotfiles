@@ -36,9 +36,8 @@ Sourced through `load.sh` in two phases:
 
 ## Git
 
-- **Identity & signing** are conditional on the remote URL via `.gitconfig.d/`
-  (`shellicar`, `eagers`, `hopeventures`), using
-  `includeIf "hasconfig:remote.*.url:…"`.
+- **Identity & signing** are conditional on the remote URL, via a per-context file
+  in `.gitconfig.d/` selected by `includeIf "hasconfig:remote.*.url:…"`.
 - **Global ignore** is managed: `core.excludesfile` → `~/dotfiles/.gitignore_global`
   — the always-never-commit bits: `.DS_Store`, `*.log`, `CLAUDE.local.md`,
   `**/.claude/.*` (hidden session files inside any `.claude/`), and
@@ -56,4 +55,4 @@ Sourced through `load.sh` in two phases:
 
 `.vscode/settings.json` is **merged** into the live settings, not symlinked —
 VS Code writes machine-local state (paths, connections) into that file. Run
-`.vscode/merge-settings.sh`: dry-run by default, `-d` / `--destructive` **writes**.
+`.vscode/sync.mjs`: dry-run by default, `--apply` **writes**.
