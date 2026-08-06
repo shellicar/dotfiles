@@ -91,7 +91,8 @@ tmuxa() {
 # --- docker ---
 docker_ip() {
     if [ "$#" = "0" ]; then
-        @="$(docker ps -qa)";
+        # shellcheck disable=SC2046 # container ids are hex with no spaces; splitting into separate arguments is the point
+        set -- $(docker ps -qa)
     fi
 
     docker inspect --format '{{.Name}} - {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$@"

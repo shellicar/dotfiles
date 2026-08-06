@@ -14,16 +14,16 @@
 #     "icon": "terminal-tmux"
 #   }
 # },
-folder_name="$(basename ${1:-$(pwd)})"
-folder_name=$(echo $folder_name | tr '.' '_')
+folder_name="$(basename "${1:-$(pwd)}")"
+folder_name=$(echo "$folder_name" | tr '.' '_')
 folderpath="${2:-$(pwd)}"
 
 ############################### FOLDER ICONS ###################################
 # Construct the path for the folder icon
 FOLDER_ICON_PATH="$folderpath/.icon"
 
-if [ -f $FOLDER_ICON_PATH ]; then
-    folder_icon="$(cat $FOLDER_ICON_PATH)"
+if [ -f "$FOLDER_ICON_PATH" ]; then
+    folder_icon="$(cat "$FOLDER_ICON_PATH")"
 else
     echo "Could not find an .icon file in $folderpath, using the default icon ️️️️️️🖥️"
     folder_icon="🖥️"
