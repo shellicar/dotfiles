@@ -1,7 +1,12 @@
 #!/bin/sh
-# Rebase the current branch onto the default branch and force-push it.
+# Bring the default branch into the current branch and push it.
 #   git catchup           print the plan, touch nothing
 #   git catchup --apply   print the plan, then do it
+# The strategy follows the branch's own history. A branch that has already merged
+# main keeps merging, because a rebase would flatten that merge and discard
+# whatever was resolved in it. That path rewrites nothing, so its push is an
+# ordinary fast-forward. Every other branch is rebased and force-pushed.
+# On the default branch itself it is a fast-forward, and there is nothing to push.
 # Preflight first: local and its remote must be the same commit. If they differ,
 # nothing starts — a rebase that fails at push time leaves local history rewritten
 # and diverged from a remote holding someone else's work.
@@ -25,16 +30,46 @@ main=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo "can
 main=${main#origin/}
 
 branch=$(git symbolic-ref --quiet --short HEAD) || { echo "detached HEAD" >&2; exit 2; }
-[ "$branch" != "$main" ] || { echo "on $main — nothing to rebase" >&2; exit 2; }
-
-[ -z "$(git status --porcelain)" ] || { echo "working tree is dirty" >&2; exit 1; }
 
 git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
 
 target=$(git rev-parse --verify --quiet "origin/$main") || { echo "no origin/$main" >&2; exit 1; }
-upstream=$(git rev-parse --verify --quiet '@{u}') || { echo "$branch has no upstream" >&2; exit 1; }
 
 local_head=$(git rev-parse HEAD)
+
+# On the default branch there is nothing to bring in but itself: a fast-forward,
+# and only ever that, so local commits on $main are refused rather than merged or
+# rebased away. It sits ahead of the preflight below because on $main the upstream
+# IS origin/$main, and being behind your upstream is exactly what that rejects.
+if [ "$branch" = "$main" ]; then
+  if git merge-base --is-ancestor "$target" HEAD; then
+    echo "already up to date with origin/$main — nothing to do"
+    exit 0
+  fi
+
+  echo "plan: fast-forward $main to origin/$main"
+  echo "  branch      $main at $local_head"
+  echo "  onto        origin/$main at $target"
+  echo "  commits     $(git rev-list --count "HEAD..$target") to fast-forward"
+
+  if [ "$apply" -eq 0 ]; then
+    echo "run: git-catchup --apply"
+    exit 0
+  fi
+
+  # No message of our own: git names the exact reason a fast-forward is refused,
+  # whether that is local commits or a modified file the incoming commits touch.
+  git merge --ff-only "$target" || exit 1
+  echo "$main fast-forwarded to origin/$main"
+  exit 0
+fi
+
+# The fast-forward above needs no clean tree: it creates no commit, and git itself
+# refuses when the incoming commits touch a file you have modified. Rebase and
+# merge do need one, because either can stop half-done on top of uncommitted work.
+[ -z "$(git status --porcelain)" ] || { echo "working tree is dirty" >&2; exit 1; }
+
+upstream=$(git rev-parse --verify --quiet '@{u}') || { echo "$branch has no upstream" >&2; exit 1; }
 if [ "$local_head" != "$upstream" ]; then
   echo "$branch and its remote are not the same commit — resolve that first" >&2
   echo "  local  $local_head" >&2
@@ -44,6 +79,51 @@ fi
 
 if git merge-base --is-ancestor "$target" HEAD; then
   echo "already up to date with origin/$main — nothing to do"
+  exit 0
+fi
+
+# Has this branch already merged origin/$main into itself? Then it keeps merging:
+# a rebase would flatten that merge away and discard whatever was resolved in it.
+# The test is the merge commits' parents past the first, not the merge commits
+# themselves. 'git pull' without --rebase also writes a merge commit, but of the
+# branch's own remote, which is not main and is no reason to stop rebasing.
+merge_from_main() (
+  pairs=$(git rev-list --merges --parents "$target..HEAD" | awk '{ for (i = 3; i <= NF; i++) print $1, $i }')
+  while IFS=' ' read -r commit parent; do
+    [ -n "$parent" ] || continue
+    if git merge-base --is-ancestor "$parent" "$target"; then
+      echo "$commit"
+      return 0
+    fi
+  done <<EOF
+$pairs
+EOF
+  return 1
+)
+
+merged_at=$(merge_from_main) || merged_at=''
+
+if [ -n "$merged_at" ]; then
+  echo "plan: merge origin/$main into $branch and push"
+  echo "  branch      $branch at $local_head"
+  echo "  merging     origin/$main at $target"
+  echo "  prior merge $merged_at"
+  echo "  commits     $(git rev-list --count "HEAD..$target") to merge in"
+
+  if [ "$apply" -eq 0 ]; then
+    echo "run: git-catchup --apply"
+    exit 0
+  fi
+
+  # The branch name, not "$target": git builds the default merge message from
+  # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
+  # local and only moves on fetch, and this run fetched once above, so naming it
+  # cannot pick up a commit the plan did not print.
+  git merge --no-edit "origin/$main" || exit 1
+
+  # Nothing was rewritten, so the remote is still an ancestor: an ordinary push.
+  git push --quiet
+  echo "$branch merged origin/$main and pushed"
   exit 0
 fi
 

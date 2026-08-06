@@ -5,12 +5,16 @@
 #   git spread --apply         print the plan, pause 5 seconds, then carry it out
 #   git spread --stash         dry run, counting dirty trees as stashable
 #   git spread --stash --apply as --apply, stashing dirty trees first
-# Per worktree: main fast-forwards only; others rebase onto origin/main;
-# a conflicted rebase is aborted and reported, never left half-done.
+# Per worktree: main fast-forwards only; a branch that has already merged
+# origin/main merges it again; every other branch rebases onto origin/main.
+# The strategy follows the branch's own history, because rebasing a branch that
+# merged main would flatten that merge and discard whatever was resolved in it.
+# A conflicted rebase or merge is aborted and reported, never left half-done.
 # Upstreams: a branch that has genuinely diverged from its own remote is
 # skipped (resolve the branch's own story first). A branch whose upstream
 # was an ancestor is rebased and then pushed --force-with-lease — safe here
-# because the lease reflects the fetch this same run just did.
+# because the lease reflects the fetch this same run just did. A branch that
+# merges rewrites nothing, so its push is an ordinary fast-forward, no lease.
 
 apply=0
 stash=0
@@ -37,6 +41,24 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repo" >&2; exit 2; 
 echo "fetching origin (prune)..."
 git fetch --quiet --prune origin || { echo "❌ fetch failed" >&2; exit 1; }
 target=$(git rev-parse --verify --quiet origin/main) || { echo "❌ no origin/main" >&2; exit 1; }
+
+# Has this branch already merged origin/main into itself? Then it keeps merging:
+# a rebase would flatten that merge away and discard whatever was resolved in it.
+# The test is the merge commits' parents past the first, not the merge commits
+# themselves. 'git pull' without --rebase also writes a merge commit, but of the
+# branch's own remote, which is not main and is no reason to stop rebasing.
+has_merged_main() (
+  parents=$(git -C "$1" rev-list --merges --parents "$target..HEAD" | awk '{ for (i = 3; i <= NF; i++) print $i }')
+  while IFS= read -r parent; do
+    [ -n "$parent" ] || continue
+    if git -C "$1" merge-base --is-ancestor "$parent" "$target"; then
+      return 0
+    fi
+  done <<EOF
+$parents
+EOF
+  return 1
+)
 
 # Fed by here-doc, not by a pipe: a while loop downstream of a pipe runs in a
 # subshell, and the plan it built would be discarded at 'done'.
@@ -82,20 +104,33 @@ while IFS= read -r wt; do
     continue
   fi
 
-  verb="rebase onto"; action=rebase
-  [ "$branch" = "main" ] && { verb="fast-forward to"; action=ff; }
+  # All three icons are double-width with no variation selector, so they take one
+  # trailing space and line up with ✅. The ⚠️ used elsewhere is a narrow base
+  # character wearing FE0F, which is why that one is written with two.
+  verb="rebase onto"; action=rebase; icon='🔁'
+  if [ "$branch" = "main" ]; then
+    verb="fast-forward to"; action=ff; icon='⏩'
+  elif has_merged_main "$wt"; then
+    verb="merge"; action=merge; icon='🔀'
+  fi
 
   stash_first=0
   [ -n "$dirty" ] && stash_first=1
 
   extra=""
   [ "$stash_first" -eq 1 ] && extra=" (stash first)"
-  [ "$push_after" -eq 1 ] && extra="$extra + force-push (with lease)"
+  if [ "$push_after" -eq 1 ]; then
+    if [ "$action" = merge ]; then
+      extra="$extra + push"
+    else
+      extra="$extra + force-push (with lease)"
+    fi
+  fi
 
   word=would
   [ "$apply" -eq 1 ] && word=will
-  printf '▶️  %s [%s]: %s %s origin/main (behind %s, ahead %s)%s\n' \
-    "$wt" "$branch" "$word" "$verb" "$behind" "$ahead" "$extra"
+  printf '%s %s [%s]: %s %s origin/main (behind %s, ahead %s)%s\n' \
+    "$icon" "$wt" "$branch" "$word" "$verb" "$behind" "$ahead" "$extra"
 
   [ "$apply" -eq 1 ] && plan_add "$action" "$branch" "$stash_first" "$push_after" "$wt"
 done <<EOF
@@ -138,6 +173,25 @@ while IFS="$TAB" read -r action branch stash_first push_after wt; do
       printf '✅ %s [main]: fast-forwarded\n' "$wt"
     else
       printf '⚠️  %s [main]: cannot fast-forward (local commits?) — skipped\n' "$wt"
+    fi
+  elif [ "$action" = merge ]; then
+    # The branch name, not "$target": git builds the default merge message from
+    # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
+    # local and only moves on fetch, and this run fetched once at the start, so
+    # naming it cannot pick up a commit the plan did not print.
+    if git -C "$wt" merge --quiet --no-edit origin/main >/dev/null 2>&1; then
+      if [ "$push_after" -eq 1 ]; then
+        if git -C "$wt" push --quiet 2>/dev/null; then
+          printf '✅ %s [%s]: merged origin/main, pushed\n' "$wt" "$branch"
+        else
+          printf '⚠️  %s [%s]: merged, but push failed (remote moved?) — push manually\n' "$wt" "$branch"
+        fi
+      else
+        printf '✅ %s [%s]: merged origin/main\n' "$wt" "$branch"
+      fi
+    else
+      git -C "$wt" merge --abort 2>/dev/null
+      printf '⚠️  %s [%s]: merge conflict — aborted, untouched\n' "$wt" "$branch"
     fi
   else
     if git -C "$wt" rebase --quiet "$target" >/dev/null 2>&1; then
