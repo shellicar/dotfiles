@@ -31,19 +31,19 @@ for repo in $REPOS; do
     continue
   fi
 
-  if ! git rev-parse @{u} >/dev/null 2>&1; then
+  if ! git rev-parse '@{u}' >/dev/null 2>&1; then
     echo "  ❌ No upstream configured — skipping"
     continue
   fi
 
-  ahead=$(git rev-list @{u}..HEAD --count)
-  behind=$(git rev-list HEAD..@{u} --count)
+  ahead=$(git rev-list '@{u}..HEAD' --count)
+  behind=$(git rev-list 'HEAD..@{u}' --count)
 
   if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
     echo "  ✅ Up to date ($(git rev-parse --short HEAD))"
 
   elif [ "$ahead" -gt 0 ] && [ "$behind" -gt 0 ]; then
-    echo "  ⚠️ Diverged (ahead $ahead, behind $behind) — local $(git rev-parse --short HEAD) vs upstream $(git rev-parse --short @{u}) — skipping"
+    echo "  ⚠️ Diverged (ahead $ahead, behind $behind) — local $(git rev-parse --short HEAD) vs upstream $(git rev-parse --short '@{u}') — skipping"
 
   elif [ "$behind" -gt 0 ]; then
     echo "  Behind by $behind — pulling (rebase)"

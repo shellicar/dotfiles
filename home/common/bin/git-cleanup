@@ -38,7 +38,7 @@ else
   GREEN=''; YELLOW=''; RED=''; BLUE=''; DIM=''; BOLD=''; RESET=''
 fi
 
-OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; DIRTY='📝'; EMPTYICON='≡'; UNKNOWN='?'; WOULDREMOVE='\342\235\227'
+OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; EMPTYICON='≡'; UNKNOWN='?'; WOULDREMOVE='\342\235\227'
 
 say() { printf '%b\n' "$*"; }
 log() { [ "$VERBOSE" = true ] && printf '%b\n' "${DIM}[git cleanup] $*${RESET}" >&2; return 0; }

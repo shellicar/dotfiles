@@ -70,14 +70,14 @@ tm() {
 }
 
 tmuxa() {
-  if [[ -n "$1" ]]; then
+  if [ -n "$1" ]; then
     session_match="$(tmux ls -F '#{session_name}' | grep -i "$1" | head -n 1)"
   else
     session_match="$(tmux ls -F '#{session_name}' | head -n 1)"
   fi
 
-  if [[ -n "$session_match" ]]; then
-    if [[ -n "$TMUX" ]]; then
+  if [ -n "$session_match" ]; then
+    if [ -n "$TMUX" ]; then
       tmux switch-client -t "$session_match"
     else
       tmux a -t "$session_match"

@@ -3,7 +3,7 @@
 
 remove_bom() {
     find . -type f -not -path '*/.git/*' -print0 | \
-    xargs -0 grep -rl $'^\xEF\xBB\xBF' | \
+    xargs -0 grep -rl "^$(printf '\357\273\277')" | \
     xargs -d '\n' sed -i '1s/^\xEF\xBB\xBF//'
 }
 

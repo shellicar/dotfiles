@@ -65,9 +65,7 @@ test_sign() {
   fi
 
   echo "Testing sign with key $key_id ($email)..."
-  echo "banana" | gpg --local-user "$key_id" --clearsign > /dev/null 2>&1
-
-  if [ $? -eq 0 ]; then
+  if echo "banana" | gpg --local-user "$key_id" --clearsign > /dev/null 2>&1; then
     echo "Signing works."
   else
     echo "Signing failed."
