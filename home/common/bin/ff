@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# ff: find files under $HOME, skipping the directories that swamp the results.
+#
+#   ff                 every file under $HOME
+#   ff -name '*.ts'    the same, narrowed by any find expression
+#
+# Two kinds of thing are pruned, which is why some are matched by -name and some
+# by -path. Library, node_modules, .git, .cache, .Trash and the four toolchain
+# caches recur at any depth, so they are matched by name wherever they turn up.
+# The last three are single fixed locations, and a bare -name TV would prune any
+# directory called TV anywhere in a repo, so those are matched by exact path.
+#
+# The toolchain caches are downloaded content, never authored, so a hit inside
+# one is never the file being looked for. They are about 185,000 files.
+#
+# Desktop, Movies/TV and the photo library are pruned because macOS refuses to
+# open them at all (TCC, unless the terminal is granted Full Disk Access). Left
+# in, each one puts an "Operation not permitted" line on stderr AND makes find
+# exit 1, so the command reported failure on every successful run. Pruning is
+# what makes the exit status mean something again.
+#
+# The trailing -print is required, not decoration. find supplies its own -print
+# only when the expression names no action at all, and that default wraps the
+# whole expression, so the pruned directories are printed too. Naming -print on
+# the right of the -o is what confines the output to the files that survived.
+#
+# Extra arguments land between -type f and -print, so they are ANDed onto the
+# surviving side alone. A leading -o among them would regroup the expression and
+# defeat the prune, so pass alternation as its own \( ... \) group.
+
+find "$HOME" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" \) -prune -o -type f "$@" -print
