@@ -27,7 +27,7 @@ esac
 
 major="$1"
 
-detected_os=$(dirname "$0")/get-os.sh
+detected_os=$(dirname "$0")/../get-os.sh
 
 case $($detected_os) in
   wsl|linux)
@@ -55,17 +55,32 @@ esac
 asset="gitversion-${platform}-${tag}.tar.gz"
 dest="$HOME/.gitversion/$major"
 
+# A setup re-run is expected to bring things up to date, which is what brew
+# bundle and apt-get install already do, so this compares against the wanted
+# version rather than mere presence. Bumping LATEST_5 or LATEST_6 would
+# otherwise never take effect on a machine that already had something.
+# gitversion reports 6.6.0+Branch.main.Sha.abc123; the build metadata after
+# the + varies per build and is not part of the release version.
+have=$("$dest/gitversion" version 2>/dev/null) || have=''
+if [ "${have%%+*}" = "$tag" ]; then
+  echo "GitVersion $tag already installed at $dest"
+  exit 0
+fi
+
 echo "Installing GitVersion $tag ($platform) to $dest"
 
 mkdir -p "$dest"
 tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
+# The public release URL needs no authentication, so this does not drag in the
+# GitHub CLI, which is in neither setup/macos/Brewfile nor setup/linux/packages
+# and is not a one-line apt install on older Debian. -f is what makes a 404 a
+# failed download rather than an error page saved as a tarball.
+url="https://github.com/GitTools/GitVersion/releases/download/$tag/$asset"
+
 echo "Downloading $asset..."
-gh release download "$tag" \
-  --repo GitTools/GitVersion \
-  --pattern "$asset" \
-  --dir "$tmpdir"
+curl -fsSL -o "$tmpdir/$asset" "$url"
 
 echo "Extracting..."
 tar -xzf "$tmpdir/$asset" -C "$dest"

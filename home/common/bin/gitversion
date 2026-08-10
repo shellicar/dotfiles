@@ -34,7 +34,7 @@ fi
 bin="$HOME/.gitversion/$version/gitversion"
 if [ ! -x "$bin" ]; then
   echo "Error: GitVersion $version not installed at $bin" >&2
-  echo "Run: ~/dotfiles/install-gitversion.sh $version" >&2
+  echo "Run: ~/dotfiles/setup/install-gitversion.sh $version" >&2
   exit 1
 fi
 
