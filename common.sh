@@ -6,47 +6,6 @@ alias vi='vim'
 alias gitlog='git log --graph --oneline'
 
 # --- git ---
-git_main() {
-  # Fetch and prune branches
-  echo "Fetching"
-  if git fetch -p; then
-    # Check if 'main' branch exists on remote
-    if git ls-remote --heads origin main | grep 'refs/heads/main' >/dev/null; then
-      target_branch="main"
-    elif git ls-remote --heads origin master | grep 'refs/heads/master' >/dev/null; then
-      # Fallback to 'master' if 'main' does not exist
-      target_branch="master"
-    else
-      echo "Neither 'main' nor 'master' branch exists on remote."
-      return 1
-    fi
-    echo "Target branch: $target_branch"
-
-    # Get the current branch name
-    current_branch=$(git branch --show-current)
-    echo "Current branch: $current_branch"
-
-    # Check if the current branch is 'main'
-    if [ "$current_branch" = "$target_branch" ]; then
-      # Pull the latest changes on 'main'
-      echo "Pulling"
-      git pull
-    else
-      # Check if 'main' branch exists locally
-      if git rev-parse --verify $target_branch >/dev/null 2>&1; then
-        # Delete 'main' branch if it exists
-        echo "Deleting target branch"
-        git branch -d $target_branch
-      fi
-      # Checkout 'main' branch
-      echo "Checking out target branch"
-      git checkout $target_branch --
-    fi
-  else
-    echo "Failed to fetch branches."
-  fi
-}
-
 # wt <branch> [base] — create a sibling worktree (<repo>--<leaf>) via the "git
 # wt-create" alias (fetch, worktree add, pnpm install if applicable), then cd into
 # it. A git alias can't cd the caller (runs in a subprocess), so the cd lives here.

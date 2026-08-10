@@ -1,0 +1,87 @@
+#!/bin/sh
+#
+# git main: put the default branch at origin's tip, and put you on it.
+#
+#   git main
+#
+# The whole plan is worked out first, refused if it cannot be carried out, and
+# only then acted on. The act itself is a single command because git offers no
+# transaction. The obvious two-step form, `git branch -d main` followed by
+# `git checkout main`, is not safe: a dirty tree refuses the checkout but not
+# the delete, so the repo is left with no local main at all. `git switch -C` is
+# documented not to reset the branch unless the switch succeeds, so a refusal
+# leaves the branch, the tree and the current checkout exactly as they were.
+#
+# -m carries uncommitted work across the switch. Without it, a dirty file that
+# also differs between here and origin refuses the switch outright, and landing
+# on the default branch is the point of the command. One consequence: when the
+# reapply conflicts, git still exits 0, leaving conflict markers and a stash
+# entry behind. A zero exit from this script is therefore not proof of a clean
+# tree, and git's own advice for that state is printed on stderr when it happens.
+#
+# Commits on local main are tagged rather than refused. -C is `git branch -f`
+# underneath, and its output is identical whether it fast-forwards or discards,
+# so git itself never tells you which one happened. The tag is the only thing
+# keeping those commits reachable afterwards:
+#
+#   git tag --list 'git-main/*'
+#
+# Nothing prunes those tags. They are cheap, and one of them is the only record
+# that work on the default branch ever existed.
+
+set -eu
+
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repo" >&2; exit 2; }
+
+main=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo "cannot determine the default branch from origin/HEAD" >&2; exit 2; }
+main=${main#origin/}
+
+git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
+
+target=$(git rev-parse --verify --quiet "origin/$main") || { echo "no origin/$main" >&2; exit 1; }
+
+current=$(git symbolic-ref --quiet --short HEAD) || current=''
+
+# A branch held by another worktree cannot be switched to. git refuses cleanly,
+# but only after the plan below has already claimed it was going to switch, so
+# the holder is found first. Being on $main ourselves is the one case where the
+# holder is this worktree, and a branch can be held by no more than one.
+if [ "$current" != "$main" ]; then
+  held=$(git worktree list --porcelain | awk -v want="refs/heads/$main" '
+    /^worktree / { path = substr($0, 10) }
+    /^branch /   { if (substr($0, 8) == want) print path }
+  ')
+  [ -z "$held" ] || { echo "$main is checked out at $held" >&2; exit 1; }
+fi
+
+tag=''
+local_sha=$(git rev-parse --verify --quiet "refs/heads/$main") || local_sha=''
+
+if [ -z "$local_sha" ]; then
+  echo "plan: create $main at origin/$main"
+elif [ "$local_sha" = "$target" ]; then
+  echo "plan: $main is already at origin/$main"
+elif git merge-base --is-ancestor "$local_sha" "$target"; then
+  echo "plan: fast-forward $main by $(git rev-list --count "$local_sha..$target") commit(s)"
+else
+  tag="git-main/$main-$(date +%Y%m%d-%H%M%S)"
+  echo "plan: tag $(git rev-list --count "$target..$local_sha") commit(s) on $main as $tag, then reset $main to origin/$main"
+fi
+
+if [ "$current" = "$main" ]; then
+  echo "      already on $main"
+else
+  echo "      switch from ${current:-detached HEAD} to $main"
+fi
+
+# Nothing to move and nowhere to go. The reset would succeed and change
+# nothing, but it still prints "Reset branch" and lists every modified file,
+# which reads as though something happened.
+if [ "$current" = "$main" ] && [ "$local_sha" = "$target" ]; then
+  exit 0
+fi
+
+# Before the switch, not after: -C is what makes them unreachable.
+[ -z "$tag" ] || git tag "$tag" "$local_sha"
+
+git switch -m -C "$main" "origin/$main"
