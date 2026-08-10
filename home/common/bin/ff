@@ -29,4 +29,4 @@
 # surviving side alone. A leading -o among them would regroup the expression and
 # defeat the prune, so pass alternation as its own \( ... \) group.
 
-find "$HOME" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" \) -prune -o -type f "$@" -print
+find "$PWD" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" \) -prune -o -type f "$@" -print
