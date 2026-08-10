@@ -66,7 +66,6 @@ logic: extract it here instead.
 - `gitversion` — GitVersion wrapper; finds its config by walking up the tree.
 - `tmux-snapshot`, `tmux-snapshot-watch` — capture and rehydrate a tmux server's
   layout; the watcher is started by tmux itself via `run-shell -b`.
-- `alerter` — vendored macOS notification binary.
 
 Each script's header comment carries its own reasoning. Read that before changing
 one; it holds the why that the code cannot.
