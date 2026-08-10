@@ -21,5 +21,11 @@ brew bundle --file="$DIR/Brewfile"
 # fnm install --lts
 # fnm default <version>
 
-# 4. Link the configs into $HOME.
+# 4. GitVersion, both majors. The `gitversion` wrapper picks one per repo from
+#    that repo's GitVersion.yml, so a machine carrying only one still fails
+#    wherever the other is wanted.
+"$DIR/../install-gitversion.sh" 5
+"$DIR/../install-gitversion.sh" 6
+
+# 5. Link the configs into $HOME.
 "$DOTFILES/install.sh"

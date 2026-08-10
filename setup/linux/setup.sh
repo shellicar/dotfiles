@@ -25,5 +25,11 @@ if ! command -v pnpm >/dev/null 2>&1 && [ ! -x "${PNPM_HOME:-$HOME/.local/share/
   curl -fsSL https://get.pnpm.io/install.sh | sh -
 fi
 
-# 4. Link the configs into $HOME.
+# 4. GitVersion, both majors. The `gitversion` wrapper picks one per repo from
+#    that repo's GitVersion.yml, so a machine carrying only one still fails
+#    wherever the other is wanted.
+"$DIR/../install-gitversion.sh" 5
+"$DIR/../install-gitversion.sh" 6
+
+# 5. Link the configs into $HOME.
 "$DOTFILES/install.sh"
