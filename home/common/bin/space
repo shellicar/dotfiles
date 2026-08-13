@@ -1,0 +1,443 @@
+#!/bin/sh
+#
+# space — find what is eating the disk, and reclaim it one named strategy at a
+# time.
+#
+# Two halves that never mix. FINDING walks the machine and reports what could be
+# reclaimed; it changes nothing, and is the whole of what a bare `space` does.
+# EXECUTING acts on named strategies, and only ever under --apply.
+#
+#   space                              every strategy, measured
+#   space --docker-images              the plan
+#   space --docker-images --apply      that plan, after a 5s pause
+#   space --apply                      refused: no strategy named
+#
+# NAMING A STRATEGY NEVER ACTS. It only decides what is in the plan. --apply is
+# the single flag that does anything.
+#
+# THE PLAN IS A LIST, NOT A COMMAND, wherever a list can be had. `docker image
+# prune --filter` re-decides what to remove at the moment it runs, so what was
+# printed and what happens are two readings of the world, in the way `du -hs *`
+# then `rm -rf *` expands the glob twice. The docker strategies therefore resolve
+# concrete IDs while planning and remove exactly those IDs. pnpm cannot: `pnpm
+# store` has no list command, only `prune`, which decides for itself. That one
+# strategy is a delegation and is marked as such rather than pretended otherwise.
+#
+# AGE APPLIES TO CONTAINERS AND NOTHING ELSE, because recoverability differs. A
+# deleted image is a re-pull. A deleted container is gone, along with whatever
+# sits in its writable layer, so age is the safety margin on the irreversible
+# half. Containers are also the only docker object whose last use is actually
+# recorded — State.StartedAt and State.FinishedAt say when it really ran.
+#
+# AN IMAGE HAS NO USABLE AGE. `--filter until=` on images compares LastTagTime,
+# which is when the image was tagged on this machine, not when it was built and
+# not whether anything uses it. It answers a question nobody asked, so the image
+# strategy has no age criterion: the candidates are every image, minus an
+# exclusion.
+#
+# THE EXCLUSION IS CONTAINERS. An image referenced by a container cannot be
+# removed, in any container state, and no property of the image changes that. So
+# the image candidates are every image less those held by containers that SURVIVE
+# THIS PLAN — which is knowable while planning, because the container plan is
+# already resolved. Running both strategies therefore frees more images than
+# running the image one alone, and the printed plan shows the larger set rather
+# than a pre-removal guess.
+#
+# CONTAINER REMOVAL KEEPS VOLUMES. `docker rm` without -v leaves named and
+# anonymous volumes alone; only the container's writable layer goes.
+
+set -u
+
+# ── presentation ────────────────────────────────────────────────────────────
+
+if [ -t 1 ]; then
+  YELLOW='\033[1;33m'; RED='\033[0;31m'
+  DIM='\033[2m'; BOLD='\033[1m'; RESET='\033[0m'
+else
+  YELLOW=''; RED=''; DIM=''; BOLD=''; RESET=''
+fi
+
+say() { printf '%b\n' "$*"; }
+step() { printf '%b' "  ${DIM}$*${RESET} "; return 0; }
+step_done() { printf '%b\n' "${DIM}$*${RESET}"; return 0; }
+
+# KiB in, one human figure out. Everything internal is KiB so every row is
+# comparable; only this function knows about units.
+human() {
+  awk -v k="$1" 'BEGIN {
+    if (k >= 1073741824)   printf "%.1fT", k / 1073741824
+    else if (k >= 1048576) printf "%.1fG", k / 1048576
+    else if (k >= 1024)    printf "%.1fM", k / 1024
+    else                   printf "%dK", k
+  }'
+}
+
+# Docker prints base-1000 sizes (kB/MB/GB, as units.HumanSize does); du -k is
+# base-1024 KiB. Converting through bytes rather than pretending they are the
+# same keeps the docker rows comparable with the du rows instead of 7% adrift.
+docker_kib() {
+  awk -v s="$1" 'BEGIN {
+    n = s + 0
+    if (s ~ /TB/)      n *= 1000000000000
+    else if (s ~ /GB/) n *= 1000000000
+    else if (s ~ /MB/) n *= 1000000
+    else if (s ~ /kB/) n *= 1000
+    printf "%d", n / 1024
+  }'
+}
+
+# shellcheck disable=SC2088  # the tilde is output, not a path to be expanded
+tilde() { case "$1" in "$HOME"/*) printf '~/%s' "${1#"$HOME"/}" ;; *) printf '%s' "$1" ;; esac; }
+
+dir_kib() { du -sk "$1" 2>/dev/null | awk '{print $1 + 0}'; }
+
+# grep -c prints its count AND exits 1 when that count is zero, so the obvious
+# `grep -c . || echo 0` emits two lines on an empty list. Always succeed instead.
+count() { grep -c .; return 0; }
+
+# One column layout, used by the survey and by every plan block, so a strategy
+# reads the same wherever it appears.
+head_row() { printf "${BOLD}  %-18s %9s %9s  %s${RESET}\n" STRATEGY TOTAL RECLAIM DETAIL; }
+row() { printf "  %-18s %9s %9s  ${DIM}%s${RESET}\n" "$1" "$(human "$2")" "$(human "$3")" "$4"; }
+detail() { printf "      ${DIM}%9s  %s${RESET}\n" "$1" "$2"; }
+cmd() { printf "      ${DIM}%s${RESET}\n" "$1"; }
+
+show_disk() {
+  printf "${BOLD}  %-22s %9s %9s %9s %6s${RESET}\n" FILESYSTEM SIZE USED FREE USE%
+  df -k "$HOME" | awk 'NR == 2 {print $NF "\t" $2 "\t" $3 "\t" $4 "\t" $5}' | while IFS="$TAB" read -r mount size used free pct; do
+    printf '  %-22s %9s %9s %9s %6s\n' "$mount" "$(human "$size")" "$(human "$used")" "$(human "$free")" "$pct"
+  done
+}
+
+# An RFC3339 instant AGE_HOURS in the past, for a lexical comparison against
+# docker's own timestamps (both UTC, both YYYY-MM-DDTHH:MM:SS, so string order is
+# time order). BSD and GNU date spell the arithmetic differently and neither
+# accepts the other's flag, so both are tried and the one that works wins — a
+# capability test, not a test of which OS this is.
+cutoff() {
+  date -u -v-"$1"H '+%Y-%m-%dT%H:%M:%S' 2>/dev/null && return 0
+  date -u -d "-$1 hours" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null && return 0
+  echo "space: this date(1) understands neither -v nor -d; cannot compute a cutoff" >&2
+  return 1
+}
+
+# ── the plan ────────────────────────────────────────────────────────────────
+
+# Tab separated, one action per line. Verbs:
+#   run <command>   a command to execute as written (delegation; see header)
+#   del <path>      a directory tree to delete
+#   rmc <id>        a container to remove
+#   rmi <id>        an image to remove
+plan_add() { PLAN="${PLAN}$1${TAB}$2
+"; }
+
+# ── finding ─────────────────────────────────────────────────────────────────
+
+# One inspect pass over every container:
+#   id \t name \t status \t imageId \t lastUse
+# lastUse is the most recent of created, started and finished. A container that
+# never ran carries 0001-01-01 in the timestamps it never reached, which sorts
+# below everything, so the maximum is always the real answer.
+container_rows() {
+  docker ps -aq 2>/dev/null | while IFS= read -r c; do
+    docker container inspect "$c" --format '{{.Id}}	{{.Name}}	{{.State.Status}}	{{.Image}}	{{.Created}}	{{.State.StartedAt}}	{{.State.FinishedAt}}' 2>/dev/null
+  done | awk -F'\t' 'NF == 7 {
+    last = $5; if ($6 > last) last = $6; if ($7 > last) last = $7
+    sub(/^\//, "", $2)
+    printf "%s\t%s\t%s\t%s\t%s\n", $1, $2, $3, $4, substr(last, 1, 19)
+  }'
+}
+
+# docker ps --size measures every container's writable layer, so it is asked once
+# per run and read from CSIZES thereafter, not re-run per container.
+CSIZES=''
+container_kib() { printf '%s\n' "$CSIZES" | awk -F'\t' -v id="$1" '$1 == id {print $2; exit}' | awk '{print $1}'; }
+
+# Stopped containers last used before the cutoff. Running containers are never
+# candidates, whatever their age.
+find_docker_containers() {
+  DC_LIST=''; DC_COUNT=0; DC_KIB=0; DC_TOTAL_KIB=0; DC_NOTE='not installed'
+  command -v docker >/dev/null 2>&1 || return 0
+  DC_NOTE='not running'
+  docker info >/dev/null 2>&1 || return 0
+  CUTOFF=$(cutoff "$AGE_HOURS") || return 1
+  CSIZES=$(docker ps -a --no-trunc --size --format '{{.ID}}	{{.Size}}' 2>/dev/null)
+
+  all=$(container_rows)
+  total=$(printf '%s\n' "$all" | count)
+  DC_LIST=$(printf '%s\n' "$all" | awk -F'\t' -v cut="$CUTOFF" '$3 != "running" && $5 < cut {print $1 "\t" $2 "\t" $5}')
+  DC_COUNT=$(printf '%s\n' "$DC_LIST" | count)
+  DC_NOTE="$total containers, $DC_COUNT idle over ${AGE_HOURS}h"
+  DC_TOTAL_KIB=$(printf '%s\n' "$all" | while IFS="$TAB" read -r id _ _ _ _; do [ -n "$id" ] && docker_kib "$(container_kib "$id")"; printf '\n'; done | awk '{t += $1} END {print t + 0}')
+  [ "$DC_COUNT" -eq 0 ] && return 0
+  DC_KIB=$(printf '%s\n' "$DC_LIST" | while IFS="$TAB" read -r id _ _; do [ -n "$id" ] && docker_kib "$(container_kib "$id")"; printf '\n'; done | awk '{t += $1} END {print t + 0}')
+  return 0
+}
+
+# Every image, less those held by a container that survives this plan. No age:
+# an image's timestamps say nothing about whether it is in use, and the only
+# thing that can stop a removal is a container holding it.
+find_docker_images() {
+  DI_LIST=''; DI_COUNT=0; DI_KIB=0; DI_TOTAL_KIB=0; DI_NOTE='not installed'
+  command -v docker >/dev/null 2>&1 || return 0
+  DI_NOTE='not running'
+  docker info >/dev/null 2>&1 || return 0
+
+  sizes=$(docker image ls -a --no-trunc --format '{{.ID}}	{{.Repository}}:{{.Tag}}	{{.Size}}' 2>/dev/null)
+  total=$(printf '%s\n' "$sizes" | count)
+
+  # Images pinned by containers that are NOT going. When --docker-containers is
+  # also running, the containers in its plan are excluded here, which is what
+  # makes the combined image list larger than the image-only one.
+  pinned=$(container_rows | awk -F'\t' '{print $1 "\t" $4}' | while IFS="$TAB" read -r cid iid; do
+    if [ "$CONTAINERS" = true ] && printf '%s\n' "$DC_LIST" | cut -f1 | grep -qxF "$cid"; then continue; fi
+    printf '%s\n' "$iid"
+  done | sort -u)
+
+  DI_LIST=$(printf '%s\n' "$sizes" | while IFS="$TAB" read -r iid tag sz; do
+    [ -n "$iid" ] || continue
+    printf '%s\n' "$pinned" | grep -qxF "$iid" && continue
+    printf '%s\t%s\t%s\n' "$iid" "$tag" "$sz"
+  done)
+  DI_COUNT=$(printf '%s\n' "$DI_LIST" | count)
+  DI_NOTE="$total images, $((total - DI_COUNT)) pinned"
+  DI_TOTAL_KIB=$(printf '%s\n' "$sizes" | while IFS="$TAB" read -r _ _ sz; do [ -n "$sz" ] && docker_kib "$sz"; printf '\n'; done | awk '{t += $1} END {print t + 0}')
+  DI_KIB=$(printf '%s\n' "$DI_LIST" | while IFS="$TAB" read -r _ _ sz; do [ -n "$sz" ] && docker_kib "$sz"; printf '\n'; done | awk '{t += $1} END {print t + 0}')
+  return 0
+}
+
+find_pnpm() {
+  PNPM_KIB=0; PNPM_NOTE='not installed'; PNPM_STORE=''
+  command -v pnpm >/dev/null 2>&1 || return 0
+  PNPM_NOTE='no store'
+  PNPM_STORE=$(pnpm store path 2>/dev/null) || return 0
+  [ -n "$PNPM_STORE" ] && [ -d "$PNPM_STORE" ] || return 0
+  PNPM_KIB=$(dir_kib "$PNPM_STORE")
+  PNPM_NOTE=$(tilde "$PNPM_STORE")
+}
+
+# Top-level node_modules only: -prune stops the walk at each one, so a nested
+# copy is counted inside its parent rather than listed again beside it.
+find_node_modules() {
+  NM_KIB=0; NM_LIST=''; NM_COUNT=0; NM_NOTE='no repos directory'
+  [ -d "$REPOS_DIR" ] || return 0
+  NM_LIST=$(find "$REPOS_DIR" -type d -name node_modules -prune -print 2>/dev/null)
+  NM_COUNT=$(printf '%s\n' "$NM_LIST" | count)
+  NM_NOTE="$NM_COUNT dirs"
+  [ "$NM_COUNT" -eq 0 ] && return 0
+  NM_KIB=$(printf '%s\n' "$NM_LIST" | while IFS= read -r d; do du -sk "$d" 2>/dev/null; done | awk '{t += $1} END {print t + 0}')
+}
+
+# Every cache directory this machine actually has. Both paths are always
+# considered; the one this OS does not use simply is not a directory, so it
+# contributes nothing. No OS is ever named, which is why this is not the runtime
+# branch CLAUDE.md forbids — the same code means the same thing everywhere.
+cache_dirs() {
+  for d in "$HOME/Library/Caches" "$HOME/.cache"; do
+    [ -d "$d" ] && printf '%s\n' "$d"
+  done
+  return 0
+}
+
+find_caches() {
+  CACHES_KIB=$(cache_dirs | while IFS= read -r d; do du -sk "$d" 2>/dev/null; done | awk '{t += $1} END {print t + 0}')
+  CACHES_NOTE="$(cache_dirs | count) dirs"
+}
+
+# ── planning ────────────────────────────────────────────────────────────────
+
+# Each plan_* prints its row and its actions, then records those same actions.
+# Printing and recording happen together so the two cannot disagree.
+
+plan_docker_containers() {
+  row docker-containers "$DC_TOTAL_KIB" "$DC_KIB" "$DC_NOTE"
+  [ "$DC_COUNT" -eq 0 ] && return 0
+  printf '%s\n' "$DC_LIST" | while IFS="$TAB" read -r id name last; do
+    [ -n "$id" ] && detail "$(human "$(docker_kib "$(container_kib "$id")")")" "$name  $last"
+  done
+  PLAN="${PLAN}$(printf '%s\n' "$DC_LIST" | cut -f1 | sed "s|^|rmc$TAB|")
+"
+}
+
+plan_docker_images() {
+  row docker-images "$DI_TOTAL_KIB" "$DI_KIB" "$DI_NOTE"
+  [ "$DI_COUNT" -eq 0 ] && return 0
+  printf '%s\n' "$DI_LIST" | head -10 | while IFS="$TAB" read -r id tag sz; do
+    [ -n "$id" ] && detail "$sz" "$tag"
+  done
+  [ "$DI_COUNT" -gt 10 ] && printf "      ${DIM}+%d more${RESET}\n" "$((DI_COUNT - 10))"
+  PLAN="${PLAN}$(printf '%s\n' "$DI_LIST" | cut -f1 | sed "s|^|rmi$TAB|")
+"
+}
+
+plan_pnpm() {
+  row pnpm "$PNPM_KIB" "$PNPM_KIB" "$PNPM_NOTE"
+  [ "$PNPM_KIB" -eq 0 ] && return 0
+  cmd 'pnpm store prune'
+  plan_add run 'pnpm store prune'
+}
+
+plan_node_modules() {
+  row node-modules "$NM_KIB" "$NM_KIB" "$NM_NOTE"
+  [ "$NM_COUNT" -eq 0 ] && return 0
+  printf '%s\n' "$NM_LIST" | head -10 | while IFS= read -r d; do
+    detail "$(human "$(dir_kib "$d")")" "${d#"$REPOS_DIR"/}"
+  done
+  [ "$NM_COUNT" -gt 10 ] && printf "      ${DIM}+%d more${RESET}\n" "$((NM_COUNT - 10))"
+  PLAN="${PLAN}$(printf '%s\n' "$NM_LIST" | sed "s|^|del$TAB|")
+"
+}
+
+# The contents, never the directory itself: an app expects its cache directory to
+# exist and only some recreate it.
+plan_caches() {
+  row caches "$CACHES_KIB" "$CACHES_KIB" "$CACHES_NOTE"
+  [ "$CACHES_KIB" -eq 0 ] && return 0
+  cache_dirs | while IFS= read -r d; do detail "$(human "$(dir_kib "$d")")" "$(tilde "$d")"; done
+  PLAN="${PLAN}$(cache_dirs | while IFS= read -r d; do find "$d" -mindepth 1 -maxdepth 1 -print 2>/dev/null; done | sed "s|^|del$TAB|")
+"
+}
+
+# ── execute ─────────────────────────────────────────────────────────────────
+
+# Decides nothing. Every action was chosen above and is already on screen.
+# Containers before images: the plan already assumed that order when it decided
+# which images were still pinned.
+run_plan() {
+  for verb in rmc rmi del run; do
+    printf '%s\n' "$PLAN" | while IFS="$TAB" read -r v target; do
+      [ "$v" = "$verb" ] || continue
+      case "$v" in
+        rmc) docker rm "$target" >/dev/null 2>&1 || printf "      ${YELLOW}%s${RESET}  %s\n" failed "$target" ;;
+        rmi) docker image rm "$target" >/dev/null 2>&1 || printf "      ${YELLOW}%s${RESET}  %s\n" failed "$target" ;;
+        del) rm -rf "$target" 2>/dev/null || printf "      ${YELLOW}%s${RESET}  %s\n" failed "$target" ;;
+        run) cmd "$target"; sh -c "$target" 2>&1 | sed 's/^/      /' ;;
+      esac
+    done
+  done
+}
+
+# ── argument parsing ────────────────────────────────────────────────────────
+
+usage() {
+  cat <<EOF
+Usage: space [strategy ...] [--apply]
+
+No arguments measures every strategy. Naming a strategy prints its plan. Neither
+changes anything; --apply is the only flag that acts, and it acts on the named
+strategies alone.
+
+Strategies:
+  --docker-containers  remove stopped containers last used over ${AGE_HOURS}h ago
+  --docker-images      remove every image no surviving container holds
+  --docker             both, in one pass
+  --pnpm               prune the pnpm store of packages nothing references
+  --node-modules       delete every node_modules under $REPOS_DIR
+  --caches             empty the cache directories this machine has
+
+Options:
+  --age HOURS      idle cutoff for --docker-containers (default $AGE_HOURS)
+  --apply          carry out the plan, after printing it and pausing 5 seconds
+  -h, --help       show this help
+
+Age applies to containers alone. A removed image is a re-pull; a removed
+container, and whatever is in its writable layer, is not recoverable. Volumes
+survive either way.
+
+Running --docker-containers frees images that were pinned only by those
+containers, so --docker plans a larger image set than --docker-images alone.
+
+Exit: 0 fine, 1 nothing to do, 64 the invocation itself was wrong.
+EOF
+}
+
+CONTAINERS=false; IMAGES=false; PNPM=false; NODE_MODULES=false; CACHES=false; APPLY=false; AGE_SET=false
+AGE_HOURS=720
+REPOS_DIR="$HOME/repos"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --docker-containers) CONTAINERS=true ;;
+    --docker-images) IMAGES=true ;;
+    --docker) CONTAINERS=true; IMAGES=true ;;
+    --pnpm) PNPM=true ;;
+    --node-modules) NODE_MODULES=true ;;
+    --caches) CACHES=true ;;
+    --age) shift; [ $# -gt 0 ] || { echo "space: --age requires a number of hours" >&2; exit 64; }; AGE_HOURS=${1%h}; AGE_SET=true ;;
+    --apply) APPLY=true ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "space: unknown argument: $1" >&2; usage >&2; exit 64 ;;
+  esac
+  shift
+done
+
+case "$AGE_HOURS" in ''|*[!0-9]*) echo "space: --age must be a whole number of hours" >&2; exit 64 ;; esac
+if [ "$AGE_SET" = true ] && [ "$CONTAINERS" = false ]; then
+  echo "space: --age applies to --docker-containers, which was not named" >&2
+  exit 64
+fi
+
+TAB=$(printf '\t')
+PLAN=''
+NAMED=false
+for s in "$CONTAINERS" "$IMAGES" "$PNPM" "$NODE_MODULES" "$CACHES"; do [ "$s" = true ] && NAMED=true; done
+
+if [ "$APPLY" = true ] && [ "$NAMED" = false ]; then
+  echo "space: --apply with no strategy named" >&2
+  printf '  %s\n' --docker --docker-containers --docker-images --pnpm --node-modules --caches >&2
+  exit 64
+fi
+
+# ── the report ──────────────────────────────────────────────────────────────
+
+printf '\n'
+show_disk
+printf '\n'
+
+# A bare run measures everything; a named run measures only what it will plan.
+# Containers are resolved before images either way, because the image candidates
+# depend on which containers survive.
+wanted() { [ "$NAMED" = false ] || [ "$1" = true ]; }
+
+wanted "$CONTAINERS" && { step docker-containers; find_docker_containers; step_done "$(human "$DC_KIB")"; }
+wanted "$IMAGES" && { step docker-images; find_docker_images; step_done "$(human "$DI_KIB")"; }
+wanted "$PNPM" && { step pnpm; find_pnpm; step_done "$(human "$PNPM_KIB")"; }
+wanted "$NODE_MODULES" && { step node-modules; find_node_modules; step_done "$(human "$NM_KIB")"; }
+wanted "$CACHES" && { step caches; find_caches; step_done "$(human "$CACHES_KIB")"; }
+
+printf '\n'
+head_row
+
+if [ "$NAMED" = false ]; then
+  row docker-containers "$DC_TOTAL_KIB" "$DC_KIB" "$DC_NOTE"
+  row docker-images "$DI_TOTAL_KIB" "$DI_KIB" "$DI_NOTE"
+  row pnpm "$PNPM_KIB" "$PNPM_KIB" "$PNPM_NOTE"
+  row node-modules "$NM_KIB" "$NM_KIB" "$NM_NOTE"
+  row caches "$CACHES_KIB" "$CACHES_KIB" "$CACHES_NOTE"
+  printf '\n'
+  row TOTAL "$((DC_TOTAL_KIB + DI_TOTAL_KIB + PNPM_KIB + NM_KIB + CACHES_KIB))" "$((DC_KIB + DI_KIB + PNPM_KIB + NM_KIB + CACHES_KIB))" ''
+  printf '\n'
+  exit 0
+fi
+
+[ "$CONTAINERS" = true ] && plan_docker_containers
+[ "$IMAGES" = true ] && plan_docker_images
+[ "$PNPM" = true ] && plan_pnpm
+[ "$NODE_MODULES" = true ] && plan_node_modules
+[ "$CACHES" = true ] && plan_caches
+
+printf '\n'
+[ -z "$PLAN" ] && { say "${DIM}nothing to do${RESET}"; exit 1; }
+
+if [ "$APPLY" != true ]; then
+  say "${DIM}dry run — nothing removed${RESET}"
+  exit 0
+fi
+
+say "${RED}${BOLD}applying in 5 seconds, ctrl-c to abort${RESET}"
+sleep 5
+printf '\n'
+run_plan
+printf '\n'
+show_disk
+printf '\n'
