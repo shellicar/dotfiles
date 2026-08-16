@@ -1,9 +1,10 @@
 #!/bin/sh
 #
-# ff: find files under $HOME, skipping the directories that swamp the results.
+# ff: find under $HOME, skipping the directories that swamp the results.
 #
-#   ff                 every file under $HOME
-#   ff -name '*.ts'    the same, narrowed by any find expression
+#   ff                    every entry under $HOME
+#   ff -name '*.ts'       the same, narrowed by any find expression
+#   ff -type d -name src  directories only
 #
 # Two kinds of thing are pruned, which is why some are matched by -name and some
 # by -path. Library, node_modules, .git, .cache, .Trash and the four toolchain
@@ -23,10 +24,20 @@
 # The trailing -print is required, not decoration. find supplies its own -print
 # only when the expression names no action at all, and that default wraps the
 # whole expression, so the pruned directories are printed too. Naming -print on
-# the right of the -o is what confines the output to the files that survived.
+# the right of the -o is what confines the output to the entries that survived.
 #
-# Extra arguments land between -type f and -print, so they are ANDed onto the
-# surviving side alone. A leading -o among them would regroup the expression and
-# defeat the prune, so pass alternation as its own \( ... \) group.
+# Extra arguments are wrapped in their own \( ... \) group, so an -o among them
+# alternates inside the group instead of splitting the whole expression. Ungrouped,
+# find's implicit -a binds tighter than -o, so `-name a -o -name b` became three OR'd
+# branches: the prune, then `-name a` with no action attached, then `-name b` carrying
+# the -print. Matches for a printed nothing, and matches for b escaped the type filter.
+# The prune survived it, being the first branch and short-circuiting, so what broke was
+# the filtering rather than the pruning.
+#
+# No -type is imposed, so the caller filters or does not: -type f, -type d, neither.
+# With no arguments the group would be empty, which find rejects, so -true fills it.
+# -true is not a POSIX primary but both BSD and GNU find have it.
 
-find "$PWD" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" \) -prune -o -type f "$@" -print
+[ $# -eq 0 ] && set -- -true
+
+find "$PWD" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" \) -prune -o \( "$@" \) -print
