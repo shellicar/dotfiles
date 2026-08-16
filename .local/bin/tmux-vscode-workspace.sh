@@ -4,8 +4,7 @@
 # Identity = the per-server .code-workspace file (one per tmux server).
 # Content  = the folders listed inside it, added to and never removed.
 #
-# Rewriting the file live-updates the already-open window in place. On every focus
-# the server's window is raised to the front so it is the visible VS Code window.
+# Rewriting the file live-updates the already-open window in place.
 # The window is opened (osascript) only when none exists yet. `code` CLI does not
 # work from a run-shell hook, so osascript is used to open.
 exec >> /tmp/tmux-vscode-workspace.log 2>&1
@@ -86,11 +85,8 @@ if [ ! -f "$WS_FILE" ] || [ "$NEW" != "$(cat "$WS_FILE")" ]; then
   mv "$WS_FILE.tmp" "$WS_FILE"
 fi
 
-# Find this server's window (match the title prefix we set) and raise it to the
-# front so it is the visible VS Code window. raise() brings it forward WITHOUT
-# taking keyboard focus from tmux; swap raise() -> focus() if you want the
-# keyboard to follow into VS Code. Nothing here touches Spaces.
-OPEN=$("$HS" -c 'local a=hs.application.get("Code"); local p="'"$NAME"' - "; local found="n"; if a then for _,w in ipairs(a:allWindows()) do local t=w:title() or ""; if t:sub(1,#p)==p then w:raise(); found="y"; break end end end; print(found)' 2>/dev/null)
+# Does this server already have a window? Match the title prefix we set.
+OPEN=$("$HS" -c 'local a=hs.application.get("Code"); local p="'"$NAME"' - "; local found="n"; if a then for _,w in ipairs(a:allWindows()) do local t=w:title() or ""; if t:sub(1,#p)==p then found="y"; break end end end; print(found)' 2>/dev/null)
 
 # No window yet: open one (osascript brings VS Code forward on first open).
 if [ "$OPEN" != "y" ]; then
