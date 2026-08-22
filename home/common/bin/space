@@ -298,7 +298,57 @@ plan_caches() {
 "
 }
 
+# ── logging ─────────────────────────────────────────────────────────────────
+#
+# The record of an --apply, and of nothing else: a dry run changed nothing, so
+# it has nothing to say. It is written when execution begins rather than when
+# the plan is printed, so a ctrl-c during the countdown leaves no trace of work
+# that never happened, while a crash partway through leaves the whole intent
+# beside the part that finished.
+#
+# Tab separated: when, what happened, the verb, the target.
+#   apply   an invocation, and the arguments it was given
+#   plan    chosen, and about to be attempted
+#   ok      done
+#   failed  attempted and refused
+#   ran     a delegated command was executed, and only it knows what it removed
+#
+# XDG_STATE_HOME is where the base directory spec puts an actions history:
+# worth keeping across restarts, not worth backing up, which is what separates
+# it from XDG_DATA_HOME. The spec also asks that a missing directory be created
+# 0700.
+
+LOG_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/space/log"
+
+now() { date '+%Y-%m-%dT%H:%M:%S%z'; }
+
+log() { printf '%s\t%s\t%s\t%s\n' "$(now)" "$1" "$2" "$3" >> "$LOG_FILE"; }
+
+# The whole plan, at one instant, before any of it is attempted. Every action is
+# written, including the ones the screen summarised away as "+966 more".
+log_plan() {
+  # shellcheck disable=SC2174  # 0700 is asked of the log directory, not of ~/.local
+  mkdir -p -m 700 "${LOG_FILE%/*}"
+  log_ts=$(now)
+  printf '%s\t%s\t%s\n' "$log_ts" apply "space $ARGV" >> "$LOG_FILE"
+  printf '%s\n' "$PLAN" | while IFS="$TAB" read -r v target; do
+    [ -n "$v" ] && printf '%s\t%s\t%s\t%s\n' "$log_ts" plan "$v" "$target"
+  done >> "$LOG_FILE"
+}
+
 # ── execute ─────────────────────────────────────────────────────────────────
+
+# One place decides what an outcome looks like, so the log and the screen cannot
+# disagree about what happened. A failure is loud in both; a success is silent on
+# screen and recorded in the log.
+outcome() {
+  if [ "$1" -eq 0 ]; then
+    log ok "$2" "$3"
+  else
+    log failed "$2" "$3"
+    printf "      ${YELLOW}%s${RESET}  %s\n" failed "$3"
+  fi
+}
 
 # Decides nothing. Every action was chosen above and is already on screen.
 # Containers before images: the plan already assumed that order when it decided
@@ -308,10 +358,10 @@ run_plan() {
     printf '%s\n' "$PLAN" | while IFS="$TAB" read -r v target; do
       [ "$v" = "$verb" ] || continue
       case "$v" in
-        rmc) docker rm "$target" >/dev/null 2>&1 || printf "      ${YELLOW}%s${RESET}  %s\n" failed "$target" ;;
-        rmi) docker image rm "$target" >/dev/null 2>&1 || printf "      ${YELLOW}%s${RESET}  %s\n" failed "$target" ;;
-        del) rm -rf "$target" 2>/dev/null || printf "      ${YELLOW}%s${RESET}  %s\n" failed "$target" ;;
-        run) cmd "$target"; sh -c "$target" 2>&1 | sed 's/^/      /' ;;
+        rmc) docker rm "$target" >/dev/null 2>&1; outcome "$?" rmc "$target" ;;
+        rmi) docker image rm "$target" >/dev/null 2>&1; outcome "$?" rmi "$target" ;;
+        del) rm -rf "$target" 2>/dev/null; outcome "$?" del "$target" ;;
+        run) cmd "$target"; sh -c "$target" 2>&1 | sed 's/^/      /'; log ran run "$target" ;;
       esac
     done
   done
@@ -347,6 +397,9 @@ survive either way.
 Running --docker-containers frees images that were pinned only by those
 containers, so --docker plans a larger image set than --docker-images alone.
 
+An --apply appends its plan, and what came of each action, to
+$LOG_FILE
+
 Exit: 0 fine, 1 nothing to do, 64 the invocation itself was wrong.
 EOF
 }
@@ -354,6 +407,7 @@ EOF
 CONTAINERS=false; IMAGES=false; PNPM=false; NODE_MODULES=false; CACHES=false; APPLY=false; AGE_SET=false
 AGE_HOURS=720
 REPOS_DIR="$HOME/repos"
+ARGV=$*
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -437,7 +491,9 @@ fi
 say "${RED}${BOLD}applying in 5 seconds, ctrl-c to abort${RESET}"
 sleep 5
 printf '\n'
+log_plan
 run_plan
+say "${DIM}logged to $(tilde "$LOG_FILE")${RESET}"
 printf '\n'
 show_disk
 printf '\n'
