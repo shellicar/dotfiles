@@ -65,7 +65,7 @@ NEW=$("$JQ" -n \
   --arg active "$ACTIVE" \
   --arg inactive "$INACTIVE" \
   '{
-     folders: (($existing + [ { path: $folder } ]) | reduce .[] as $f ([]; if any(.[]; .path == $f.path) then . else . + [$f] end)),
+     folders: (($existing + [ { path: $folder } ]) | reduce .[] as $f ([]; if any(.[]; .path == $f.path) then . else . + [$f] end) | sort_by(.name // (.path | split("/") | last))),
      settings: {
        "window.title": $title,
        "workbench.colorCustomizations": {
