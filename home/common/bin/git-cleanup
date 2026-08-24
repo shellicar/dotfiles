@@ -26,6 +26,27 @@
 #
 # gone never changes the verdict. Strip it away and the merge check reads the
 # same.
+#
+# A DETACHED WORKTREE has no branch to speak for it, so the commit it is parked
+# on is the subject, and five facts about that commit decide it:
+#
+#   uncommitted  the worktree holds changes that exist nowhere else
+#   in main      the commit's work is in the trunk
+#   merged PR    a merged pull request carries the commit
+#   open PR      an open pull request carries the commit
+#   on a ref     a branch, remote branch or tag contains the commit
+#
+# Those collapse to two questions. FINISHED is in main or merged PR: the work it
+# was made for has landed, so the worktree has no future. LIVE is uncommitted,
+# on a ref, or open PR: something there is still going on.
+#
+#   uncommitted → keep      finished → remove
+#   live        → keep      neither  → unsure, said plainly rather than guessed
+#
+# ON A REF IS A KEEP, NEVER A REMOVE. A branch still holding the commit says the
+# work is not finished, and a worktree of unfinished work is one you may still
+# want, whether you made it an hour ago or a year ago. Age says nothing here and
+# is not consulted.
 
 set -u
 
@@ -48,6 +69,21 @@ log() { [ "$VERBOSE" = true ] && printf '%b\n' "${DIM}[git cleanup] $*${RESET}" 
 # label ends its own line, or the log output lands in the middle of it.
 step() { printf '%b' "  ${DIM}$*${RESET} "; [ "$VERBOSE" = true ] && printf '\n'; return 0; }
 step_done() { [ "$VERBOSE" = true ] && printf '    '; printf '%b\n' "${DIM}$*${RESET}"; return 0; }
+
+# A branch or worktree untouched for a week or more is a signal it is likely
+# safe to clean up, so it reads GREEN rather than a warning colour. Weeks,
+# months and years are always old; "N days ago" only counts once N reaches 7,
+# git showing day-granularity up to ~13 days before it switches to weeks.
+age_colour() (
+  case "$1" in
+    *' week'*|*' month'*|*' year'*) printf '%s' "$GREEN"; return 0 ;;
+    *' day'*)
+      n=$(printf '%s' "$1" | awk '{print $1}')
+      case "$n" in ''|*[!0-9]*) ;; *) [ "$n" -ge 7 ] && { printf '%s' "$GREEN"; return 0; } ;; esac
+      ;;
+  esac
+  printf '%s' "$DIM"
+)
 
 # ── repository context ──────────────────────────────────────────────────────
 
@@ -197,6 +233,37 @@ pr_merge_commit() {
   printf '%s\n' "$PR_MERGE_TABLE" | awk -F'\t' -v b="$1" '$1==b{print $2; exit}'
 }
 
+# Which pull requests carry each detached commit. Asked from the commit end, so
+# the cost is one call per detached worktree rather than a walk over every pull
+# request and its commits — and no local object is needed, where testing
+# ancestry against a pull request's head sha needs a commit that garbage
+# collection is entitled to have taken. Azure DevOps has no equivalent endpoint,
+# so there the fact is simply absent and the others decide. A failed call is the
+# same as no pull request, which sends a worktree towards unsure, never towards
+# removal.
+fetch_detached_prs() {
+  DETACHED_PR_TABLE=''
+  local head rows
+  [ -z "$DETACHED" ] && return 0
+  [ "$(pr_host 2>/dev/null)" = github ] || return 0
+  command -v gh >/dev/null 2>&1 || return 0
+  while IFS="$TAB" read -r head _; do
+    [ -z "$head" ] && continue
+    rows=$(gh api "repos/{owner}/{repo}/commits/$head/pulls" --jq '.[] | [(if .merged_at then "merged" elif .state == "open" then "open" else "closed" end), "PR #\(.number) \(.head.ref)"] | @tsv' 2>/dev/null) || continue
+    [ -z "$rows" ] && continue
+    DETACHED_PR_TABLE="$DETACHED_PR_TABLE$(printf '%s\n' "$rows" | awk -v h="$head" '{print h "\t" $0}')
+"
+  done <<EOF
+$DETACHED
+EOF
+}
+
+# The label of a pull request of the given kind (merged/open/closed) carrying
+# this commit, or empty.
+detached_pr() {
+  printf '%s\n' "$DETACHED_PR_TABLE" | awk -F'\t' -v h="$1" -v k="$2" '$1==h && $2==k {print $3; exit}'
+}
+
 # Past the cap the content walk is skipped: main has moved far enough that the
 # branch's paths have likely been restructured out from under the comparison, so
 # the walk is both the expensive check and the futile one. Distance AND age,
@@ -222,8 +289,11 @@ distance_from_main() { git rev-list --count "origin/$MAIN" "^$1" 2>/dev/null || 
 # maximum this run needs, and 0 (skip entirely) if none qualify.
 compute_max_walk_depth() (
   max=0
-  branches=${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}
-  for branch in $branches; do
+  revs=${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}
+  # Detached heads reach the same content walk, so the index has to be deep
+  # enough for them too, not just for the branches.
+  [ -z "$ONLY_BRANCHES" ] && revs="$revs $(printf '%s' "$DETACHED" | cut -f1)"
+  for branch in $revs; do
     [ "$branch" = "$MAIN" ] && continue
     base=$(git merge-base "$branch" "origin/$MAIN" 2>/dev/null) || continue
     git merge-base --is-ancestor "$branch" "origin/$MAIN" 2>/dev/null && continue
@@ -321,6 +391,12 @@ worktree_of() {
 
 worktree_dirty() { [ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]; }
 
+# The first branch, remote branch or tag containing the commit, or empty. Local
+# branches sort ahead of remotes and tags, so a local name is preferred.
+commit_on_ref() {
+  git for-each-ref --contains "$1" --format='%(refname:short)' --count=1 refs/heads refs/remotes refs/tags 2>/dev/null
+}
+
 # The ignored files a worktree removal takes with it. Neither git status
 # --porcelain nor git worktree remove counts them, so a worktree whose only
 # extra content is ignored reads as clean and is removed with that content
@@ -375,22 +451,9 @@ process_branch() {
 
   ahead=$(git rev-list --count "origin/$MAIN..$branch" 2>/dev/null || echo '?')
   last=$(git log -1 --format=%cr "$branch" 2>/dev/null)
-  # Flag anything a week or older — weeks/months/years are always old; "N
-  # days ago" only counts once N reaches 7 (git shows day-granularity up to
-  # ~13 days before switching to weeks). GREEN, not a warning colour: a
-  # branch untouched this long is a signal it's likely safe to clean up,
-  # not a signal to worry about it.
-  age_color="$DIM"
-  case "$last" in
-    *' week'*|*' month'*|*' year'*) age_color="$GREEN" ;;
-    *' day'*)
-      days_num=$(printf '%s' "$last" | awk '{print $1}')
-      case "$days_num" in ''|*[!0-9]*) ;; *) [ "$days_num" -ge 7 ] && age_color="$GREEN" ;; esac
-      ;;
-  esac
   # The commit count stays full-brightness (not dimmed) — it's the number
   # that actually matters when deciding whether a branch is worth a look.
-  meta="${DIM}[${RESET}$ahead ahead${DIM}, ${RESET}${age_color}${last}${RESET}${DIM}]${RESET}"
+  meta="${DIM}[${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
 
   # Verdict (content) and indicator (gone) computed independently.
   not_in_main=$(commits_not_in_main "$branch")
@@ -468,6 +531,43 @@ process_branch() {
   fi
 }
 
+say_keeping() { say "  ${DIM}${KEEP} $1${RESET} $2 ${DIM}($3 — keeping)${RESET}"; }
+
+# The five facts, in the order that decides. Each rule that fires is the whole
+# reason, and it is the reason printed.
+process_detached() {
+  local wt=$1 head=$2 name short ahead last meta pr ref
+
+  name=$(basename "$wt")
+  short=$(git rev-parse --short "$head" 2>/dev/null)
+  ahead=$(git rev-list --count "origin/$MAIN..$head" 2>/dev/null || echo '?')
+  last=$(git log -1 --format=%cr "$head" 2>/dev/null)
+  meta="${DIM}[${RESET}$short${DIM}, ${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
+
+  # Uncommitted, or the worktree you are standing in.
+  ref=$(worktree_block_reason "$wt")
+  [ -n "$ref" ] && { say_keeping "$name" "$meta" "$ref"; return 0; }
+
+  # Finished: the trunk has the work, by content or by a merged pull request.
+  if [ "$(commits_not_in_main "$head")" = 0 ]; then
+    do_delete_worktree "$wt" "$name" 'work already in main' "$meta"; return 0
+  fi
+  pr=$(detached_pr "$head" merged)
+  [ -n "$pr" ] && { do_delete_worktree "$wt" "$name" "merged in $pr" "$meta"; return 0; }
+
+  # Live: a branch still holds it, or a pull request is still open on it.
+  ref=$(commit_on_ref "$head")
+  [ -n "$ref" ] && { say_keeping "$name" "$meta" "on $ref"; return 0; }
+  pr=$(detached_pr "$head" open)
+  [ -n "$pr" ] && { say_keeping "$name" "$meta" "$pr is open"; return 0; }
+
+  # Nothing claims it either way.
+  UNSURE_COUNT=$((UNSURE_COUNT + 1))
+  pr=$(detached_pr "$head" closed)
+  [ -n "$pr" ] && pr="$pr closed without merging" || pr='on no branch, in no pull request'
+  say "  ${YELLOW}${UNKNOWN}${RESET} $name $meta ${DIM}($pr — unsure)${RESET}"
+}
+
 # Print, gate on worktree safety, and record the action when this class is
 # selected AND --apply is given. Nothing is deleted here: the pass decides and
 # prints, run_plan carries out what was printed.
@@ -517,6 +617,31 @@ do_delete() {
 
   plan_add delete "$branch" - - "${wt:--}"
   say "  ${RED}${WOULDREMOVE}${RESET} $branch $meta ${DIM}($desc — will $what)${RESET}"
+  say_ignored "$ignored"
+}
+
+# The branchless twin of do_delete: same two gates, but there is only a worktree
+# to take away, and the caller has already cleared the keep rules.
+do_delete_worktree() {
+  local wt=$1 name=$2 desc=$3 meta=$4 ignored
+
+  DETACHED_COUNT=$((DETACHED_COUNT + 1))
+  ignored=$(worktree_ignored "$wt")
+
+  if [ "$APPLY_DETACHED" != true ]; then
+    say "  ${GREEN}${OK}${RESET} $name $meta ${DIM}($desc — would remove worktree, run --detached)${RESET}"
+    say_ignored "$ignored"
+    return 0
+  fi
+
+  if [ "$APPLY" != true ]; then
+    say "  ${RED}${WOULDREMOVE}${RESET} $name $meta ${DIM}($desc — would remove worktree, run --apply)${RESET}"
+    say_ignored "$ignored"
+    return 0
+  fi
+
+  plan_add detached "$name" - - "$wt"
+  say "  ${RED}${WOULDREMOVE}${RESET} $name $meta ${DIM}($desc — will remove worktree)${RESET}"
   say_ignored "$ignored"
 }
 
@@ -607,6 +732,14 @@ run_plan() {
           say "  ${YELLOW}${WARN}${RESET}$branch: $outcome, skipped"
         fi
         ;;
+      detached)
+        if git worktree remove "$wt" >/dev/null 2>&1; then
+          REMOVED_COUNT=$((REMOVED_COUNT + 1))
+          say "  ${GREEN}${OK}${RESET} $branch removed"
+        else
+          say "  ${YELLOW}${WARN}${RESET}$branch: worktree remove failed, skipped"
+        fi
+        ;;
       rescue)
         say "  $branch"
         run_rescue "$branch" "$join" "$n" "$wt"
@@ -627,11 +760,19 @@ Deletes local branches (and their worktrees) whose commits are already in the
 main branch. The merge check is the verdict; 'gone' (remote branch deleted) is
 only an indicator, surfaced when it disagrees with the content.
 
+A worktree with no branch on it is judged on the commit it is parked on: removed
+when that work has landed, kept when anything says the work is still going, and
+reported as unsure when neither is true. Whether a branch still holds the commit
+is a reason to keep it, never a reason to remove it, and its age is not used.
+
   merged (0 commits on top)  → deleted by --apply
   merged + N commits on top  → rescued (stray commits moved off), then deleted, by --rescue
   gone but content not found → warned; deleted by --gone if you trust it
   unmerged                   → kept
   too far behind             → inconclusive, not evaluated; evaluated by --old
+  detached, work landed      → removed by --detached
+  detached, work still going → kept
+  detached, neither          → unsure, reported and kept
 
 Options:
   --apply          delete the fully-merged branches (and their worktrees)
@@ -642,6 +783,8 @@ Options:
                    (trusting the remote-deleted indicator)
   --empty          also delete branches that never diverged from main (0
                    commits ahead) — not a squash-merge detection
+  --detached       also remove worktrees with no branch on them, whose commit is
+                   in main or carried by a merged pull request
   --branch BRANCH  check (and, with the other flags, act on) only this
                    branch, instead of walking every local branch — repeat
                    the flag to filter to several
@@ -656,7 +799,7 @@ Options:
   -h, --help       show this help
 
 Default (no flag) is a dry-run report. A branch whose worktree is dirty, or that
-you are standing in, is never touched.
+you are standing in, is never touched, and the same holds for a detached one.
 
 Azure DevOps repos read git config 'cleanup.subscription' for a subscription in
 the org's tenant, which is what resolves the identity to authenticate as. Set it
@@ -669,7 +812,7 @@ one login per subscription, so without this the second login evicts the first.
 EOF
 }
 
-APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=5; ONLY_BRANCHES=''; EVALUATE_OLD=false
+APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; APPLY_DETACHED=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=5; ONLY_BRANCHES=''; EVALUATE_OLD=false
 
 # The evaluation cap. Both must be exceeded before a branch is left unevaluated.
 MAX_DISTANCE=100; MAX_AGE_DAYS=30
@@ -683,6 +826,7 @@ while [ $# -gt 0 ]; do
     --rescue) RESCUE=true ;;
     --gone) APPLY_GONE=true ;;
     --empty) APPLY_EMPTY=true ;;
+    --detached) APPLY_DETACHED=true ;;
     --branch) shift; [ $# -gt 0 ] || { echo "Error: --branch requires a branch name" >&2; exit 1; }; ONLY_BRANCHES="$ONLY_BRANCHES $1" ;;
     -a|--all) SHOW_ALL=true ;;
     --depth) shift; [ $# -gt 0 ] || { echo "Error: --depth requires a number" >&2; exit 1; }; WALK_DEPTH=$1 ;;
@@ -721,21 +865,32 @@ fetch_pr_merges
 step_done "$(printf '%s' "$PR_MERGE_TABLE" | grep -c .) found ($PR_SOURCE)"
 [ -n "$PR_HINT" ] && say "$PR_HINT"
 
-step 'indexing main ...'
-build_shared_main_index
-step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
-
 WT_MAP=$(git worktree list --porcelain | awk '
   /^worktree /   { p = substr($0, 10) }
   /^branch refs\/heads\// { print substr($0, 19) "\t" p }
 ')
+# HEAD comes before the branch/detached line of each entry, so the sha is in
+# hand by the time the kind is known.
 DETACHED=$(git worktree list --porcelain | awk '
   /^worktree /   { p = substr($0, 10) }
-  /^detached/    { print p }
+  /^HEAD /       { h = substr($0, 6) }
+  /^detached/    { print h "\t" p }
 ')
 CUR_WT=$(git rev-parse --show-toplevel 2>/dev/null)
 
-MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0; INCONCLUSIVE_COUNT=0; PLAN=''
+# After DETACHED: the index depth is sized for the detached heads too.
+step 'indexing main ...'
+build_shared_main_index
+step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
+
+DETACHED_PR_TABLE=''
+if [ -n "$DETACHED" ] && [ -z "$ONLY_BRANCHES" ]; then
+  step 'detached worktree PRs ...'
+  fetch_detached_prs
+  step_done "$(printf '%s' "$DETACHED_PR_TABLE" | grep -c .) found"
+fi
+
+MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; DETACHED_COUNT=0; UNSURE_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0; INCONCLUSIVE_COUNT=0; PLAN=''
 
 printf '\n%b\n' "${BOLD}Branches${RESET}"
 if [ -n "$ONLY_BRANCHES" ]; then
@@ -751,19 +906,23 @@ else
   done
 fi
 
-if [ -n "$DETACHED" ]; then
-  printf '\n%b\n' "${BOLD}Detached worktrees${RESET} ${DIM}(no branch — judge by hand)${RESET}"
-  printf '%s\n' "$DETACHED" | while IFS= read -r p; do
-    [ "$p" = "$CUR_WT" ] && continue
-    say "  ${KEEP} $(basename "$p") ${DIM}($p)${RESET}"
-  done
+# Not a pipeline: the loop counts and appends to the plan, and a pipeline would
+# run it in a subshell and throw both away when it ended.
+if [ -n "$DETACHED" ] && [ -z "$ONLY_BRANCHES" ]; then
+  printf '\n%b\n' "${BOLD}Detached worktrees${RESET}"
+  while IFS="$TAB" read -r head p; do
+    [ -z "$head" ] && continue
+    process_detached "$p" "$head"
+  done <<EOF
+$DETACHED
+EOF
 fi
 
 printf '\n'
 # Summary rule — three kinds of line, three reasons:
-#  - the five category counts (merged/empty/review/suspect/inconclusive) always
-#    print, zero or not: this is a fixed report card, and a line that vanishes
-#    at zero is ambiguous — "nothing here" or "never checked"?
+#  - the seven category counts always print, zero or not: this is a fixed report
+#    card, and a line that vanishes at zero is ambiguous — "nothing here" or
+#    "never checked"?
 #  - the hidden/unmerged line always prints too, but its wording depends on
 #    -a: with -a nothing is actually hidden, so it must say so, not repeat
 #    a stale "hidden" claim.
@@ -774,6 +933,8 @@ say "${BLUE}${EMPTYICON} never diverged from main: $EMPTY_COUNT${RESET}  ${DIM}�
 say "${DIM}${KEEP} merged with commits on top: $REVIEW_COUNT${RESET}  ${DIM}→ --rescue${RESET}"
 say "${RED}${WARN}gone but content not found: $SUSPECT_COUNT${RESET}  ${DIM}→ --gone to trust${RESET}"
 say "${YELLOW}${UNKNOWN}${RESET} inconclusive, too far behind: $INCONCLUSIVE_COUNT${RESET}  ${DIM}→ --old${RESET}"
+say "${GREEN}${OK} detached worktrees, work landed: $DETACHED_COUNT${RESET}  ${DIM}→ --detached${RESET}"
+say "${YELLOW}${UNKNOWN}${RESET} detached worktrees, unsure: $UNSURE_COUNT${RESET}  ${DIM}→ nothing claims them${RESET}"
 if [ "$SHOW_ALL" = true ]; then
   say "${DIM}$HIDDEN_COUNT unmerged/idle shown above${RESET}"
 else
