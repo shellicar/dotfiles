@@ -42,6 +42,7 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
   prepends to `PATH` (see Commands)
 - `home/{common,<os>}/`, `os/`, `setup/<os>/`, `.gitconfig.d/`, `.vscode/`
 - `.config/git/hooks/`, `.local/bin/` — linked by hand, *not* by `install.sh`
+- `docs/yubikey.md`: hardware-backed signing and auth decisions, and their reasoning
 
 ## Commands (`home/common/bin/`)
 
