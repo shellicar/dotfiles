@@ -101,19 +101,6 @@ is the floor, being where EUCLEAK was fixed. Nothing in 5.8 is a security fix. O
 direct from Yubico is what makes the version knowable, since it is stated at the point of
 sale and appears nowhere on the packaging or the SKU.
 
-## `gpg-setup.sh` needs updating
-
-It assumes one model: keys generated on disk, protected by a passphrase whose exposure is
-bounded by a 24 hour `gpg-agent` cache and a cron job that kills the agent each morning.
-After this there are two models sharing one agent, since four identities keep their
-on-disk keys and the fifth is card-backed.
-
-`--generate` produces RSA-4096 on disk, which is no longer the path. `--configure` has no
-notion of a card, so no touch policy and no `scdaemon`. `--schedule` and `--reset` still
-earn their place for the on-disk keys and do nothing for the card one. `--test-sign`
-resolves a key by email through `--list-secret-keys`, which returns a stub for a card
-key; behaviour unverified.
-
 ## Passphrases
 
 The specs call these PINs. ISO 7816 named the field in the 1980s when the reader was a

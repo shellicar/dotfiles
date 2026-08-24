@@ -24,6 +24,7 @@ BASE_OS=$(resolve_os "$OS")
 is_whole_dir() {
   case "$1" in
     .hammerspoon) return 0 ;;
+    .config/git/hooks) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -74,17 +75,9 @@ link_one() {
   fi
 }
 
-link_tree() {
-  src_root="$1"
-  # Optional overlay root: paths that also exist under it are left for that
-  # tier to link, so a base tier and its overlay don't fight over the same
-  # destination on every run.
-  overlay_root="${2:-}"
-  [ -d "$src_root" ] || return 0
-
-  # Walk immediate entries (incl. dotfiles). Whole-dir entries get one symlink;
-  # everything else is linked per-file.
-  for src in "$src_root"/* "$src_root"/.[!.]*; do
+# Recurses so a whole-dir entry nested below the tree root is still found.
+link_dir() {
+  for src in "$1"/* "$1"/.[!.]*; do
     [ -e "$src" ] || continue
     rel="${src#"$src_root"/}"
     [ -n "$overlay_root" ] && [ -e "$overlay_root/$rel" ] && continue
@@ -92,15 +85,23 @@ link_tree() {
     if [ -d "$src" ] && is_whole_dir "$rel"; then
       link_one "$src" "$HOME/$rel"
     elif [ -d "$src" ]; then
-      find "$src" -type f | while IFS= read -r f; do
-        subrel="${f#"$src_root"/}"
-        [ -n "$overlay_root" ] && [ -e "$overlay_root/$subrel" ] && continue
-        link_one "$f" "$HOME/$subrel"
-      done
+      link_dir "$src"
     else
       link_one "$src" "$HOME/$rel"
     fi
   done
+  # Deliberate: an empty directory would otherwise end on the failed -e test.
+  return 0
+}
+
+link_tree() {
+  src_root="$1"
+  # Optional overlay root: paths that also exist under it are left for that
+  # tier to link, so a base tier and its overlay don't fight over the same
+  # destination on every run.
+  overlay_root="${2:-}"
+  [ -d "$src_root" ] || return 0
+  link_dir "$src_root"
 }
 
 echo "Installing dotfiles ($OS)..."

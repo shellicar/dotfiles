@@ -27,10 +27,12 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 - **`bin/` tools are dry-run by default.** Anything that deletes, rewrites history
   or force-pushes prints its plan on no args; `--apply` is the only flag that acts.
   Every other flag narrows *what is in the plan*, never causes it to happen.
-- **`.config/` and `.local/` are outside `install.sh`'s reach.** It walks `home/`
-  only, so those two are linked into `$HOME` by hand — `~/.config/git/hooks` is a
-  whole-directory symlink made manually. Adding a file under them changes nothing
-  until a link exists, and a rename there silently leaves a dangling link behind.
+- **Anything destined for `$HOME` lives under `home/`.** `install.sh` walks that
+  tree and nothing else. Directories are linked per-file unless named in
+  `is_whole_dir()`, which symlinks the directory itself: `.hammerspoon`, and
+  `.config/git/hooks` so a hook added there is live without re-running anything.
+- **`.local/` is not linked, and does not need to be.** `.tmux.conf` calls its
+  script by repo path, so nothing under it has to exist in `$HOME`.
 
 ## Map
 
@@ -41,7 +43,7 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 - `home/common/bin/` — executables linked per-file into `~/bin`, which `path.sh`
   prepends to `PATH` (see Commands)
 - `home/{common,<os>}/`, `os/`, `setup/<os>/`, `.gitconfig.d/`, `.vscode/`
-- `.config/git/hooks/`, `.local/bin/` — linked by hand, *not* by `install.sh`
+- `.local/bin/` — not linked into `$HOME`; called by repo path
 - `docs/yubikey.md`: hardware-backed signing and auth decisions, and their reasoning
 
 ## Commands (`home/common/bin/`)
@@ -91,10 +93,10 @@ one; it holds the why that the code cannot.
 - Level 2 isn't centralisable: `core.excludesfile` is single-valued (last-wins),
   so a conditional `includeIf` would *replace* rather than stack, and committing
   the ignore would itself be a trace. Hence per-clone `info/exclude`.
-- **Hooks**: `core.hooksPath` → `~/.config/git/hooks`, a hand-made symlink to
-  `.config/git/hooks` here. `pre-push` gates the *remote* ref name rather than the
-  local branch (a local checkout can be called anything; what lands on the remote
-  is what matters): only `docs/ fix/ hotfix/ security/ feature/ epic/ review/`.
+- **Hooks**: `core.hooksPath` → `~/.config/git/hooks`, which `install.sh` symlinks
+  whole to `home/common/.config/git/hooks`. `pre-push` gates the *remote* ref name
+  rather than the local branch (a local checkout can be called anything; what lands
+  on the remote is what matters): only `docs/ fix/ hotfix/ security/ feature/ epic/ review/`.
   `pre-commit` delegates to the repo's own `.git/hooks/pre-commit` when one
   exists, so a per-repo hook still runs.
 - **`[cleanup]` is per org, set beside `user.email`**: `git-cleanup` reads
