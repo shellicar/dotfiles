@@ -16,9 +16,13 @@ usage() {
   echo "Usage: $(basename "$0") <command>"
   echo ""
   echo "Commands:"
-  echo "  --generate     Generate a new GPG key (interactive)"
-  echo "  --test-sign    Test signing with a key (prompts for email)"
+  echo "  --test-sign    Test signing with an on-disk key (prompts for email)"
+  echo "  --test-sign --hardware"
+  echo "                 Test signing with the key on the inserted card"
   echo "  --configure    Configure gpg-agent, keychain, and pinentry"
+  echo "  --configure --hardware"
+  echo "                 As above, but for card-only use: no cache expiry,"
+  echo "                 and removes the daily kill from cron"
   echo "  --schedule     Set up daily cron to kill gpg-agent (default 6am)"
   echo "  --reset        Kill gpg-agent now (next sign prompts)"
   exit 1
@@ -32,40 +36,54 @@ find_key_by_email() {
 }
 
 generate_key() {
-  echo "GPG Key Generation"
-  echo "==================="
+  echo "Disabled. Signing keys are generated on-card, which cannot be scripted:"
   echo ""
-  echo "When prompted, select:"
-  echo "  Kind:    (1) RSA and RSA"
-  echo "  Size:    4096"
-  echo "  Expiry:  your choice (0 = no expiry)"
+  echo "  gpg --no-options --card-edit"
+  echo "  admin"
+  echo "  key-attr      # ECC, Curve 25519, for each of the three slots"
+  echo "  generate      # no off-card backup, no expiry"
   echo ""
+  echo "See docs/yubikey.md. Re-enable this only to make an on-disk key."
+  exit 1
+}
 
-  gpg --no-options --full-generate-key
-
-  echo ""
-  echo "Your keys:"
-  gpg --list-secret-keys --keyid-format long
+# The signature key on the inserted card, which is unambiguous in a way an email
+# lookup no longer is: every identity now resolves to the same key, and several
+# card stubs carry the same addresses.
+find_card_key() {
+  gpg --no-options --card-status --with-colons 2>/dev/null \
+    | awk -F: '/^fpr:/ { print $2; exit }'
 }
 
 test_sign() {
-  printf "Email: "
-  read -r email
+  if [ "${1:-}" = "--hardware" ]; then
+    key_id=$(find_card_key)
+    if [ -z "$key_id" ]; then
+      echo "Error: no card inserted, or it holds no signature key"
+      exit 1
+    fi
+    label="card"
+  else
+    printf "Email: "
+    read -r email
 
-  if [ -z "$email" ]; then
-    echo "Error: email is required"
-    exit 1
+    if [ -z "$email" ]; then
+      echo "Error: email is required"
+      exit 1
+    fi
+
+    key_id=$(find_key_by_email "$email")
+
+    if [ -z "$key_id" ]; then
+      echo "Error: no key found for $email"
+      exit 1
+    fi
+    label="$email"
   fi
 
-  key_id=$(find_key_by_email "$email")
-
-  if [ -z "$key_id" ]; then
-    echo "Error: no key found for $email"
-    exit 1
-  fi
-
-  echo "Testing sign with key $key_id ($email)..."
-  if echo "banana" | gpg --local-user "$key_id" --clearsign > /dev/null 2>&1; then
+  echo "Testing sign with key $key_id ($label)..."
+  echo "A card key needs a touch; the contact blinks and times out unanswered."
+  if echo "banana" | gpg --no-options --local-user "$key_id" --clearsign > /dev/null 2>&1; then
     echo "Signing works."
   else
     echo "Signing failed."
@@ -94,15 +112,41 @@ schedule_reset() {
   echo "Done."
 }
 
+remove_cron() {
+  if crontab -l 2>/dev/null | grep -q 'gpgconf --kill gpg-agent'; then
+    crontab -l 2>/dev/null | grep -v 'gpgconf --kill gpg-agent' | crontab -
+    echo "  Removed the daily gpg-agent kill from cron"
+  else
+    echo "  No gpg-agent cron entry to remove"
+  fi
+}
+
 reset_agent() {
   echo "Killing gpg-agent..."
   gpgconf --kill gpg-agent
   echo "Done. Next sign will prompt for passphrase."
 }
 
+# --hardware writes the card-only policy. A cached passphrase is not what stands
+# between malware and a signature once the key is on a card: the touch is, and
+# the chip enforces it regardless of cache state. So the TTL becomes purely how
+# often the passphrase is typed, and the daily kill is bounding a window that no
+# longer exists. Both only make sense while on-disk keys are still in use.
 configure_agent() {
+  if [ "${1:-}" = "--hardware" ]; then
+    CACHE_TTL=0
+    hardware=1
+  else
+    hardware=0
+  fi
+
   echo "GPG Agent + Keychain Configuration"
   echo "===================================="
+  if [ "$hardware" -eq 1 ]; then
+    echo "Mode: hardware (card-only)"
+  else
+    echo "Mode: on-disk keys"
+  fi
   echo ""
 
   # --- Keychain ---
@@ -148,8 +192,16 @@ EOF
     echo "  pinentry: $(command -v pinentry-mac)"
   fi
 
-  echo "  gpg-agent cache: ${CACHE_TTL}s"
+  if [ "$CACHE_TTL" -eq 0 ]; then
+    echo "  gpg-agent cache: no expiry (agent lifetime)"
+  else
+    echo "  gpg-agent cache: ${CACHE_TTL}s"
+  fi
   echo "  config: $GPG_AGENT_CONF"
+
+  if [ "$hardware" -eq 1 ]; then
+    remove_cron
+  fi
   echo ""
 
   # --- gpg.conf ---
@@ -167,8 +219,8 @@ EOF
 # --- Main ---
 case "${1:-}" in
   --generate)   generate_key ;;
-  --test-sign)  test_sign ;;
-  --configure)  configure_agent ;;
+  --test-sign)  test_sign "${2:-}" ;;
+  --configure)  configure_agent "${2:-}" ;;
   --schedule)   schedule_reset ;;
   --reset)      reset_agent ;;
   *)            usage ;;
