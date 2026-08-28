@@ -1,0 +1,38 @@
+#!/bin/sh
+# Pick a random start position on a passcard, naming the column by its symbol
+# and the row by its colour, which is how the position is found by eye.
+#
+# Every position is valid because the grid reads as one continuous string:
+# row 1 left to right, then row 2, wrapping from the last character back to the
+# first. Without that rule the number of valid starts would shrink as the
+# passphrase lengthened and reach zero at the row width.
+set -e
+
+cols=64
+rows=16
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -c) cols="$2"; shift 2 ;;
+    -r) rows="$2"; shift 2 ;;
+    *)  echo "Usage: $(basename "$0") [-c COLS] [-r ROWS]" >&2; exit 1 ;;
+  esac
+done
+
+symbols='$ ▪ △ ▲ ⊙ ♥ □ ¡ ♦ ◐ ♠ ◆ ✳ ⊛ ★ ☺ ¥ ○ ⊤ € ? ● ¿ ! ♪ ♣ £ ◪ ▴ § ¶ ± ÷ × ¤ ∞ ≠ ≈ ⌘ ⌂ ☼ ☽ ♫ ♯ ⚑ ⚐ ⌥ ⎋ ⇧ ⇪ ⌦ ⏎ ␣ ∂ ∆ ∑ √ ∫ ≤ ≥ ⊂ ⊃ ∈ ∴'
+colours='red orange yellow green teal blue purple pink'
+
+# shellcheck disable=SC2086
+set -- $symbols
+[ "$cols" -le $# ] || { echo "passpath: max $# columns, asked for $cols" >&2; exit 1; }
+
+rand() {
+  printf '%s' "$(( $(od -An -N2 -tu2 /dev/urandom | tr -d ' ') % $1 + 1 ))"
+}
+
+row=$(rand "$rows")
+col=$(rand "$cols")
+
+printf 'row %s (%s)   column %s (%s)\n' \
+  "$row" "$(printf '%s' "$colours" | cut -d' ' -f"$(( (row - 1) % 8 + 1 ))")" \
+  "$col" "$(printf '%s' "$symbols" | cut -d' ' -f"$col")"
