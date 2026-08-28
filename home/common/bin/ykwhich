@@ -1,0 +1,43 @@
+#!/bin/sh
+# Name the YubiKey currently plugged in.
+#
+# The two keys are physically identical and hold different GPG keys, so acting
+# on the wrong one wastes attempts against a counter that erases credentials.
+# scdaemon also binds to a single card, so more than one present is its own
+# failure and is reported as such.
+set -e
+
+serial_a=38532913
+serial_b=38532914
+
+serials=$(ykman list --serials 2>/dev/null || true)
+
+if [ -z "$serials" ]; then
+  echo "No YubiKey"
+  exit 1
+fi
+
+status=0
+
+printf '%s\n' "$serials" | while read -r serial; do
+  [ -n "$serial" ] || continue
+  case "$serial" in
+    "$serial_a") echo "Key A ($serial)" ;;
+    "$serial_b") echo "Key B ($serial)" ;;
+    *)           echo "Unknown key ($serial)" ;;
+  esac
+done
+
+count=$(printf '%s\n' "$serials" | grep -c .)
+if [ "$count" -gt 1 ]; then
+  echo ""
+  echo "More than one plugged in; scdaemon binds to one card, so unplug all but one"
+  status=1
+fi
+
+case "$serials" in
+  *"$serial_a"*|*"$serial_b"*) ;;
+  *) status=1 ;;
+esac
+
+exit "$status"
