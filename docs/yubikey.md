@@ -36,8 +36,8 @@ The OpenPGP application has three slots: one signature, one encryption, one
 authentication. **One signing key per YubiKey.** The five identities in `.gitconfig.d/`
 do not fit as five separate keys.
 
-Resolved as one key carrying five UIDs, exported per platform with UIDs filtered so each
-platform sees only the address relevant to it.
+One key carries all five UIDs. Exports are filtered so a platform sees only the addresses
+relevant to it.
 
 **Why not five SSH keys instead.** Git can sign with `ed25519-sk` keys, which are
 FIDO2-backed and unbounded, so five identities would fit. Rejected because an SSH key is
@@ -54,11 +54,14 @@ that a personal GitHub profile should not carry a list of contracting clients. F
 is a keyring-and-upload concern only: **UIDs are not on the card at all**, so this never
 touches the hardware.
 
+Only GitHub holds a published key. Its export carries two UIDs; the three client
+addresses are published nowhere.
+
 **Generated on-card**, so the private key has never existed on disk and there is nothing
-to back up or leak. The cost is accepted: key A and key B hold different key material,
-both public keys go to every platform, and switching keys means changing `signingkey` in
-the relevant `.gitconfig.d/` file. Both public keys stay in the keyring permanently, or
-inserting a card produces a stub for material gpg cannot identify.
+to back up or leak. This costs interchangeability: key A and key B hold different key
+material, both public keys must be published, and switching keys means changing
+`signingkey` in the relevant `.gitconfig.d/` file. Both public keys stay in the keyring
+permanently, or inserting a card produces a stub for material gpg cannot identify.
 
 ## Touch policy: `cached`
 
@@ -106,11 +109,31 @@ sale and appears nowhere on the packaging or the SKU.
 The specs call these PINs. ISO 7816 named the field in the 1980s when the reader was a
 bank terminal with a numeric keypad, and OpenPGP and PIV inherited the name while
 relaxing the constraint. Every tool still prompts for a "PIN". Only PIV's is actually
-numeric-length-constrained; the rest are passphrases.
+length-constrained; the rest are passphrases.
 
 **There is no YubiKey passphrase.** The applications share nothing: separate storage,
 separate credentials, separate counters. Unlocking one does nothing for another, and
 there is no master credential above them.
+
+Two strings in total, both used on both keys:
+
+| | Read from | Used for | Needed when |
+|---|---|---|---|
+| **P1** | Card A | FIDO2, OpenPGP user | Signing a commit, registering a key with a service |
+| **P2** | Card B | OpenPGP admin | Configuring a card, and unblocking P1 after three failures |
+
+**Both keys carry the same P1 and P2.** A passphrase is worthless to anyone not holding
+that specific key, so reuse across the two creates no shared point of failure. Two
+different strings on two identical objects does create one: three wrong attempts kills
+the OpenPGP application, and confidently typing the wrong key's passphrase twice gets you
+most of the way there.
+
+**P2 must differ from P1.** Its job is unblocking P1 after three failures, so if they
+match, the situation it exists for is the situation where you do not know it. That is
+also why they come from different cards.
+
+Card B therefore lives with key B rather than at the desk: P2 is needed only when
+configuring a card, and its other role is recovery.
 
 | Credential | Length | Attempts | On lockout |
 |---|---|---|---|
@@ -120,29 +143,44 @@ there is no master credential above them.
 | PIV PIN | 6 to 8 | 3 | PUK unblocks it |
 | PIV PUK | 6 to 8 | 3 | Certificates gone |
 
+FIDO2 has no admin credential, so every FIDO2 operation including enrolment uses P1.
+Deregistering a key is done on the service's own site and needs neither.
+
 PIV's 8-character ceiling against OpenPGP admin's 8-character floor means a single string
-usable everywhere must be exactly 8. Skipping PIV removes the ceiling entirely.
-
-**Same passphrase on both keys.** A passphrase is worthless to anyone not holding that
-specific key, so reuse across the two creates no shared point of failure. Two different
-strings on two identical objects does create one: three wrong attempts kills the OpenPGP
-application, and confidently typing the wrong key's passphrase twice gets you most of the
-way there.
-
-**The admin passphrase must differ from the user one.** Its job is unblocking the user
-passphrase after three failures, so if they match, the situation it exists for is the
-situation where you do not know it.
+usable everywhere would have to be exactly 8. PIV is not enabled here, so the ceiling does
+not apply.
 
 **Memorable beats strong**, and the reasoning is not the usual one. These are
 access-control gates checked by the chip, not key material, and the chip counts. Entropy
 is not what protects them. Forgetting one destroys the credentials as completely as
 losing the key, so the failure to design against is memory, not guessing.
 
-**All of them go on paper** with the stored key, including the daily one. Usage keeps
-that one in your head, but a passphrase you cannot recall is a dead key either way.
-
 **Unused applications sit at published defaults**, `123456` and `12345678`. PIV being
 unused does not mean it is off; it means it is open. Set it or accept that.
+
+## The cards
+
+A passphrase is never written down. It is read off a printed grid along a remembered
+path, so the printed artifact is inert to anyone who finds it: 1024 positions, times the
+directions, times the plausible lengths. Against a chip that erases itself after 3 to 8
+attempts, that is not a guessing problem.
+
+`passcard` generates a grid, `passpath` picks a random start position. Both live in
+`home/common/bin/`.
+
+The grid reads as one continuous string, row 1 left to right then row 2, wrapping from
+the last character back to the first. Without that rule the number of valid start
+positions would shrink as the passphrase lengthened and reach zero at the row width.
+
+**Each card derives from a seed**, so a destroyed card can be reprinted. The seed is
+emitted to stderr and never into the HTML, so a printed card cannot reproduce itself.
+Dimensions are a required argument rather than a default, which keeps a leaked seed
+insufficient on its own.
+
+The derivation is HMAC-SHA256 over a counter rather than a seeded PRNG. A PRNG is built
+to be reproducible, not unpredictable: small state, recoverable from partial output, and
+not stable across implementations. Deterministic yet unpredictable is the definition of a
+PRF, so a PRF is what it uses.
 
 ## TOTP
 
@@ -181,32 +219,68 @@ servers, WebAuthn stays between the browser and the key.
 the second key cannot be added retrospectively. Doing this once is the entire point of
 the ordering.
 
-**1. Passphrases on both keys.** FIDO2 and OpenPGP user share one string, memorised;
-OpenPGP admin is a second, on paper. Add PIV's pair only if PIV is enabled. All of them
-written down with the stored key.
+**1. Cards first, printed, before anything is set.** Generate both with `passcard`,
+capture the seeds, pick the paths with `passpath`, and print. A passphrase that exists
+only in a browser tab and short-term memory is lost to a reboot, which costs a full
+factory reset of both applications and everything built on them.
 
-**2. GPG, per key.** Generate on-card, which creates the key with one UID; add the
-remaining four; set the signature slot's touch policy to `cached`. Key B repeats it and
-produces different key material, which is inherent to on-card generation.
+**2. Passphrases on both keys.** P1 from card A on FIDO2 and OpenPGP user, P2 from card B
+on OpenPGP admin. Add PIV's pair only if PIV is enabled.
 
-**3. Publish the new public keys.** Filtered per platform, so each sees only its own
-address. Both keys' public halves go everywhere that verifies, at this point rather than
-when one fails.
+**3. GPG, per key.** Set the key attributes to ed25519 first, since a card at factory
+defaults generates RSA-2048 without asking. Generate on-card, which creates the key with
+one UID; add the remaining four with `--quick-add-uid`; set the signature slot's touch
+policy to `cached`. Key B repeats it and produces different key material, which is
+inherent to on-card generation.
 
-**4. Update `.gitconfig.d/`.** All five files take the same `signingkey`, since the five
+**4. Publish the public keys.** One GitHub account covers both `github.com/shellicar` and
+the `Hellicar-Solutions` organisation, so it takes a single export carrying those two
+UIDs. The three client UIDs are exported nowhere, which achieves the separation more
+completely than filtering per platform would.
+
+Publishing is not what makes a signature worth having. The signature lives in the commit
+object and is verified by tooling, so a platform that displays no badge changes nothing.
+GitHub's own "require signed commits" is weaker than it looks: it checks a signature
+resolves to some verified key on the account, not that the commit was signed with a key
+you control. A workflow that validates against known fingerprints before a merge is what
+actually proves it.
+
+Both keys go up at this point rather than when one fails, and the old keys stay: they are
+what verifies every commit signed before the switch.
+
+**5. Update `.gitconfig.d/`.** All five files take the same `signingkey`, since the five
 identities now share one key. The `includeIf` selection still picks the right email per
 remote, which is what it is actually for.
 
-**5. Bitwarden.** Create the Families organization, bring the five accounts in, enable
+**6. Bitwarden.** Create the Families organization, bring the five accounts in, enable
 WebAuthn on each with both keys, and print every recovery code.
 
-**6. The credential pass.** The real work, and the reason for the ordering above.
+**7. The credential pass.** The real work, and the reason for the ordering above.
 Microsoft Authenticator has no clean seed export, so every credential is a manual
 re-enrolment regardless of destination.
 
 One visit per service, doing all of it: register both keys via FIDO2 and delete TOTP
 where supported, otherwise place the TOTP by tier, and drop SMS 2FA wherever it is still
 enabled. Walking a hundred services twice is the outcome to avoid.
+
+## Operating notes
+
+**One key plugged in at a time.** `scdaemon` binds to a single card, so two present at
+once means signing requests can address the wrong one and stall. `gpgconf --kill
+gpg-agent` clears a stale binding.
+
+**The touch is easy to miss.** After the passphrase prompt closes, the contact blinks and
+waits about fifteen seconds. No touch reads as `gpg: signing failed: Timeout`, which does
+not mention touching at all.
+
+**`gpg.conf` carries `no-tty`**, which is right for signing through pinentry and blocks
+`--card-edit` outright. `--no-options` skips the config for one invocation.
+
+**Resets are per application.** `ykman openpgp reset --force` and `ykman fido reset
+--force` are separate, and there is no command that resets the whole key. The `card-edit`
+factory-reset needs a typed confirmation that some terminals fail to submit, so it can
+silently do nothing; `gpg --card-status` is how you tell, since a real reset returns the
+key attributes to `rsa2048` and zeroes the signature counter.
 
 ## Deliberately not here
 
