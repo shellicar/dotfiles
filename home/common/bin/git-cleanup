@@ -72,33 +72,39 @@ ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
 
 # ── the single pass ─────────────────────────────────────────────────────────
 
+# Asks the library for the verdict, then says it in this command's words. The
+# deciding is not here, so git refresh reaches the same answers.
 process_branch() {
-  local branch=$1 wt ahead last meta not_in_main gone noun2 icon desc note outcome
+  local branch=$1 class wt ahead last meta not_in_main gone noun2 icon desc note outcome verdict
 
   [ "$branch" = "$MAIN" ] && return 0
-  wt=$(worktree_of "$branch")
 
-  ahead=$(git rev-list --count "origin/$MAIN..$branch" 2>/dev/null || echo '?')
+  # Computed BEFORE the read, not inside its here-doc. A here-doc is expanded as
+  # part of setting up the command it feeds, so the substitution would run with
+  # IFS already set to tab, and every unquoted expansion inside the verdict would
+  # stop splitting on newlines.
+  verdict=$(branch_verdict "$branch")
+  IFS="$TAB" read -r class not_in_main ahead gone wt <<EOF
+$verdict
+EOF
+
   last=$(git log -1 --format=%cr "$branch" 2>/dev/null)
   # The commit count stays full-brightness (not dimmed) — it's the number
   # that actually matters when deciding whether a branch is worth a look.
   meta="${DIM}[${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
-
-  # Verdict (content) and indicator (gone) computed independently.
-  not_in_main=$(commits_not_in_main "$branch")
-  gone=false; branch_upstream_gone "$branch" && gone=true
   [ "$not_in_main" -gt 1 ] && noun2=commits || noun2=commit
 
-  if [ "$not_in_main" = 0 ]; then
-    if [ "$ahead" = 0 ]; then
-      # Never diverged from main — NOT a squash-merge detection, just a
-      # branch identical to main. Git's own ancestor check already knows
-      # this on its own; a different class and a different flag.
-      icon="${BLUE}${EMPTYICON}${RESET}"
-      desc='never diverged from main'
-      do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_EMPTY" '--empty' 'EMPTY_COUNT'
-      return 0
-    fi
+  if [ "$class" = empty ]; then
+    # Never diverged from main — NOT a squash-merge detection, just a
+    # branch identical to main. Git's own ancestor check already knows
+    # this on its own; a different class and a different flag.
+    icon="${BLUE}${EMPTYICON}${RESET}"
+    desc='never diverged from main'
+    do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_EMPTY" '--empty' 'EMPTY_COUNT'
+    return 0
+  fi
+
+  if [ "$class" = merged ]; then
     # Fully in main — the squash-merge delete case.
     icon="${GREEN}${OK}${RESET}"
     if [ "$gone" = true ]; then
@@ -111,7 +117,7 @@ process_branch() {
     return 0
   fi
 
-  if [ "$not_in_main" -gt 0 ]; then
+  if [ "$class" = review ]; then
     # Merged up to the join point, but N commits sit on top of it.
     note="merged, $not_in_main $noun2 on top not in main"
     [ "$gone" = true ] && note="$note [gone]"
@@ -134,7 +140,7 @@ process_branch() {
   # was not run, so nothing is known either way. Not folded into unmerged, and
   # not offered to --gone, which means 'searched and not found', not 'not
   # searched'.
-  if [ "$not_in_main" = -2 ]; then
+  if [ "$class" = inconclusive ]; then
     INCONCLUSIVE_COUNT=$((INCONCLUSIVE_COUNT + 1))
     note="$(distance_from_main "$branch") behind, not evaluated"
     [ "$gone" = true ] && note="$note [gone]"
@@ -143,8 +149,7 @@ process_branch() {
     return 0
   fi
 
-  # not_in_main == -1: content not found in main.
-  if [ "$gone" = true ]; then
+  if [ "$class" = suspect ]; then
     # Indicator says merged (remote deleted), content cannot confirm it.
     icon="${RED}${WARN}${RESET}"; desc='gone, but content not found in main'
     do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_GONE" '--gone' 'SUSPECT_COUNT'
@@ -165,7 +170,7 @@ say_keeping() { say "  ${DIM}${KEEP} $1${RESET} $2 ${DIM}($3 — keeping)${RESET
 # The five facts, in the order that decides. Each rule that fires is the whole
 # reason, and it is the reason printed.
 process_detached() {
-  local wt=$1 head=$2 name short ahead last meta pr ref
+  local wt=$1 head=$2 name short ahead last meta class why verdict
 
   name=$(basename "$wt")
   short=$(git rev-parse --short "$head" 2>/dev/null)
@@ -173,28 +178,20 @@ process_detached() {
   last=$(git log -1 --format=%cr "$head" 2>/dev/null)
   meta="${DIM}[${RESET}$short${DIM}, ${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
 
-  # Uncommitted, or the worktree you are standing in.
-  ref=$(worktree_block_reason "$wt")
-  [ -n "$ref" ] && { say_keeping "$name" "$meta" "$ref"; return 0; }
+  # Before the read, for the reason in process_branch.
+  verdict=$(detached_verdict "$wt" "$head")
+  IFS="$TAB" read -r class why <<EOF
+$verdict
+EOF
 
-  # Finished: the trunk has the work, by content or by a merged pull request.
-  if [ "$(commits_not_in_main "$head")" = 0 ]; then
-    do_delete_worktree "$wt" "$name" 'work already in main' "$meta"; return 0
-  fi
-  pr=$(detached_pr "$head" merged)
-  [ -n "$pr" ] && { do_delete_worktree "$wt" "$name" "merged in $pr" "$meta"; return 0; }
-
-  # Live: a branch still holds it, or a pull request is still open on it.
-  ref=$(commit_on_ref "$head")
-  [ -n "$ref" ] && { say_keeping "$name" "$meta" "on $ref"; return 0; }
-  pr=$(detached_pr "$head" open)
-  [ -n "$pr" ] && { say_keeping "$name" "$meta" "$pr is open"; return 0; }
-
-  # Nothing claims it either way.
-  UNSURE_COUNT=$((UNSURE_COUNT + 1))
-  pr=$(detached_pr "$head" closed)
-  [ -n "$pr" ] && pr="$pr closed without merging" || pr='on no branch, in no pull request'
-  say "  ${YELLOW}${UNKNOWN}${RESET} $name $meta ${DIM}($pr — unsure)${RESET}"
+  case "$class" in
+    landed) do_delete_worktree "$wt" "$name" "$why" "$meta" ;;
+    unsure)
+      UNSURE_COUNT=$((UNSURE_COUNT + 1))
+      say "  ${YELLOW}${UNKNOWN}${RESET} $name $meta ${DIM}($why — unsure)${RESET}"
+      ;;
+    *) say_keeping "$name" "$meta" "$why" ;;
+  esac
 }
 
 # Print, gate on worktree safety, and record the action when this class is

@@ -489,6 +489,68 @@ remove_branch() (
   return 0
 )
 
+# ── verdicts ──────────────────────────────────────────────────────────────
+#
+# The decision, with no opinion about how it is shown. A front-end asks and then
+# says it in its own words, which is what lets two of them agree.
+
+# A branch, as: class, commits not in main, commits ahead, gone, worktree.
+#   empty        identical to main, nothing of its own
+#   merged       its work is in main
+#   review       merged up to a point, with N commits sitting on top
+#   suspect      the remote branch is gone but the content cannot be found
+#   inconclusive too far behind to have been evaluated at all
+#   unmerged     work of its own, not in main
+branch_verdict() (
+  b=$1
+  ahead=$(git rev-list --count "origin/$MAIN..$b" 2>/dev/null || echo '?')
+  n=$(commits_not_in_main "$b")
+  gone=false; branch_upstream_gone "$b" && gone=true
+  wt=$(worktree_of "$b")
+  if [ "$n" = 0 ] && [ "$ahead" = 0 ]; then
+    class=empty
+  elif [ "$n" = 0 ]; then
+    class=merged
+  elif [ "$n" -gt 0 ]; then
+    class=review
+  elif [ "$n" = -2 ]; then
+    class=inconclusive
+  elif [ "$gone" = true ]; then
+    class=suspect
+  else
+    class=unmerged
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\n' "$class" "$n" "$ahead" "$gone" "$wt"
+)
+
+# A worktree with no branch on it, as: class, then the reason in words.
+#   blocked  uncommitted changes, so nothing is on offer whatever else is true
+#   landed   its work is in main, or a merged pull request carries it
+#   live     a branch still holds it, or an open pull request does
+#   unsure   nothing claims it either way
+#
+# The order is the decision. Uncommitted first because it outranks everything;
+# landed before live because a branch holding a commit whose work is already in
+# main is not a reason to keep the checkout.
+detached_verdict() (
+  wt=$1 head=$2
+  r=$(worktree_block_reason "$wt")
+  [ -n "$r" ] && { printf 'blocked\t%s\n' "$r"; return 0; }
+
+  [ "$(commits_not_in_main "$head")" = 0 ] && { printf 'landed\twork already in main\n'; return 0; }
+  pr=$(detached_pr "$head" merged)
+  [ -n "$pr" ] && { printf 'landed\tmerged in %s\n' "$pr"; return 0; }
+
+  r=$(commit_on_ref "$head")
+  [ -n "$r" ] && { printf 'live\ton %s\n' "$r"; return 0; }
+  pr=$(detached_pr "$head" open)
+  [ -n "$pr" ] && { printf 'live\t%s is open\n' "$pr"; return 0; }
+
+  pr=$(detached_pr "$head" closed)
+  [ -n "$pr" ] && { printf 'unsure\t%s closed without merging\n' "$pr"; return 0; }
+  printf 'unsure\ton no branch, in no pull request\n'
+)
+
 # ── bringing main in ────────────────────────────────────────────────────────
 
 # Has this branch already merged origin/$MAIN into itself? Then it keeps
