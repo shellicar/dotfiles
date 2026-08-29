@@ -1,12 +1,12 @@
 #!/bin/sh
-# Spread origin/main into every worktree of the current repo.
+# Spread the default branch into every worktree of the current repo.
 # Dry run by default; --apply to act; --stash to stash dirty trees first.
 #   git spread                 print the plan, touch nothing
 #   git spread --apply         print the plan, pause 5 seconds, then carry it out
 #   git spread --stash         dry run, counting dirty trees as stashable
 #   git spread --stash --apply as --apply, stashing dirty trees first
-# Per worktree: main fast-forwards only; a branch that has already merged
-# origin/main merges it again; every other branch rebases onto origin/main.
+# Per worktree: the default branch fast-forwards only; a branch that has already
+# merged it merges again; every other branch rebases onto it.
 # The strategy follows the branch's own history, because rebasing a branch that
 # merged main would flatten that merge and discard whatever was resolved in it.
 # A conflicted rebase or merge is aborted and reported, never left half-done.
@@ -15,6 +15,18 @@
 # was an ancestor is rebased and then pushed --force-with-lease — safe here
 # because the lease reflects the fetch this same run just did. A branch that
 # merges rewrites nothing, so its push is an ordinary fast-forward, no lease.
+# A branch cut from another branch is skipped: see branch_cut_from in the lib.
+
+set -u
+
+DIR=$(cd "$(dirname "$0")" && pwd)
+TOOL='git spread'
+# SCRIPTDIR makes shellcheck resolve the path below against this file rather
+# than against whatever directory it happens to be run from. A directive applies
+# to the command after it, so both must sit against the source line itself.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/git-common.sh
+. "$DIR/../lib/git-common.sh"
 
 apply=0
 stash=0
@@ -28,37 +40,15 @@ done
 
 TAB=$(printf '\t')
 PLAN=''
+VERBOSE=false
+BASE_OVERRIDE=''
 
-# One planned action per line. Fields are tab separated and none can be empty,
-# and the worktree path goes last so it absorbs anything unusual in the path.
-plan_add() {
-  PLAN="${PLAN}$1${TAB}$2${TAB}$3${TAB}$4${TAB}$5
-"
-}
-
-git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repo" >&2; exit 2; }
+ensure_in_git_repository
 
 echo "fetching origin (prune)..."
 git fetch --quiet --prune origin || { echo "❌ fetch failed" >&2; exit 1; }
-target=$(git rev-parse --verify --quiet origin/main) || { echo "❌ no origin/main" >&2; exit 1; }
-
-# Has this branch already merged origin/main into itself? Then it keeps merging:
-# a rebase would flatten that merge away and discard whatever was resolved in it.
-# The test is the merge commits' parents past the first, not the merge commits
-# themselves. 'git pull' without --rebase also writes a merge commit, but of the
-# branch's own remote, which is not main and is no reason to stop rebasing.
-has_merged_main() (
-  parents=$(git -C "$1" rev-list --merges --parents "$target..HEAD" | awk '{ for (i = 3; i <= NF; i++) print $i }')
-  while IFS= read -r parent; do
-    [ -n "$parent" ] || continue
-    if git -C "$1" merge-base --is-ancestor "$parent" "$target"; then
-      return 0
-    fi
-  done <<EOF
-$parents
-EOF
-  return 1
-)
+MAIN=$(get_main_branch)
+target=$(git rev-parse --verify --quiet "origin/$MAIN") || { echo "❌ no origin/$MAIN" >&2; exit 1; }
 
 # Fed by here-doc, not by a pipe: a while loop downstream of a pipe runs in a
 # subshell, and the plan it built would be discarded at 'done'.
@@ -85,7 +75,7 @@ while IFS= read -r wt; do
     continue
   fi
   push_after=0
-  if [ -n "$upstream" ] && [ "$branch" != "main" ]; then
+  if [ -n "$upstream" ] && [ "$branch" != "$MAIN" ]; then
     if git -C "$wt" merge-base --is-ancestor "$upstream" HEAD; then
       push_after=1
     else
@@ -108,10 +98,18 @@ while IFS= read -r wt; do
   # trailing space and line up with ✅. The ⚠️ used elsewhere is a narrow base
   # character wearing FE0F, which is why that one is written with two.
   verb="rebase onto"; action=rebase; icon='🔁'
-  if [ "$branch" = "main" ]; then
+  if [ "$branch" = "$MAIN" ]; then
     verb="fast-forward to"; action=ff; icon='⏩'
-  elif has_merged_main "$wt"; then
+  elif branch_merged_main "$wt" >/dev/null; then
     verb="merge"; action=merge; icon='🔀'
+  else
+    # Cut from another branch: neither rebase is right for it, so it gets none.
+    base=$(fork_point "$branch") || base=''
+    parent=$(branch_cut_from "$branch" "$base")
+    if [ -n "$parent" ]; then
+      printf '⛔ %s [%s]: cut from %s, not from %s — skipping, rebase it yourself\n' "$wt" "$branch" "$parent" "$MAIN"
+      continue
+    fi
   fi
 
   stash_first=0
@@ -129,8 +127,8 @@ while IFS= read -r wt; do
 
   word=would
   [ "$apply" -eq 1 ] && word=will
-  printf '%s %s [%s]: %s %s origin/main (behind %s, ahead %s)%s\n' \
-    "$icon" "$wt" "$branch" "$word" "$verb" "$behind" "$ahead" "$extra"
+  printf '%s %s [%s]: %s %s origin/%s (behind %s, ahead %s)%s\n' \
+    "$icon" "$wt" "$branch" "$word" "$verb" "$MAIN" "$behind" "$ahead" "$extra"
 
   [ "$apply" -eq 1 ] && plan_add "$action" "$branch" "$stash_first" "$push_after" "$wt"
 done <<EOF
@@ -179,30 +177,37 @@ while IFS="$TAB" read -r action branch stash_first push_after wt; do
     # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
     # local and only moves on fetch, and this run fetched once at the start, so
     # naming it cannot pick up a commit the plan did not print.
-    if git -C "$wt" merge --quiet --no-edit origin/main >/dev/null 2>&1; then
+    if git -C "$wt" merge --quiet --no-edit "origin/$MAIN" >/dev/null 2>&1; then
       if [ "$push_after" -eq 1 ]; then
         if git -C "$wt" push --quiet 2>/dev/null; then
-          printf '✅ %s [%s]: merged origin/main, pushed\n' "$wt" "$branch"
+          printf '✅ %s [%s]: merged origin/%s, pushed\n' "$wt" "$branch" "$MAIN"
         else
           printf '⚠️  %s [%s]: merged, but push failed (remote moved?) — push manually\n' "$wt" "$branch"
         fi
       else
-        printf '✅ %s [%s]: merged origin/main\n' "$wt" "$branch"
+        printf '✅ %s [%s]: merged origin/%s\n' "$wt" "$branch" "$MAIN"
       fi
     else
       git -C "$wt" merge --abort 2>/dev/null
       printf '⚠️  %s [%s]: merge conflict — aborted, untouched\n' "$wt" "$branch"
     fi
   else
-    if git -C "$wt" rebase --quiet "$target" >/dev/null 2>&1; then
+    # --onto from the fork point, not a plain rebase onto the target. The pass
+    # already refused anything cut from another branch, so the fork point here is
+    # where this branch left main and the two agree; naming it anyway keeps the
+    # rebase honest if that ever stops being true.
+    base=$(fork_point "$branch") || base=''
+    if [ -z "$base" ]; then
+      printf '⚠️  %s [%s]: cannot find where it was cut from — skipped\n' "$wt" "$branch"
+    elif git -C "$wt" rebase --quiet --onto "$target" "$base" >/dev/null 2>&1; then
       if [ "$push_after" -eq 1 ]; then
         if git -C "$wt" push --quiet --force-with-lease 2>/dev/null; then
-          printf '✅ %s [%s]: rebased onto origin/main, force-pushed (lease held)\n' "$wt" "$branch"
+          printf '✅ %s [%s]: rebased onto origin/%s, force-pushed (lease held)\n' "$wt" "$branch" "$MAIN"
         else
           printf '⚠️  %s [%s]: rebased, but push refused (lease failed — remote moved?) — push manually\n' "$wt" "$branch"
         fi
       else
-        printf '✅ %s [%s]: rebased onto origin/main\n' "$wt" "$branch"
+        printf '✅ %s [%s]: rebased onto origin/%s\n' "$wt" "$branch" "$MAIN"
       fi
     else
       git -C "$wt" rebase --abort 2>/dev/null

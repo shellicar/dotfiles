@@ -16,6 +16,17 @@
 
 set -eu
 
+DIR=$(cd "$(dirname "$0")" && pwd)
+TOOL='git catchup'
+VERBOSE=false
+BASE_OVERRIDE=''
+# SCRIPTDIR makes shellcheck resolve the path below against this file rather
+# than against whatever directory it happens to be run from. A directive applies
+# to the command after it, so both must sit against the source line itself.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/git-common.sh
+. "$DIR/../lib/git-common.sh"
+
 apply=0
 for arg in "$@"; do
   case "$arg" in
@@ -24,10 +35,10 @@ for arg in "$@"; do
   esac
 done
 
-git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repo" >&2; exit 2; }
+ensure_in_git_repository
 
-main=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo "cannot determine the default branch from origin/HEAD" >&2; exit 2; }
-main=${main#origin/}
+MAIN=$(get_main_branch)
+main=$MAIN
 
 branch=$(git symbolic-ref --quiet --short HEAD) || { echo "detached HEAD" >&2; exit 2; }
 
@@ -82,26 +93,7 @@ if git merge-base --is-ancestor "$target" HEAD; then
   exit 0
 fi
 
-# Has this branch already merged origin/$main into itself? Then it keeps merging:
-# a rebase would flatten that merge away and discard whatever was resolved in it.
-# The test is the merge commits' parents past the first, not the merge commits
-# themselves. 'git pull' without --rebase also writes a merge commit, but of the
-# branch's own remote, which is not main and is no reason to stop rebasing.
-merge_from_main() (
-  pairs=$(git rev-list --merges --parents "$target..HEAD" | awk '{ for (i = 3; i <= NF; i++) print $1, $i }')
-  while IFS=' ' read -r commit parent; do
-    [ -n "$parent" ] || continue
-    if git merge-base --is-ancestor "$parent" "$target"; then
-      echo "$commit"
-      return 0
-    fi
-  done <<EOF
-$pairs
-EOF
-  return 1
-)
-
-merged_at=$(merge_from_main) || merged_at=''
+merged_at=$(branch_merged_main .) || merged_at=''
 
 if [ -n "$merged_at" ]; then
   echo "plan: merge origin/$main into $branch and push"
@@ -127,16 +119,15 @@ if [ -n "$merged_at" ]; then
   exit 0
 fi
 
-# The fork point, not the merge-base. Plain 'git rebase origin/$main' replays
-# everything since the merge-base, so a branch stacked on another branch replays
-# that branch's commits too and force-pushes them back rewritten. The oldest
-# commit no other ref can reach is the first one that is ours; its parent is
-# where we forked.
-others=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes | grep -vxF "refs/heads/$branch" | grep -vxF "refs/remotes/origin/$branch" || true)
-oldest=$(git rev-list "$target..HEAD" --not $others | tail -1)
-[ -n "$oldest" ] || { echo "no commits on $branch that another branch does not already have" >&2; exit 1; }
-base=$(git rev-parse --verify --quiet "$oldest^") || { echo "cannot resolve the fork point of $branch" >&2; exit 1; }
+base=$(fork_point "$branch") || { echo "no commits on $branch that another branch does not already have" >&2; exit 1; }
+[ -n "$base" ] || { echo "cannot resolve the fork point of $branch" >&2; exit 1; }
 git merge-base --is-ancestor "$base" HEAD || { echo "fork point $base is not an ancestor of $branch" >&2; exit 1; }
+
+# Cut from another branch rather than from main. A fork-point rebase would drop
+# the parent branch's commits and a plain one would duplicate them, so neither is
+# offered and you are told what it is tangled with.
+parent=$(branch_cut_from "$branch" "$base")
+[ -z "$parent" ] || { echo "$branch was cut from $parent, not from $main — rebase it onto $parent yourself" >&2; exit 1; }
 
 echo "plan: rebase $branch onto origin/$main and force-push it"
 echo "  branch      $branch at $local_head"

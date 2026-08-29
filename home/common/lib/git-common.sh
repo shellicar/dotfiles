@@ -489,6 +489,70 @@ remove_branch() (
   return 0
 )
 
+# ── bringing main in ────────────────────────────────────────────────────────
+
+# Has this branch already merged origin/$MAIN into itself? Then it keeps
+# merging: a rebase would flatten that merge away and discard whatever was
+# resolved in it. The test is the merge commits' parents past the first, not the
+# merge commits themselves. 'git pull' without --rebase also writes a merge
+# commit, but of the branch's own remote, which is not main and is no reason to
+# stop rebasing.
+# Echoes the merge commit that brought main in, for a caller that wants to name
+# it. Takes a worktree path, so '.' for the one you are standing in.
+branch_merged_main() (
+  wt=$1
+  pairs=$(git -C "$wt" rev-list --merges --parents "origin/$MAIN..HEAD" | awk '{ for (i = 3; i <= NF; i++) print $1, $i }')
+  while IFS=' ' read -r commit parent; do
+    [ -n "$parent" ] || continue
+    if git -C "$wt" merge-base --is-ancestor "$parent" "origin/$MAIN"; then
+      echo "$commit"
+      return 0
+    fi
+  done <<EOF
+$pairs
+EOF
+  return 1
+)
+
+# Where the branch was cut: the parent of the oldest commit on it that no other
+# ref can reach. Empty when the branch has nothing of its own.
+#
+# This is what a rebase has to be given. Plain 'git rebase origin/$MAIN' replays
+# everything back to the merge-base, which for a branch cut from another branch
+# is where THAT branch left main, so it replays the other branch's commits too
+# and force-pushes them back rewritten under new ids.
+fork_point() (
+  b=$1
+  others=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes |
+    grep -vxF "refs/heads/$b" | grep -vxF "refs/remotes/origin/$b") || others=''
+  # shellcheck disable=SC2086  # deliberate split: --not takes many refs
+  oldest=$(git rev-list "origin/$MAIN..$b" --not $others | tail -1)
+  [ -n "$oldest" ] || return 1
+  git rev-parse --verify --quiet "$oldest^"
+)
+
+# The branch this one was cut from, or empty for the normal case of one cut from
+# main. One cheap test does the discriminating: if the fork parent is on main
+# there is nothing to look at, and a ref lookup on it would otherwise match every
+# branch cut from main at or after that commit, which is all of them.
+#
+# Neither rebase is right for a branch cut from another branch. Plain rebase
+# duplicates the parent's commits onto it; a fork-point rebase drops them and
+# leaves it built on nothing. So the caller offers no update at all and names the
+# branch it is tangled with, for you to look at.
+branch_cut_from() (
+  b=$1 base=$2
+  [ -n "$base" ] || return 0
+  git merge-base --is-ancestor "$base" "origin/$MAIN" 2>/dev/null && return 0
+  git for-each-ref --contains "$base" --format='%(refname:short)' refs/heads refs/remotes 2>/dev/null |
+    while read -r r; do
+      n=${r#origin/}
+      [ "$n" = "$b" ] && continue
+      printf '%s\n' "$n"
+      break
+    done
+)
+
 # ── the plan, and carrying it out ───────────────────────────────────────────
 
 # Append one action to the plan. Fields are tab separated and never empty ('-'
