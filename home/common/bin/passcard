@@ -1,0 +1,146 @@
+#!/bin/sh
+# Printable password card: a grid of characters read along a remembered path
+# (symbol column, colour row). The path is the secret, so the printed card is
+# inert on its own.
+#
+# The grid is derived from a seed by HMAC-SHA256 over a counter. A seeded PRNG
+# would be wrong here: small state, recoverable from partial output, and not
+# reproducible across implementations or versions. A PRF gives the one property
+# needed, deterministic yet unpredictable without the seed.
+#
+# The seed goes to stderr, never into the HTML, so the printed card never
+# carries the means to reproduce itself.
+set -e
+
+cols=""
+rows=""
+out=""
+seed=""
+
+usage() {
+  echo "Usage: $(basename "$0") -c COLS -r ROWS [-s SEED] [-o FILE]"
+  echo ""
+  echo "  -c COLS   columns, max 64 (required)"
+  echo "  -r ROWS   rows (required)"
+  echo "  -s SEED   reproduce a card from its seed"
+  echo "  -o FILE   write here (default stdout)"
+  echo ""
+  echo "Writes HTML; open it and print in colour. The seed is printed to"
+  echo "stderr, never into the HTML."
+  echo ""
+  echo "Dimensions are required rather than defaulted so that a seed alone"
+  echo "cannot reproduce a card. Both are needed, and they are worth storing"
+  echo "apart from each other."
+  exit 1
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -c) cols="$2"; shift 2 ;;
+    -r) rows="$2"; shift 2 ;;
+    -s) seed="$2"; shift 2 ;;
+    -o) out="$2"; shift 2 ;;
+    *)  usage ;;
+  esac
+done
+
+symbols='$ ▪ △ ▲ ⊙ ♥ □ ¡ ♦ ◐ ♠ ◆ ✳ ⊛ ★ ☺ ¥ ○ ⊤ € ? ● ¿ ! ♪ ♣ £ ◪ ▴ § ¶ ± ÷ × ¤ ∞ ≠ ≈ ⌘ ⌂ ☼ ☽ ♫ ♯ ⚑ ⚐ ⌥ ⎋ ⇧ ⇪ ⌦ ⏎ ␣ ∂ ∆ ∑ √ ∫ ≤ ≥ ⊂ ⊃ ∈ ∴'
+colours='#f5a3a3 #f8c887 #fbee85 #b6e08a #8fd6c6 #9dc0ee #bfa8e6 #efa3d0'
+alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+
+[ -n "$cols" ] && [ -n "$rows" ] || usage
+
+# Validated before any output, so a rejected size cannot leave a truncated card
+# behind when -o is given.
+# shellcheck disable=SC2086
+set -- $symbols
+[ "$cols" -le $# ] || { echo "passcard: max $# columns, asked for $cols" >&2; exit 1; }
+
+[ -n "$seed" ] || seed=$(LC_ALL=C tr -dc 'a-f0-9' < /dev/urandom | head -c 32)
+
+# Bytes >= 248 are discarded rather than taken modulo 62, which would make the
+# first 10 letters of the alphabet slightly likelier than the rest.
+grid_chars() {
+  need=$1
+  hexkey=$(printf '%s' "$seed" | od -An -tx1 | tr -d ' \n')
+  blocks=$((need / 25 + 2))
+  counter=0
+  while [ "$counter" -lt "$blocks" ]; do
+    printf '%s' "$counter" \
+      | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$hexkey" \
+      | sed 's/.*= *//'
+    counter=$((counter + 1))
+  done | awk -v need="$need" -v alpha="$alphabet" '
+    BEGIN {
+      for (i = 0; i < 16; i++) { h[sprintf("%x", i)] = i; h[sprintf("%X", i)] = i }
+    }
+    { s = s $0 }
+    END {
+      for (i = 1; i < length(s) && n < need; i += 2) {
+        v = h[substr(s, i, 1)] * 16 + h[substr(s, i + 1, 1)]
+        if (v >= 248) continue
+        printf "%s", substr(alpha, v % 62 + 1, 1)
+        n++
+      }
+      if (n < need) { exit 1 }
+    }'
+}
+
+emit() {
+  cat <<'HEAD'
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  body { font-family: sans-serif; margin: 2rem; }
+  .card { display: inline-block; border: 2px solid #222; border-radius: 8px;
+          padding: 6px 8px; background: #fff; }
+  table { border-collapse: collapse; font-family: "SF Mono", Menlo, monospace; }
+  td { padding: 0; white-space: pre; }
+  .lbl { font-size: 0.55em; vertical-align: top; padding-right: 3px;
+         text-align: right; color: #333; }
+  /* Browsers drop background colours when printing unless told otherwise, and
+     the row colour is half of how a path is remembered. */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  @media print { body { margin: 0; } }
+</style>
+<body>
+HEAD
+
+  printf '<div class="card"><table>\n'
+
+  printf '<tr><td class="lbl"></td><td>'
+  i=0
+  for s in $symbols; do
+    i=$((i + 1))
+    [ "$i" -gt "$cols" ] && break
+    printf '%s' "$s"
+  done
+  printf '</td></tr>\n'
+
+  r=0
+  while [ "$r" -lt "$rows" ]; do
+    r=$((r + 1))
+    n=0
+    bg='#ffffff'
+    for c in $colours; do
+      n=$((n + 1))
+      [ "$n" -eq $(( (r - 1) % 8 + 1 )) ] && bg="$c"
+    done
+    span="$(( (r - 1) * cols + 1 ))-$(( r * cols ))"
+    printf '<tr style="background:%s"><td class="lbl">%s</td><td>%s</td></tr>\n' \
+      "$bg" "$r" "$(printf '%s' "$all" | cut -c"$span")"
+  done
+
+  printf '</table></div>\n</body>\n'
+}
+
+all=$(grid_chars $((cols * rows)))
+
+if [ -n "$out" ]; then
+  emit > "$out"
+  echo "Wrote $out"
+else
+  emit
+fi
+
+echo "seed: $seed  (${cols}x${rows} -- both are needed to reproduce)" >&2

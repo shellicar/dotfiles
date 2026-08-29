@@ -1,0 +1,67 @@
+#!/bin/sh
+# What git calls to sign, in place of gpg itself (`gpg.program` in
+# .gitconfig.d/common).
+#
+# The signing key is on a YubiKey whose touch policy is `cached`, so a signature
+# blinks the contact and waits about fifteen seconds for a finger before failing
+# with `gpg: signing failed: Timeout`. The blink is easy to miss and nothing
+# announces it, so this rings the terminal when a signature is wanted and asks a
+# second time when the first went unanswered.
+#
+# git calls this same program to verify a signature, where nothing is waiting on
+# a person, so only the signing call is wrapped. A form of signing call not
+# recognised here is handed straight through: that loses the bell, never the
+# signature.
+#
+# The first gpg call consumes stdin, so a second attempt has nothing left to
+# sign unless the payload is buffered first. stdout is the signature git reads
+# back, so that is buffered too and released only once an attempt succeeds: a
+# failed attempt's partial output would otherwise be prepended to a good one.
+set -e
+
+signing=no
+for arg in "$@"; do
+  case "$arg" in
+    -bsau) signing=yes ;;
+  esac
+done
+
+if [ "$signing" = no ]; then
+  exec gpg "$@"
+fi
+
+attempts=2
+
+payload=$(mktemp)
+out=$(mktemp)
+err=$(mktemp)
+
+trap 'rm -f "$payload" "$out" "$err"' EXIT
+
+cat >"$payload"
+
+# stdout and stderr are pipes here, so a bell written to either is captured
+# rather than heard. /dev/tty is the controlling terminal, which the kernel
+# resolves per process and which the redirection does not take away.
+ring() {
+  printf '\a' >/dev/tty 2>/dev/null || true
+  return 0
+}
+
+attempt=0
+status=1
+
+while [ "$attempt" -lt "$attempts" ]; do
+  attempt=$((attempt + 1))
+  ring
+  if gpg "$@" <"$payload" >"$out" 2>"$err"; then
+    status=0
+    break
+  else
+    status=$?
+  fi
+done
+
+cat "$out"
+cat "$err" >&2
+exit "$status"
