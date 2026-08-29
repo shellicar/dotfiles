@@ -615,6 +615,29 @@ branch_cut_from() (
     done
 )
 
+# How to bring main into this worktree, as: action, then what it needs.
+#   ff              the default branch itself, fast-forward only
+#   merge           it has merged main before, so it merges again
+#   rebase  <base>  replayed from where it was cut
+#   none    <why>   nothing is on offer, and why
+#
+# The strategy only. Whether the tree is dirty, whether it is behind at all and
+# whether to push afterwards are the caller's, because the commands differ on
+# those and agree on this.
+update_verdict() (
+  wt=$1 b=$2
+  [ "$b" = "$MAIN" ] && { printf 'ff\t-\n'; return 0; }
+  branch_merged_main "$wt" >/dev/null && { printf 'merge\t-\n'; return 0; }
+  base=$(fork_point "$b") || base=''
+  parent=$(branch_cut_from "$b" "$base")
+  [ -n "$parent" ] && { printf 'none\tcut from %s, not from %s\n' "$parent" "$MAIN"; return 0; }
+  # No commit of its own that nothing else reaches, which happens at the bottom
+  # of a stack: the branch cut from this one has all of them, so there is no
+  # fork point to replay from.
+  [ -z "$base" ] && { printf 'none\tanother branch already has every commit on it\n'; return 0; }
+  printf 'rebase\t%s\n' "$base"
+)
+
 # ── the plan, and carrying it out ───────────────────────────────────────────
 
 # Append one action to the plan. Fields are tab separated and never empty ('-'

@@ -94,23 +94,26 @@ while IFS= read -r wt; do
     continue
   fi
 
+  # Computed before the read: a here-doc is expanded as part of setting up the
+  # command it feeds, so the substitution would run with IFS already set to tab.
+  verdict=$(update_verdict "$wt" "$branch")
+  IFS="$TAB" read -r action detail <<EOF
+$verdict
+EOF
+
+  if [ "$action" = none ]; then
+    printf '⛔ %s [%s]: %s — skipping, rebase it yourself\n' "$wt" "$branch" "$detail"
+    continue
+  fi
+
   # All three icons are double-width with no variation selector, so they take one
   # trailing space and line up with ✅. The ⚠️ used elsewhere is a narrow base
   # character wearing FE0F, which is why that one is written with two.
-  verb="rebase onto"; action=rebase; icon='🔁'
-  if [ "$branch" = "$MAIN" ]; then
-    verb="fast-forward to"; action=ff; icon='⏩'
-  elif branch_merged_main "$wt" >/dev/null; then
-    verb="merge"; action=merge; icon='🔀'
-  else
-    # Cut from another branch: neither rebase is right for it, so it gets none.
-    base=$(fork_point "$branch") || base=''
-    parent=$(branch_cut_from "$branch" "$base")
-    if [ -n "$parent" ]; then
-      printf '⛔ %s [%s]: cut from %s, not from %s — skipping, rebase it yourself\n' "$wt" "$branch" "$parent" "$MAIN"
-      continue
-    fi
-  fi
+  case "$action" in
+    ff)     verb="fast-forward to"; icon='⏩' ;;
+    merge)  verb="merge";           icon='🔀' ;;
+    *)      verb="rebase onto";     icon='🔁' ;;
+  esac
 
   stash_first=0
   [ -n "$dirty" ] && stash_first=1
