@@ -4,10 +4,15 @@ set -e
 # --- Configuration ---
 GPG_AGENT_CONF="$HOME/.gnupg/gpg-agent.conf"
 GPG_CONF="$HOME/.gnupg/gpg.conf"
+SCDAEMON_CONF="$HOME/.gnupg/scdaemon.conf"
 KEYCHAIN_NAME="gpg.keychain"
 KEYCHAIN_PATH="$HOME/Library/Keychains/${KEYCHAIN_NAME}-db"
 KEYCHAIN_TIMEOUT=1
 CACHE_TTL=86400
+# gpg-agent has no infinite value: the man page defines both TTLs as plain
+# seconds, and 0 means no caching at all rather than never expiring. 400 days is
+# the stand-in, since the agent dies at logout long before it elapses.
+CACHE_TTL_HARDWARE=34560000
 CRON_HOUR="${CRON_HOUR:-6}"
 CRON_MINUTE="${CRON_MINUTE:-0}"
 
@@ -134,7 +139,7 @@ reset_agent() {
 # longer exists. Both only make sense while on-disk keys are still in use.
 configure_agent() {
   if [ "${1:-}" = "--hardware" ]; then
-    CACHE_TTL=0
+    CACHE_TTL="$CACHE_TTL_HARDWARE"
     hardware=1
   else
     hardware=0
@@ -192,14 +197,24 @@ EOF
     echo "  pinentry: $(command -v pinentry-mac)"
   fi
 
-  if [ "$CACHE_TTL" -eq 0 ]; then
-    echo "  gpg-agent cache: no expiry (agent lifetime)"
+  if [ "$CACHE_TTL" -eq "$CACHE_TTL_HARDWARE" ]; then
+    echo "  gpg-agent cache: ${CACHE_TTL}s (agent lifetime, in practice)"
   else
     echo "  gpg-agent cache: ${CACHE_TTL}s"
   fi
   echo "  config: $GPG_AGENT_CONF"
 
   if [ "$hardware" -eq 1 ]; then
+    # Without this, a touch that times out makes scdaemon de-verify the card and
+    # discard the cached passphrase, so the next signature prompts again. The
+    # card keeps PW1 verified on its own; only scdaemon throws it away. Needs the
+    # patched build from setup/macos/build-gnupg.sh.
+    if grep -q 'keep-chv-on-timeout' "$SCDAEMON_CONF" 2>/dev/null; then
+      echo "  scdaemon: keep-chv-on-timeout already set"
+    else
+      echo "keep-chv-on-timeout" >> "$SCDAEMON_CONF"
+      echo "  scdaemon: keep-chv-on-timeout added"
+    fi
     remove_cron
   fi
   echo ""

@@ -7,6 +7,19 @@ brew "fnm"        # Node version manager
 brew "pnpm"       # native install, not corepack
 brew "tmux"       # .tmux.conf and the prompt status hooks
 brew "vim"        # EDITOR, .vimrc, the vi alias
-brew "gnupg"      # GPG-signed commits
+# GnuPG is built from source by build-gnupg.sh, not installed here: it carries a
+# local scdaemon patch, and a package manager that always installs the latest
+# version would pair a new gpg-agent with the vendored scdaemon. These are what
+# that build links against.
+brew "libgpg-error"
+brew "libgcrypt"
+brew "libassuan"
+brew "libksba"
+brew "npth"
+brew "gnutls"
+brew "pinentry-mac" # gpg-agent's pinentry-program
+brew "autoconf"     # build-gnupg.sh runs autogen.sh
+brew "automake"
+brew "pkg-config"
 brew "git-lfs"
 brew "shellcheck" # ./test.sh
