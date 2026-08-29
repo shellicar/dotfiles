@@ -66,11 +66,11 @@ if [ -f "$WS_FILE" ]; then
 fi
 
 # A relative path is resolved against this file's own directory, which is what it is
-# relative to: VS Code writes one that way when a folder is added through its UI, and
-# the dedupe below matches on the path string. An absolute path already is that answer,
-# and stripping a leading slash is what tells the two apart. A folder that has gone
-# resolves to nothing and leaves an empty slot, which keeps this list index-aligned
-# with $EXISTING so the two pair up.
+# relative to. These files do contain such entries, and the dedupe below matches on
+# the path string, so both spellings of one folder survive without this. An absolute
+# path already is that answer, and stripping a leading slash is what tells the two
+# apart. A folder that has gone resolves to nothing and leaves an empty slot, which
+# keeps this list index-aligned with $EXISTING so the two pair up.
 RESOLVED=$(printf '%s' "$EXISTING" | "$JQ" -r '.[].path' | while IFS= read -r ENTRY; do
   ABS="$ENTRY"
   [ "${ENTRY#/}" = "$ENTRY" ] && ABS=$(cd "$WS_DIR" && "$REALPATH" "$ENTRY" 2>/dev/null)
