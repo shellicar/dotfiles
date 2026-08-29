@@ -44,6 +44,10 @@ VERBOSE=false
 BASE_OVERRIDE=''
 
 ensure_in_git_repository
+# run_update writes git's own failure message here so it can report the real
+# reason rather than calling everything a conflict.
+CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
+mkdir -p "$CACHE_DIR"
 
 echo "fetching origin (prune)..."
 git fetch --quiet --prune origin || { echo "❌ fetch failed" >&2; exit 1; }
@@ -169,54 +173,9 @@ while IFS="$TAB" read -r action branch stash_first push_after wt; do
     fi
   fi
 
-  if [ "$action" = ff ]; then
-    if git -C "$wt" merge --ff-only --quiet "$target" 2>/dev/null; then
-      printf '✅ %s [main]: fast-forwarded\n' "$wt"
-    else
-      printf '⚠️  %s [main]: cannot fast-forward (local commits?) — skipped\n' "$wt"
-    fi
-  elif [ "$action" = merge ]; then
-    # The branch name, not "$target": git builds the default merge message from
-    # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
-    # local and only moves on fetch, and this run fetched once at the start, so
-    # naming it cannot pick up a commit the plan did not print.
-    if git -C "$wt" merge --quiet --no-edit "origin/$MAIN" >/dev/null 2>&1; then
-      if [ "$push_after" -eq 1 ]; then
-        if git -C "$wt" push --quiet 2>/dev/null; then
-          printf '✅ %s [%s]: merged origin/%s, pushed\n' "$wt" "$branch" "$MAIN"
-        else
-          printf '⚠️  %s [%s]: merged, but push failed (remote moved?) — push manually\n' "$wt" "$branch"
-        fi
-      else
-        printf '✅ %s [%s]: merged origin/%s\n' "$wt" "$branch" "$MAIN"
-      fi
-    else
-      git -C "$wt" merge --abort 2>/dev/null
-      printf '⚠️  %s [%s]: merge conflict — aborted, untouched\n' "$wt" "$branch"
-    fi
-  else
-    # --onto from the fork point, not a plain rebase onto the target. The pass
-    # already refused anything cut from another branch, so the fork point here is
-    # where this branch left main and the two agree; naming it anyway keeps the
-    # rebase honest if that ever stops being true.
-    base=$(fork_point "$branch") || base=''
-    if [ -z "$base" ]; then
-      printf '⚠️  %s [%s]: cannot find where it was cut from — skipped\n' "$wt" "$branch"
-    elif git -C "$wt" rebase --quiet --onto "$target" "$base" >/dev/null 2>&1; then
-      if [ "$push_after" -eq 1 ]; then
-        if git -C "$wt" push --quiet --force-with-lease 2>/dev/null; then
-          printf '✅ %s [%s]: rebased onto origin/%s, force-pushed (lease held)\n' "$wt" "$branch" "$MAIN"
-        else
-          printf '⚠️  %s [%s]: rebased, but push refused (lease failed — remote moved?) — push manually\n' "$wt" "$branch"
-        fi
-      else
-        printf '✅ %s [%s]: rebased onto origin/%s\n' "$wt" "$branch" "$MAIN"
-      fi
-    else
-      git -C "$wt" rebase --abort 2>/dev/null
-      printf '⚠️  %s [%s]: rebase conflict — aborted, untouched\n' "$wt" "$branch"
-    fi
-  fi
+  # One implementation, in the library, shared with git refresh. It works out
+  # whether to push from the branch's own upstream rather than being told.
+  run_update "$action" "$branch" "$wt"
 
   if [ "$stashed" -eq 1 ]; then
     if git -C "$wt" stash pop --quiet; then

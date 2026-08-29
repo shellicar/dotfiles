@@ -650,7 +650,16 @@ update_verdict() (
   printf 'rebase\t%s\n' "$base"
 )
 
-# Carry out one update. A conflict is aborted and reported, never left half
+# What git said, first real line only. Reporting every failure as "conflict" is
+# a guess, and a wrong one: an unset committer identity, a missing signing key
+# and a genuine conflict all exit non-zero and only one of them is about the
+# code. Say what git said.
+why_it_failed() {
+  grep -v '^[[:space:]]*$' "$CACHE_DIR/update-error" 2>/dev/null | head -1 |
+    sed -e 's/^fatal: //' -e 's/^error: //' | cut -c1-90
+}
+
+# Carry out one update. A failure is aborted and reported, never left half
 # done. A merge rewrites nothing, so its push is an ordinary one; a rebase
 # rewrote history, so its push needs the lease, which is only sound because the
 # caller fetched once at the start of this run and nothing has moved since.
@@ -671,9 +680,9 @@ run_update() {
       return 0
       ;;
     merge)
-      if ! git -C "$wt" merge --quiet --no-edit "origin/$MAIN" >/dev/null 2>&1; then
+      if ! git -C "$wt" merge --quiet --no-edit "origin/$MAIN" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
-        say "  ${YELLOW}${WARN}${RESET}$b: merge conflict, aborted and untouched"
+        say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
       fi
       if [ "$push" = yes ] && ! git -C "$wt" push --quiet 2>/dev/null; then
@@ -687,9 +696,9 @@ run_update() {
 
   base=$(fork_point "$b") || base=''
   [ -n "$base" ] || { say "  ${YELLOW}${WARN}${RESET}$b: cannot find where it was cut from, skipped"; return 0; }
-  if ! git -C "$wt" rebase --quiet --onto "origin/$MAIN" "$base" >/dev/null 2>&1; then
+  if ! git -C "$wt" rebase --quiet --onto "origin/$MAIN" "$base" >/dev/null 2>"$CACHE_DIR/update-error"; then
     git -C "$wt" rebase --abort 2>/dev/null
-    say "  ${YELLOW}${WARN}${RESET}$b: rebase conflict, aborted and untouched"
+    say "  ${YELLOW}${WARN}${RESET}$b: rebase failed, aborted and untouched — $(why_it_failed)"
     return 0
   fi
   if [ "$push" = yes ] && ! git -C "$wt" push --quiet --force-with-lease 2>/dev/null; then
