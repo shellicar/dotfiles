@@ -638,6 +638,55 @@ update_verdict() (
   printf 'rebase\t%s\n' "$base"
 )
 
+# Carry out one update. A conflict is aborted and reported, never left half
+# done. A merge rewrites nothing, so its push is an ordinary one; a rebase
+# rewrote history, so its push needs the lease, which is only sound because the
+# caller fetched once at the start of this run and nothing has moved since.
+#
+# The branch name is named to git, not the sha behind it: git builds a merge
+# message from what it is given, and a raw sha writes "Merge commit '<sha>'".
+run_update() {
+  local act=$1 b=$2 wt=$3 base push=no
+  git -C "$wt" rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 && push=yes
+
+  case "$act" in
+    ff)
+      if git -C "$wt" merge --ff-only --quiet "origin/$MAIN" 2>/dev/null; then
+        say "  ${GREEN}${OK}${RESET} $b fast-forwarded"
+      else
+        say "  ${YELLOW}${WARN}${RESET}$b: cannot fast-forward (local commits?), skipped"
+      fi
+      return 0
+      ;;
+    merge)
+      if ! git -C "$wt" merge --quiet --no-edit "origin/$MAIN" >/dev/null 2>&1; then
+        git -C "$wt" merge --abort 2>/dev/null
+        say "  ${YELLOW}${WARN}${RESET}$b: merge conflict, aborted and untouched"
+        return 0
+      fi
+      if [ "$push" = yes ] && ! git -C "$wt" push --quiet 2>/dev/null; then
+        say "  ${YELLOW}${WARN}${RESET}$b: merged, but the push failed — push it yourself"
+        return 0
+      fi
+      say "  ${GREEN}${OK}${RESET} $b merged origin/$MAIN"
+      return 0
+      ;;
+  esac
+
+  base=$(fork_point "$b") || base=''
+  [ -n "$base" ] || { say "  ${YELLOW}${WARN}${RESET}$b: cannot find where it was cut from, skipped"; return 0; }
+  if ! git -C "$wt" rebase --quiet --onto "origin/$MAIN" "$base" >/dev/null 2>&1; then
+    git -C "$wt" rebase --abort 2>/dev/null
+    say "  ${YELLOW}${WARN}${RESET}$b: rebase conflict, aborted and untouched"
+    return 0
+  fi
+  if [ "$push" = yes ] && ! git -C "$wt" push --quiet --force-with-lease 2>/dev/null; then
+    say "  ${YELLOW}${WARN}${RESET}$b: rebased, but the push was refused (the remote moved) — push it yourself"
+    return 0
+  fi
+  say "  ${GREEN}${OK}${RESET} $b rebased onto origin/$MAIN"
+}
+
 # ── the plan, and carrying it out ───────────────────────────────────────────
 
 # Append one action to the plan. Fields are tab separated and never empty ('-'
@@ -720,6 +769,9 @@ run_plan() {
       rescue)
         say "  $branch"
         run_rescue "$branch" "$join" "$n" "$wt"
+        ;;
+      ff|merge|rebase)
+        run_update "$action" "$branch" "$wt"
         ;;
     esac
   done <<EOF
