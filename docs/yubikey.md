@@ -3,21 +3,105 @@
 Hardware-backed signing and authentication: the decisions, their reasoning, and what
 moving to this setup involves.
 
-Two YubiKey 5C NFC. USB-C for the machine, NFC so a phone can reach the key without a
-cable, which the Nano and 5Ci form factors cannot do.
+YubiKey 5C NFC throughout. USB-C for the machine, NFC so a phone can reach the key
+without a cable, which the Nano and 5Ci form factors cannot do. A Nano also sits flush,
+making the per-signature touch a fingernail operation.
 
-## Two keys, both enrolled
-
-The keys are peers. There is no master and no recovery key, and neither knows the other
-exists. One is carried, one is stored; that is the only difference between them.
+## Three keys, by write frequency
 
 **FIDO2 credentials cannot be copied between keys.** Not exported, not cloned, not
-backed up. Each service holds a separate credential per key, so both keys must be
-registered at every service, by hand.
+backed up. Each service holds a separate credential per key, so every key must be
+registered at every service, by hand, and a key can only be enrolled while you still have
+access. Enrol a service with one key present and that service has a single point of
+failure.
 
-The consequence that decides the discipline: **a backup key can only be enrolled while
-you still have access.** Enrol a new service with only one key present and that service
-has a single point of failure. So both keys are present whenever a service is set up.
+That forces the layout, because the credentials divide on how often they are *written*
+while being identical in how often they are *read*.
+
+| Credential | Read | Written |
+|---|---|---|
+| GPG signing key | Every commit | Once, ever |
+| Core passkeys: Bitwarden, Apple, Microsoft | Daily | Once per account, and accounts are rare |
+| Everyday passkeys | Daily | Every new service |
+| OATH seeds | Daily | Every new TOTP-only service |
+
+A credential written once can be sealed away and stay correct indefinitely. A credential
+written weekly cannot: a sealed copy is wrong the day after it is made, and the wrongness
+is invisible until it is needed. **Both kinds on one device forces the write-once half
+into the wrong regime**, because the accruing half drags the device out of storage.
+
+Hence three keys rather than two:
+
+| Key | Role | Holds | Handled |
+|---|---|---|---|
+| A | Working 1 | GPG, OATH, all passkeys | Carried, used daily |
+| C | Working 2 | OATH, everyday passkeys | To hand, present at every new signup |
+| B | Archive | GPG, core passkeys | Sealed, written once |
+
+B is the archive because it already holds the core credentials, and those are the
+expensive ones to re-create. C takes the accruing work, which is re-enrollable a service
+at a time.
+
+Nothing is on three keys. Access needs one key, so a credential needs exactly two: the
+one in use and the one that replaces it. A third registration adds nothing.
+
+The archive is opened only when a new core account appears, which is a few times a year
+against a few times a week for everyday services. That ratio is the whole justification.
+
+Apple enforces exactly two security keys per account, so core credentials could not be on
+all three even if that were wanted.
+
+OATH has no archive. A seed can only be written when the service shows it, so an archived
+copy would be permanently stale. TOTP is the recoverable tier by design: losing it means
+re-enrolling, not losing access.
+
+## The signals, and what a passphrase costs
+
+Signing happens on behalf of an agent doing development work, so the question is not
+whether an operation is authorised but *which* operation is being authorised, at a moment
+not chosen by the person authorising it.
+
+Two physical signals carry that, and they discriminate because the caching differs:
+
+| Signal | Means |
+|---|---|
+| Blink, no dialog | GPG signing. `gpg-agent` has the passphrase cached |
+| Dialog, then blink | FIDO2 or OATH. Neither caches anywhere, ever |
+
+The touch itself proves presence, not consent: the chip receives a hash and cannot
+display what it represents. So the dialog is the only channel carrying content, and the
+discrimination above is the only way to tell one kind of operation from another.
+
+This has a consequence for `forcesig`, the card setting deciding whether GPG asks for the
+passphrase once per session or per signature. Set to per signature, every commit would
+surface a dialog naming the operation, restoring the informative channel for signing at
+the cost of typing the passphrase constantly. Left at once per session, signing is a bare
+blink.
+
+**The passphrase is typed far more than expected.** FIDO2 has no cache: not on the key,
+not in the browser, not in any agent. Every credential requesting user verification
+prompts, every time. A 16-character passphrase read off a card takes several seconds, and
+that repeats through the day.
+
+The fix is a shorter passphrase, not a different key. Eight attempts against a chip that
+then erases its credentials makes three memorable words as unguessable as sixteen random
+characters, and far faster to type. The card and its long read answer a question about
+entropy that does not apply here.
+
+### The Bio series
+
+A fingerprint sensor on the key replaces typing the passphrase for user verification,
+which is the friction above. What it entails:
+
+- **Bio is FIDO-only.** The FIDO Edition supports FIDO2 and U2F. The Multi-protocol
+  Edition adds PIV and is subscription-only. Neither holds OATH or OpenPGP.
+- OATH would move to a phone app, so the seed sits in software rather than hardware.
+- Passkeys on Bio, with GPG and OATH on 5C, is **five** devices rather than three: each
+  role still needs its working pair and its archive.
+- Five identical keys holding different things have to be labelled by hand, and reaching
+  for the wrong one costs an attempt against a counter that erases credentials.
+- The signals separate by device: a blink on the signing key means the agent, a lit
+  sensor on the access key means a person.
 
 ## What each application holds
 
@@ -58,9 +142,9 @@ Only GitHub holds a published key. Its export carries two UIDs; the three client
 addresses are published nowhere.
 
 **Generated on-card**, so the private key has never existed on disk and there is nothing
-to back up or leak. This costs interchangeability: key A and key B hold different key
-material, both public keys must be published, and switching keys means changing
-`signingkey` in the relevant `.gitconfig.d/` file. Both public keys stay in the keyring
+to back up or leak. This costs interchangeability: each key holds different key material,
+every public key must be published, and switching keys means changing `signingkey` in the
+relevant `.gitconfig.d/` file. Both public keys stay in the keyring
 permanently, or inserting a card produces a stub for material gpg cannot identify.
 
 ## Touch policy: `cached`
@@ -115,25 +199,25 @@ length-constrained; the rest are passphrases.
 separate credentials, separate counters. Unlocking one does nothing for another, and
 there is no master credential above them.
 
-Two strings in total, both used on both keys:
+Two strings in total, used on every key:
 
 | | Read from | Used for | Needed when |
 |---|---|---|---|
-| **P1** | Card A | FIDO2, OpenPGP user | Signing a commit, registering a key with a service |
-| **P2** | Card B | OpenPGP admin | Configuring a card, and unblocking P1 after three failures |
+| **P1** | Card User | FIDO2, OpenPGP user | Signing a commit, registering a key with a service |
+| **P2** | Card Admin | OpenPGP admin | Configuring a key, and unblocking P1 after three failures |
 
-**Both keys carry the same P1 and P2.** A passphrase is worthless to anyone not holding
-that specific key, so reuse across the two creates no shared point of failure. Two
-different strings on two identical objects does create one: three wrong attempts kills
-the OpenPGP application, and confidently typing the wrong key's passphrase twice gets you
-most of the way there.
+**Every key carries the same P1 and P2.** A passphrase is worthless to anyone not holding
+that specific key, so reuse across them creates no shared point of failure. Different
+strings on identical objects does create one: three wrong attempts kills the OpenPGP
+application, and confidently typing the wrong key's passphrase twice gets you most of the
+way there.
 
 **P2 must differ from P1.** Its job is unblocking P1 after three failures, so if they
 match, the situation it exists for is the situation where you do not know it. That is
 also why they come from different cards.
 
-Card B therefore lives with key B rather than at the desk: P2 is needed only when
-configuring a card, and its other role is recovery.
+Card Admin therefore lives in the sealed envelope rather than at the desk: P2 is needed
+only when configuring a key, and its other role is recovery.
 
 | Credential | Length | Attempts | On lockout |
 |---|---|---|---|
@@ -194,8 +278,8 @@ Three tiers, in order of preference:
    Yubico Authenticator.
 3. **A dedicated phone** for the long tail, kept off the daily-driver device.
 
-The seed can be written to both keys only if it is added at enrolment time. There is no
-copying afterwards.
+A seed can only be written to a key while the service is displaying it. There is no
+copying afterwards, which is why OATH has no archive copy.
 
 ## Bitwarden
 
@@ -224,8 +308,9 @@ capture the seeds, pick the paths with `passpath`, and print. A passphrase that 
 only in a browser tab and short-term memory is lost to a reboot, which costs a full
 factory reset of both applications and everything built on them.
 
-**2. Passphrases on both keys.** P1 from card A on FIDO2 and OpenPGP user, P2 from card B
-on OpenPGP admin. Add PIV's pair only if PIV is enabled.
+**2. Passphrases on every key.** P1 from card User on FIDO2 and OpenPGP user, P2 from
+card Admin on OpenPGP admin. Add PIV's pair only if PIV is enabled, and note PIV caps at
+8 characters where the others do not.
 
 **3. GPG, per key.** Set the key attributes to ed25519 first, since a card at factory
 defaults generates RSA-2048 without asking. Generate on-card, which creates the key with
@@ -263,11 +348,45 @@ One visit per service, doing all of it: register both keys via FIDO2 and delete 
 where supported, otherwise place the TOTP by tier, and drop SMS 2FA wherever it is still
 enabled. Walking a hundred services twice is the outcome to avoid.
 
+## Splitting into three keys
+
+From a two-key build, where A and B both hold everything, to the three-key layout:
+
+**1. Enrol C as Working 2.** Passphrases from the same cards, then everyday passkeys and
+OATH. No GPG key: signing stays on A and B. Each OATH seed has to come from the service
+again, since seeds cannot be copied between keys.
+
+**2. Strip C's work from B.** `ykman fido credentials delete` for everyday passkeys,
+`ykman oath accounts delete` for OATH seeds. B keeps GPG and the core passkeys, which is
+what makes it the archive.
+
+**3. Remove B from the services it no longer serves**, or they still believe it has
+access. Not urgent while B is in your possession.
+
+**4. Seal B.** With card Admin, the revocation certificates and the recovery codes.
+
+The order matters: C has to be working before B is stripped, or there is a window with
+only one key holding the everyday credentials.
+
 ## Operating notes
 
 **One key plugged in at a time.** `scdaemon` binds to a single card, so two present at
 once means signing requests can address the wrong one and stall. `gpgconf --kill
 gpg-agent` clears a stale binding.
+
+**The agent's cache and the card's own state are separate gates, and either one prompts.**
+`gpg-agent`'s `default-cache-ttl` governs only how long the agent holds the passphrase.
+The card verifies PW1 itself and holds that verified state in volatile memory, so
+unplugging the key or the machine sleeping clears it regardless of the agent. The
+practical cadence is therefore once per insertion, not once per TTL, and a prompt after
+the key has been out is expected rather than a broken cache.
+
+The card's `forcesig` is a third gate on the same path: set to forced, it demands the
+passphrase per signature and the agent cache stops mattering entirely.
+
+**There is no infinite cache value.** Both TTLs are plain seconds and `0` means no
+caching at all, which is the opposite of what it reads as. 400 days stands in for
+forever, since the agent dies at logout long before it elapses.
 
 **The touch is easy to miss.** After the passphrase prompt closes, the contact blinks and
 waits about fifteen seconds. No touch reads as `gpg: signing failed: Timeout`, which does
