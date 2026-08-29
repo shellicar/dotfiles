@@ -32,6 +32,9 @@ fi
 
 attempts=2
 
+bell_state="/tmp/gpg-wrapper-bell.$(id -u)"
+bell_quiet=5
+
 payload=$(mktemp)
 out=$(mktemp)
 err=$(mktemp)
@@ -40,13 +43,38 @@ trap 'rm -f "$payload" "$out" "$err"' EXIT
 
 cat >"$payload"
 
+# An unrung bell must never fail a signature, and set -e would make it do that.
+set +e
+
 # stdout and stderr are pipes here, so a bell written to either is captured
-# rather than heard. /dev/tty is the controlling terminal, which the kernel
-# resolves per process and which the redirection does not take away.
-ring() {
-  printf '\a' >/dev/tty 2>/dev/null || true
-  return 0
+# rather than heard. A detached spawn has no controlling terminal either, so
+# /dev/tty cannot be opened at all. ps reports the terminal per process, and the
+# nearest ancestor that still has one is where the person is.
+bell_tty() {
+  # ps prints ?? for no terminal, which would otherwise glob against the cwd.
+  set -f
+  pid=$$
+  while [ "$pid" -gt 1 ]; do
+    # shellcheck disable=SC2046 # splitting ps's two fields is the point
+    set -- $(ps -o ppid=,tty= -p "$pid")
+    [ "$#" -eq 2 ] || break
+    case "$2" in
+      \?*) ;;
+      *) set +f; printf '/dev/%s\n' "$2"; return 0 ;;
+    esac
+    pid=$1
+  done
+  set +f
+  return 1
 }
+
+ring() {
+  now=$(date +%s)
+  last=$(cat "$bell_state") || last=0
+  [ "$((now - last))" -ge "$bell_quiet" ] || return 0
+  printf '%s\n' "$now" >"$bell_state"
+  dev=$(bell_tty) && printf '\a' >"$dev"
+} 2>/dev/null
 
 attempt=0
 status=1
