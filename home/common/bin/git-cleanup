@@ -448,11 +448,26 @@ worktree_of() {
 
 worktree_dirty() { [ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]; }
 
+# A branch this run is going to delete. Its name is in the plan, which the branch
+# pass finishes building before the detached pass starts.
+doomed_branch() {
+  printf '%s' "$PLAN" | awk -F"$TAB" -v b="$1" '$1=="delete" && $2==b {found=1} END {exit !found}'
+}
+
 # The first branch, remote branch or tag containing the commit, or empty. Local
 # branches sort ahead of remotes and tags, so a local name is preferred.
-commit_on_ref() {
-  git for-each-ref --contains "$1" --format='%(refname:short)' --count=1 refs/heads refs/remotes refs/tags 2>/dev/null
-}
+#
+# A branch already in the plan does not count. It is about to stop existing, so
+# keeping a worktree "because that branch holds the commit" states a reason that
+# this same run makes false a few seconds later.
+commit_on_ref() (
+  git for-each-ref --contains "$1" --format='%(refname:short)' refs/heads refs/remotes refs/tags 2>/dev/null |
+    while read -r r; do
+      doomed_branch "${r#origin/}" && continue
+      printf '%s\n' "$r"
+      break
+    done
+)
 
 # The ignored files a worktree removal takes with it. Neither git status
 # --porcelain nor git worktree remove counts them, so a worktree whose only
@@ -474,10 +489,14 @@ say_ignored() {
 }
 
 # Reason a worktree must not be touched, or empty. Dirty ALWAYS blocks — there is
-# no case where uncommitted work is worth risking. Current worktree blocks too.
+# no case where uncommitted work is worth risking.
+#
+# Standing in a worktree is NOT a reason. git will remove the one you are in, and
+# the only casualty is a shell whose directory has gone, which a cd fixes. This
+# script runs from the main working tree (see the chdir at the bottom), which git
+# refuses to remove, so its own footing is never what is being deleted.
 worktree_block_reason() {
   [ -z "$1" ] && return 0
-  [ "$1" = "$CUR_WT" ] && { echo "the worktree you are in"; return 0; }
   worktree_dirty "$1" && { echo "worktree has uncommitted changes"; return 0; }
   return 0
 }
@@ -899,6 +918,16 @@ done
 
 ensure_in_git_repository
 command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
+
+# Run from the main working tree, always. git refuses to remove that one, so
+# whatever this run deletes, it is never standing on it. Without this, removing
+# the worktree you launched from unlinks the directory the process is sitting in
+# and every git call for the rest of the run resolves from a path that is gone.
+# The first porcelain entry is the main working tree by definition.
+MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')
+[ -n "$MAIN_WT" ] || { echo "Error: cannot find the main working tree" >&2; exit 1; }
+cd "$MAIN_WT" || exit 1
+
 CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
 NOW=$(date +%s)
@@ -933,7 +962,6 @@ DETACHED=$(git worktree list --porcelain | awk '
   /^HEAD /       { h = substr($0, 6) }
   /^detached/    { print h "\t" p }
 ')
-CUR_WT=$(git rev-parse --show-toplevel 2>/dev/null)
 
 # After DETACHED: the index depth is sized for the detached heads too.
 step 'indexing main ...'
