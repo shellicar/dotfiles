@@ -2,7 +2,8 @@
 # Retarget this tmux server's dedicated VS Code workspace to the focused pane's repo.
 #
 # Identity = the per-server .code-workspace file (one per tmux server).
-# Content  = the folders listed inside it, added to and never removed.
+# Content  = the folders listed inside it, added to as panes are focused and dropped
+#            when the directory goes.
 #
 # Rewriting the file live-updates the already-open window in place.
 # The window is opened (osascript) only when none exists yet. `code` CLI does not
@@ -10,6 +11,7 @@
 exec >> /tmp/tmux-vscode-workspace.log 2>&1
 
 JQ=/usr/bin/jq
+REALPATH=/bin/realpath
 HS=/opt/homebrew/bin/hs
 OSASCRIPT=/usr/bin/osascript
 
@@ -49,23 +51,41 @@ WS_DIR="$HOME/.vscode-tmux"
 mkdir -p "$WS_DIR"
 WS_FILE="$WS_DIR/$SERVER.code-workspace"
 
-# Folders are append-only: removing one restarts the extension host, which prompts
-# for confirmation when an extension editor such as a preview is open. An
-# unparseable file has already lost its folder list, so rebuild from this repo.
+# The folder list grows as panes are focused, and an entry is dropped only once its
+# directory has gone. That removal restarts the extension host, which prompts for
+# confirmation when an extension editor such as a preview is open. An unparseable
+# file has already lost its folder list, so rebuild from this repo.
 EXISTING='[]'
 if [ -f "$WS_FILE" ]; then
   EXISTING=$("$JQ" -c 'if (.folders | type) == "array" then .folders else [] end' "$WS_FILE" 2>/dev/null) || EXISTING='[]'
   [ -z "$EXISTING" ] && EXISTING='[]'
 fi
 
+# Resolve each listed folder against this file's own directory, which is what a
+# relative path in a .code-workspace is relative to: VS Code writes one that way when
+# a folder is added through its UI, and the dedupe below matches on the path string.
+# A folder that has gone resolves to nothing and leaves an empty slot, which keeps
+# this list index-aligned with $EXISTING so the two pair up below.
+RESOLVED=$(printf '%s' "$EXISTING" | "$JQ" -r '.[].path' | while IFS= read -r ENTRY; do
+  ABS=$(cd "$WS_DIR" && "$REALPATH" "$ENTRY" 2>/dev/null)
+  [ -d "$ABS" ] || ABS=
+  printf '%s\n' "$ABS"
+done | "$JQ" -R -s -c 'split("\n") | .[:-1]')
+
 NEW=$("$JQ" -n \
   --argjson existing "$EXISTING" \
+  --argjson resolved "$RESOLVED" \
   --arg folder "$DIR" \
   --arg title "$TITLE" \
   --arg active "$ACTIVE" \
   --arg inactive "$INACTIVE" \
   '{
-     folders: (($existing + [ { path: $folder } ]) | reduce .[] as $f ([]; if any(.[]; .path == $f.path) then . else . + [$f] end) | sort_by(.name // (.path | split("/") | last))),
+     folders: (
+       ([ $existing, $resolved ] | transpose | map(select(.[1] != "") | .[0] + { path: .[1] }))
+       + [ { path: $folder } ]
+       | reduce .[] as $f ([]; if any(.[]; .path == $f.path) then . else . + [$f] end)
+       | sort_by(.name // (.path | split("/") | last))
+     ),
      settings: {
        "window.title": $title,
        "workbench.colorCustomizations": {
