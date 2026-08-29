@@ -130,7 +130,7 @@ EOF
     [ -n "$wt" ] && note="$note, worktree"
     say "  🟡 $branch $meta ${DIM}($note)${RESET}"
     local rbase rjoin
-    rbase=$(git merge-base "$branch" "origin/$MAIN")
+    rbase=$(git merge-base "$branch" "$MAIN_REF")
     rjoin=$(git rev-list "$rbase..$branch" | sed -n "$((not_in_main + 1))p")
     do_rescue "$branch" "$rjoin" "$not_in_main" "$wt"
     return 0
@@ -174,7 +174,7 @@ process_detached() {
 
   name=$(basename "$wt")
   short=$(git rev-parse --short "$head" 2>/dev/null)
-  ahead=$(git rev-list --count "origin/$MAIN..$head" 2>/dev/null || echo '?')
+  ahead=$(git rev-list --count "$MAIN_REF..$head" 2>/dev/null || echo '?')
   last=$(git log -1 --format=%cr "$head" 2>/dev/null)
   meta="${DIM}[${RESET}$short${DIM}, ${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
 
@@ -401,8 +401,7 @@ CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
 NOW=$(date +%s)
 TAB=$(printf '\t')
-MAIN=$(get_main_branch)
-ref_exists "origin/$MAIN" || { echo "Error: origin/$MAIN does not exist (fetch origin, or pass -b <branch>)" >&2; exit 1; }
+resolve_main
 
 if [ "$EVALUATE_OLD" = true ]; then
   CAP_NOTE='cap off (--old)'

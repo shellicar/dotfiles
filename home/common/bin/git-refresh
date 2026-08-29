@@ -79,8 +79,7 @@ NL='
 '
 E=$(printf '\033')
 STRIKE="${E}[9m"; UNSTRIKE="${E}[29m"; INV="${E}[7m"
-MAIN=$(get_main_branch)
-ref_exists "origin/$MAIN" || { echo "Error: origin/$MAIN does not exist" >&2; exit 1; }
+resolve_main
 
 PLAN=''
 REMOVED_COUNT=0
@@ -146,7 +145,7 @@ EOF
   if [ -n "$wt" ]; then
     b_reason=$(worktree_block_reason "$wt")
     [ -n "$b_reason" ] && block=$b_reason
-    behind=$(git -C "$wt" rev-list --count "HEAD..origin/$MAIN" 2>/dev/null || echo 0)
+    behind=$(git -C "$wt" rev-list --count "HEAD..$MAIN_REF" 2>/dev/null || echo 0)
     # An unclean worktree cannot be updated either, so it says so once rather
     # than appearing twice under two headings.
     if [ "$block" = - ] && [ "$behind" != 0 ]; then
@@ -474,7 +473,7 @@ while IFS="$TAB" read -r op state kind action target why; do
       ;;
     rescue)
       b=${op%R}
-      base=$(git merge-base "$b" "origin/$MAIN")
+      base=$(git merge-base "$b" "$MAIN_REF")
       n=${why% on top}
       join=$(git rev-list "$base..$b" | sed -n "$((n + 1))p")
       plan_add rescue "$b" "$join" "$n" "${target:--}"

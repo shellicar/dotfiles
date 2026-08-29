@@ -37,14 +37,14 @@ done
 
 ensure_in_git_repository
 
-MAIN=$(get_main_branch)
-main=$MAIN
-
 branch=$(git symbolic-ref --quiet --short HEAD) || { echo "detached HEAD" >&2; exit 2; }
 
 git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
 
-target=$(git rev-parse --verify --quiet "origin/$main") || { echo "no origin/$main" >&2; exit 1; }
+# After the fetch, so origin/HEAD is current before it is read.
+resolve_main
+main=$MAIN
+target=$(git rev-parse --verify --quiet "$MAIN_REF")
 
 local_head=$(git rev-parse HEAD)
 
@@ -111,7 +111,7 @@ if [ -n "$merged_at" ]; then
   # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
   # local and only moves on fetch, and this run fetched once above, so naming it
   # cannot pick up a commit the plan did not print.
-  git merge --no-edit "origin/$main" || exit 1
+  git merge --no-edit "$MAIN_REF" || exit 1
 
   # Nothing was rewritten, so the remote is still an ancestor: an ordinary push.
   git push --quiet

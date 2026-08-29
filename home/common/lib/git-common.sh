@@ -71,12 +71,32 @@ ensure_in_git_repository() {
   git rev-parse --git-dir >/dev/null 2>&1 || { echo "Error: not in a git repository" >&2; exit 1; }
 }
 
-get_main_branch() (
-  [ -n "$BASE_OVERRIDE" ] && { echo "$BASE_OVERRIDE"; return 0; }
-  ref=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null) || {
-    echo "Error: cannot determine main branch from origin/HEAD (try -b <branch>)" >&2; exit 1; }
-  echo "$ref" | sed 's@^refs/remotes/origin/@@'
-)
+# Sets two things. MAIN_REF is what git is handed for every operation. MAIN is
+# the plain name, and it is only ever printed.
+#
+# FULL REF, NEVER THE SHORT NAME. Git resolves a short name by searching, and
+# the search reaches refs/heads before refs/remotes, so a local branch called
+# "origin/main" answers to it. That is not hypothetical: one existed in this
+# repository, and `git rev-list origin/main..main` then reported zero commits
+# where the answer was one. No error, just a wrong number, which is the worst
+# thing a tool that deletes branches can be handed.
+resolve_main() {
+  if [ -n "$BASE_OVERRIDE" ]; then
+    MAIN=$BASE_OVERRIDE
+    MAIN_REF="refs/remotes/origin/$BASE_OVERRIDE"
+  else
+    MAIN_REF=refs/remotes/origin/HEAD
+    # Not --short. That shortens to the least ambiguous form, so the moment a
+    # local branch shadows the trunk it returns "remotes/origin/main" instead of
+    # "main", and the name that gets printed everywhere is wrong. Strip the
+    # known prefix instead, which cannot vary.
+    ref=$(git symbolic-ref --quiet "$MAIN_REF") || {
+      echo "Error: cannot determine the default branch from origin/HEAD (try -b <branch>)" >&2; exit 1; }
+    MAIN=${ref#refs/remotes/origin/}
+  fi
+  git rev-parse --verify --quiet "$MAIN_REF" >/dev/null || {
+    echo "Error: $MAIN_REF does not exist (fetch origin, or pass -b <branch>)" >&2; exit 1; }
+}
 
 fetch_origin() {
   [ "$NO_FETCH" = true ] && { log "skipping fetch (--no-fetch)"; return 0; }
@@ -306,14 +326,14 @@ detached_pr() {
 branch_beyond_cap() (
   [ "$EVALUATE_OLD" = true ] && return 1
   [ -n "$ONLY_BRANCHES" ] && return 1
-  dist=$(git rev-list --count "origin/$MAIN" "^$1" 2>/dev/null) || return 1
+  dist=$(git rev-list --count "$MAIN_REF" "^$1" 2>/dev/null) || return 1
   [ "$dist" -gt "$MAX_DISTANCE" ] || return 1
   last=$(git log -1 --format=%ct "$1" 2>/dev/null) || return 1
   [ $(( NOW - last )) -gt $(( MAX_AGE_DAYS * 86400 )) ]
 )
 
 # Commits main has moved past the branch's fork, for the inconclusive report.
-distance_from_main() { git rev-list --count "origin/$MAIN" "^$1" 2>/dev/null || echo '?'; }
+distance_from_main() { git rev-list --count "$MAIN_REF" "^$1" 2>/dev/null || echo '?'; }
 
 # How many main commits, back from the tip, we actually need indexed this
 # run: the largest base..origin/$MAIN distance among branches that fail BOTH
@@ -328,13 +348,13 @@ compute_max_walk_depth() (
   [ -z "$ONLY_BRANCHES" ] && revs="$revs $(printf '%s' "$DETACHED" | cut -f1)"
   for rev in $revs; do
     [ "$rev" = "$MAIN" ] && continue
-    base=$(git merge-base "$rev" "origin/$MAIN" 2>/dev/null) || continue
-    git merge-base --is-ancestor "$rev" "origin/$MAIN" 2>/dev/null && continue
+    base=$(git merge-base "$rev" "$MAIN_REF" 2>/dev/null) || continue
+    git merge-base --is-ancestor "$rev" "$MAIN_REF" 2>/dev/null && continue
     # Same test the verdict uses, or the index is sized for fewer branches than
     # actually reach the content walk and their answers come out wrong.
     pr_covers_branch "$rev" && continue
     branch_beyond_cap "$rev" && continue
-    dist=$(git rev-list --count "$base..origin/$MAIN" 2>/dev/null) || continue
+    dist=$(git rev-list --count "$base..$MAIN_REF" 2>/dev/null) || continue
     [ "$dist" -gt "$max" ] && max=$dist
   done
   echo "$max"
@@ -351,7 +371,7 @@ build_shared_main_index() {
   MAIN_IDX="$CACHE_DIR/main-index"
   : > "$MAIN_IDX" || { echo "Error: cannot write $MAIN_IDX" >&2; exit 1; }
   [ "$depth" -eq 0 ] && return 0
-  git rev-list -n "$depth" "origin/$MAIN" | while read -r c; do
+  git rev-list -n "$depth" "$MAIN_REF" | while read -r c; do
     p=$(git rev-parse "$c^" 2>/dev/null) || continue
     content_hash_cached "$p" "$c"
   done | sort -u > "$MAIN_IDX"
@@ -377,9 +397,9 @@ build_shared_main_index() {
 commits_not_in_main() (
   # rev, not branch: a detached worktree's head comes through here too.
   rev=$1
-  base=$(git merge-base "$rev" "origin/$MAIN" 2>/dev/null) || { echo -1; return; }
+  base=$(git merge-base "$rev" "$MAIN_REF" 2>/dev/null) || { echo -1; return; }
   # Fully contained in main (0 unique commits — includes a branch sitting at main).
-  git merge-base --is-ancestor "$rev" "origin/$MAIN" && { echo 0; return; }
+  git merge-base --is-ancestor "$rev" "$MAIN_REF" && { echo 0; return; }
 
   pr_covers_branch "$rev" && { echo 0; return; }
 
@@ -515,7 +535,7 @@ remove_branch() (
 #   unmerged     work of its own, not in main
 branch_verdict() (
   b=$1
-  ahead=$(git rev-list --count "origin/$MAIN..$b" 2>/dev/null || echo '?')
+  ahead=$(git rev-list --count "$MAIN_REF..$b" 2>/dev/null || echo '?')
   n=$(commits_not_in_main "$b")
   gone=false; branch_upstream_gone "$b" && gone=true
   wt=$(worktree_of "$b")
@@ -575,10 +595,10 @@ detached_verdict() (
 # it. Takes a worktree path, so '.' for the one you are standing in.
 branch_merged_main() (
   wt=$1
-  pairs=$(git -C "$wt" rev-list --merges --parents "origin/$MAIN..HEAD" | awk '{ for (i = 3; i <= NF; i++) print $1, $i }')
+  pairs=$(git -C "$wt" rev-list --merges --parents "$MAIN_REF..HEAD" | awk '{ for (i = 3; i <= NF; i++) print $1, $i }')
   while IFS=' ' read -r commit parent; do
     [ -n "$parent" ] || continue
-    if git -C "$wt" merge-base --is-ancestor "$parent" "origin/$MAIN"; then
+    if git -C "$wt" merge-base --is-ancestor "$parent" "$MAIN_REF"; then
       echo "$commit"
       return 0
     fi
@@ -600,7 +620,7 @@ fork_point() (
   others=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes |
     grep -vxF "refs/heads/$b" | grep -vxF "refs/remotes/origin/$b") || others=''
   # shellcheck disable=SC2086  # deliberate split: --not takes many refs
-  oldest=$(git rev-list "origin/$MAIN..$b" --not $others | tail -1)
+  oldest=$(git rev-list "$MAIN_REF..$b" --not $others | tail -1)
   [ -n "$oldest" ] || return 1
   git rev-parse --verify --quiet "$oldest^"
 )
@@ -617,7 +637,7 @@ fork_point() (
 branch_cut_from() (
   b=$1 base=$2
   [ -n "$base" ] || return 0
-  git merge-base --is-ancestor "$base" "origin/$MAIN" 2>/dev/null && return 0
+  git merge-base --is-ancestor "$base" "$MAIN_REF" 2>/dev/null && return 0
   git for-each-ref --contains "$base" --format='%(refname:short)' refs/heads refs/remotes 2>/dev/null |
     while read -r r; do
       n=${r#origin/}
@@ -672,7 +692,7 @@ run_update() {
 
   case "$act" in
     ff)
-      if git -C "$wt" merge --ff-only --quiet "origin/$MAIN" 2>/dev/null; then
+      if git -C "$wt" merge --ff-only --quiet "$MAIN_REF" 2>/dev/null; then
         say "  ${GREEN}${OK}${RESET} $b fast-forwarded"
       else
         say "  ${YELLOW}${WARN}${RESET}$b: cannot fast-forward (local commits?), skipped"
@@ -680,7 +700,7 @@ run_update() {
       return 0
       ;;
     merge)
-      if ! git -C "$wt" merge --quiet --no-edit "origin/$MAIN" >/dev/null 2>"$CACHE_DIR/update-error"; then
+      if ! git -C "$wt" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
         say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
@@ -696,7 +716,7 @@ run_update() {
 
   base=$(fork_point "$b") || base=''
   [ -n "$base" ] || { say "  ${YELLOW}${WARN}${RESET}$b: cannot find where it was cut from, skipped"; return 0; }
-  if ! git -C "$wt" rebase --quiet --onto "origin/$MAIN" "$base" >/dev/null 2>"$CACHE_DIR/update-error"; then
+  if ! git -C "$wt" rebase --quiet --onto "$MAIN_REF" "$base" >/dev/null 2>"$CACHE_DIR/update-error"; then
     git -C "$wt" rebase --abort 2>/dev/null
     say "  ${YELLOW}${WARN}${RESET}$b: rebase failed, aborted and untouched — $(why_it_failed)"
     return 0
@@ -726,12 +746,12 @@ run_rescue() {
   local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" tmp base_used pr_mc rc outcome
 
   tmp=$(mktemp -d) || return 1
-  git worktree add -q --detach "$tmp" "origin/$MAIN" 2>/dev/null || {
+  git worktree add -q --detach "$tmp" "$MAIN_REF" 2>/dev/null || {
     rmdir "$tmp" 2>/dev/null
     say "     ${YELLOW}↳ rescue setup failed${RESET}"; return 1; }
 
   base_used=main
-  ( cd "$tmp" && git switch -q -c "$dst" "$branch" && git rebase -q --onto "origin/$MAIN" "$join" ) 2>/dev/null
+  ( cd "$tmp" && git switch -q -c "$dst" "$branch" && git rebase -q --onto "$MAIN_REF" "$join" ) 2>/dev/null
   rc=$?
   if [ "$rc" -ne 0 ]; then
     ( cd "$tmp" && git rebase --abort >/dev/null 2>&1; git switch -q --detach 2>/dev/null; git branch -D "$dst" >/dev/null 2>&1 )
