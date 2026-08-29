@@ -385,6 +385,22 @@ readkey() {
   return 0
 }
 
+# What is selected, in the order it will happen. Printed before the countdown as
+# well as by --plan: leaving the alternate screen takes the list with it, and
+# being asked to confirm something you can no longer see is not being asked.
+say_selected() {
+  printf '\n%b%s%b\n' "$BOLD" "$1" "$RESET"
+  while IFS="$TAB" read -r op state kind action target why; do
+    [ -z "$op" ] && continue
+    [ "$state" = on ] || continue
+    [ "$why" = - ] && why=''
+    icon_of "$kind"
+    printf '  %s %s  %b%s%b\n' "$IC" "$action" "$DIM" "$why" "$RESET"
+  done <<EOF
+$ROWS
+EOF
+}
+
 say_noted() {
   [ -z "$NOTED" ] && return 0
   printf '\n%bLooked at, nothing on offer%b\n' "$BOLD" "$RESET"
@@ -401,16 +417,7 @@ EOF
 derive
 
 if [ "$plan_only" = true ]; then
-  printf '\n%bWould run%b\n' "$BOLD" "$RESET"
-  while IFS="$TAB" read -r op state kind action target why; do
-    [ -z "$op" ] && continue
-    [ "$state" = on ] || continue
-    [ "$why" = - ] && why=''
-    icon_of "$kind"
-    printf '  %s %s  %b%s%b\n' "$IC" "$action" "$DIM" "$why" "$RESET"
-  done <<EOF
-$ROWS
-EOF
+  say_selected 'Would run'
   say_noted
   printf '\n%bplan only, nothing was touched%b\n' "$DIM" "$RESET"
   exit 0
@@ -483,6 +490,7 @@ EOF
 
 [ -z "$PLAN" ] && { printf 'nothing selected\n'; exit 0; }
 
+say_selected 'Will run'
 printf '\n%bstarting in 5 seconds, ctrl-c to abort%b\n\n' "$BOLD" "$RESET"
 sleep 5
 run_plan
