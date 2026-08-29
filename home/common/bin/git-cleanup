@@ -130,8 +130,8 @@ EOF
     [ -n "$wt" ] && note="$note, worktree"
     say "  🟡 $branch $meta ${DIM}($note)${RESET}"
     local rbase rjoin
-    rbase=$(git merge-base "$branch" "$MAIN_REF")
-    rjoin=$(git rev-list "$rbase..$branch" | sed -n "$((not_in_main + 1))p")
+    rbase=$(git merge-base "refs/heads/$branch" "$MAIN_REF")
+    rjoin=$(git rev-list "$rbase..refs/heads/$branch" | sed -n "$((not_in_main + 1))p")
     do_rescue "$branch" "$rjoin" "$not_in_main" "$wt"
     return 0
   fi

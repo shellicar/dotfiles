@@ -249,7 +249,9 @@ pr_merge_commit() {
 pr_covers_branch() (
   head=$(pr_head "$1") || return 1
   [ -n "$head" ] || return 1
-  tip=$(git rev-parse --verify --quiet "$1") || return 1
+  # refs/heads/, not the bare name: a tag sharing the name would answer first,
+  # and the tip compared would be the tag's.
+  tip=$(git rev-parse --verify --quiet "refs/heads/$1") || return 1
   [ "$tip" = "$head" ]
 )
 
@@ -342,21 +344,31 @@ distance_from_main() { git rev-list --count "$MAIN_REF" "^$1" 2>/dev/null || ech
 # maximum this run needs, and 0 (skip entirely) if none qualify.
 compute_max_walk_depth() (
   max=0
-  revs=${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}
-  # Detached heads reach the same content walk, so the index has to be deep
-  # enough for them too, not just for the branches.
-  [ -z "$ONLY_BRANCHES" ] && revs="$revs $(printf '%s' "$DETACHED" | cut -f1)"
-  for rev in $revs; do
-    [ "$rev" = "$MAIN" ] && continue
+  # Each candidate as the ref git is asked about, then the branch name when
+  # there is one. A branch is named in full so a tag cannot answer for it; a
+  # detached head is already a commit and has no name the PR table could use.
+  # Detached heads are here because they reach the same content walk, so the
+  # index has to be deep enough for them too.
+  cands=$(
+    for b in ${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}; do
+      [ "$b" = "$MAIN" ] && continue
+      printf 'refs/heads/%s\t%s\n' "$b" "$b"
+    done
+    [ -n "$ONLY_BRANCHES" ] || printf '%s' "$DETACHED" | cut -f1 | awk 'NF{print $1 "\t"}'
+  )
+  while IFS="$TAB" read -r rev name; do
+    [ -z "$rev" ] && continue
     base=$(git merge-base "$rev" "$MAIN_REF" 2>/dev/null) || continue
     git merge-base --is-ancestor "$rev" "$MAIN_REF" 2>/dev/null && continue
     # Same test the verdict uses, or the index is sized for fewer branches than
     # actually reach the content walk and their answers come out wrong.
-    pr_covers_branch "$rev" && continue
+    [ -n "$name" ] && pr_covers_branch "$name" && continue
     branch_beyond_cap "$rev" && continue
     dist=$(git rev-list --count "$base..$MAIN_REF" 2>/dev/null) || continue
     [ "$dist" -gt "$max" ] && max=$dist
-  done
+  done <<EOF
+$cands
+EOF
   echo "$max"
 )
 
@@ -395,13 +407,16 @@ build_shared_main_index() {
 # that case and deleted a branch, its worktree, and the one commit that had been
 # added after the merge. The content walk below is what covers the difference.
 commits_not_in_main() (
-  # rev, not branch: a detached worktree's head comes through here too.
-  rev=$1
+  # Two arguments, because they answer different questions. rev is what git is
+  # asked about, and a detached worktree's head comes through here as well as a
+  # branch. name is the branch it belongs to, given only when there is one,
+  # because the pull request table is keyed by name and cannot take a commit.
+  rev=$1 name=${2:-}
   base=$(git merge-base "$rev" "$MAIN_REF" 2>/dev/null) || { echo -1; return; }
   # Fully contained in main (0 unique commits — includes a branch sitting at main).
   git merge-base --is-ancestor "$rev" "$MAIN_REF" && { echo 0; return; }
 
-  pr_covers_branch "$rev" && { echo 0; return; }
+  [ -n "$name" ] && pr_covers_branch "$name" && { echo 0; return; }
 
   # Cheap checks done and unresolved; only the expensive one is left.
   branch_beyond_cap "$rev" && { echo -2; return; }
@@ -535,8 +550,12 @@ remove_branch() (
 #   unmerged     work of its own, not in main
 branch_verdict() (
   b=$1
-  ahead=$(git rev-list --count "$MAIN_REF..$b" 2>/dev/null || echo '?')
-  n=$(commits_not_in_main "$b")
+  # Everything git is asked resolves refs/heads/, so a tag of the same name
+  # cannot answer instead. The plain name survives only for the lookups keyed
+  # by it: the pull request table and the worktree map.
+  ref="refs/heads/$b"
+  ahead=$(git rev-list --count "$MAIN_REF..$ref" 2>/dev/null || echo '?')
+  n=$(commits_not_in_main "$ref" "$b")
   gone=false; branch_upstream_gone "$b" && gone=true
   wt=$(worktree_of "$b")
   if [ "$n" = 0 ] && [ "$ahead" = 0 ]; then
@@ -620,7 +639,7 @@ fork_point() (
   others=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes |
     grep -vxF "refs/heads/$b" | grep -vxF "refs/remotes/origin/$b") || others=''
   # shellcheck disable=SC2086  # deliberate split: --not takes many refs
-  oldest=$(git rev-list "$MAIN_REF..$b" --not $others | tail -1)
+  oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" --not $others | tail -1)
   [ -n "$oldest" ] || return 1
   git rev-parse --verify --quiet "$oldest^"
 )
@@ -660,6 +679,11 @@ update_verdict() (
   wt=$1 b=$2
   [ "$b" = "$MAIN" ] && { printf 'ff\t-\n'; return 0; }
   branch_merged_main "$wt" >/dev/null && { printf 'merge\t-\n'; return 0; }
+  # Nothing of its own, so it is main under another name and a fast-forward is
+  # the whole of it. Without this it falls through to the fork point, finds
+  # none, and is reported as being tangled with a branch that does not exist.
+  [ "$(git rev-list --count "$MAIN_REF..refs/heads/$b" 2>/dev/null || echo 0)" = 0 ] &&
+    { printf 'ff\t-\n'; return 0; }
   base=$(fork_point "$b") || base=''
   parent=$(branch_cut_from "$b" "$base")
   [ -n "$parent" ] && { printf 'none\tcut from %s, not from %s\n' "$parent" "$MAIN"; return 0; }

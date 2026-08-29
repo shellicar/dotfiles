@@ -133,7 +133,6 @@ BFACTS=''
 DFACTS=''
 
 for b in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
-  [ "$b" = "$MAIN" ] && continue
   verdict=$(branch_verdict "$b")
   IFS="$TAB" read -r class n ahead gone wt <<EOF
 $verdict
@@ -207,7 +206,7 @@ note_default() {
 
 icon_of() {
   case "$1" in
-    remove) IC='🔥' ;;
+    remove|detach) IC='🔥' ;;
     rescue) IC='🛟' ;;
     ff)     IC='⏩' ;;
     merge)  IC='🔀' ;;
@@ -238,8 +237,11 @@ derive() {
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
 
+    # The trunk is here for its update and nothing else. Left to the verdict it
+    # reads as "empty", being an ancestor of itself with nothing ahead, and would
+    # be offered for deletion.
     removal=''
-    case "$class" in
+    [ "$name" = "$MAIN" ] || case "$class" in
       merged|empty) removal="remove $name"; def=on ;;
       suspect)      removal="remove $name"; def=off ;;
       review)       removal="rescue $why off $name, then remove it"; def=off ;;
@@ -260,13 +262,18 @@ derive() {
 
     [ "$uact" = - ] && continue
     if [ "$uact" = none ]; then NOTED="$NOTED$name$TAB$udetail$NL"; continue; fi
+    case "$uact" in
+      ff)     act="fast-forward $name" ;;
+      merge)  act="merge $MAIN into $name" ;;
+      *)      act="rebase $name onto $MAIN" ;;
+    esac
     if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
       block_op "${name}U"
-      emit "${name}U" skip "$uact" "$uact $name onto $MAIN" "$wt" "skipped, the removal above takes it"
+      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it"
     else
       note_default "${name}U" on
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$uact" "$uact $name onto $MAIN" "$wt" "$behind behind"
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind"
     fi
   done <<EOF
 $BFACTS
@@ -299,9 +306,12 @@ EOF
       [ "$cpr" != - ] && reason="$cpr closed without merging" || reason='on no branch, in no pull request'
     fi
 
+    # Kind 'detach', not 'remove': the plan routes on it, and a worktree with no
+    # branch loses only the directory. Inferring that later from whether the name
+    # matched the directory's basename removed the worktree and left the branch.
     note_default "${name}R" "$det"
     st=off; has "${name}R" "$SELECTED" && st=on
-    emit "${name}R" "$st" remove "remove worktree $name" "$wt" "$reason"
+    emit "${name}R" "$st" detach "remove worktree $name" "$wt" "$reason"
   done <<EOF
 $DFACTS
 EOF
@@ -461,21 +471,16 @@ while IFS="$TAB" read -r op state kind action target why; do
   [ "$state" = on ] || continue
   case "$kind" in
     remove)
-      case "$op" in
-        *R) b=${op%R} ;;
-        *)  b=$op ;;
-      esac
-      if [ -n "$target" ] && [ "$b" = "$(basename "$target")" ]; then
-        plan_add detached "$b" - - "$target"
-      else
-        plan_add delete "$b" - - "${target:--}"
-      fi
+      plan_add delete "${op%R}" - - "${target:--}"
+      ;;
+    detach)
+      plan_add detached "${op%R}" - - "$target"
       ;;
     rescue)
       b=${op%R}
-      base=$(git merge-base "$b" "$MAIN_REF")
+      base=$(git merge-base "refs/heads/$b" "$MAIN_REF")
       n=${why% on top}
-      join=$(git rev-list "$base..$b" | sed -n "$((n + 1))p")
+      join=$(git rev-list "$base..refs/heads/$b" | sed -n "$((n + 1))p")
       plan_add rescue "$b" "$join" "$n" "${target:--}"
       ;;
     ff|merge|rebase)

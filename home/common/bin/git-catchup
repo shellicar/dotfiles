@@ -41,7 +41,6 @@ branch=$(git symbolic-ref --quiet --short HEAD) || { echo "detached HEAD" >&2; e
 
 git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
 
-# After the fetch, so origin/HEAD is current before it is read.
 resolve_main
 main=$MAIN
 target=$(git rev-parse --verify --quiet "$MAIN_REF")
