@@ -41,4 +41,9 @@ EOF
 
 [ "$#" -gt 0 ] || { echo "found no shell scripts to lint" >&2; exit 64; }
 
-shellcheck --format=gcc "$@"
+# -x follows a sourced file, so a command and the library under home/common/lib
+# are analysed together. Without it every variable the library defines for its
+# front-ends reads as unused, and every function the front-end calls reads as
+# undefined. The path is resolved by the 'shellcheck source-path=SCRIPTDIR'
+# directive in each command, so it works from any working directory.
+shellcheck -x --format=gcc "$@"
