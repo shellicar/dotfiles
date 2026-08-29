@@ -1,3 +1,13 @@
-home/macos/.local/gnupg/bin/** filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/dirmngr filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/dirmngr-client filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpg filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpg-agent filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpg-card filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpg-connect-agent filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpgconf filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpgsm filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpgsplit filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpgtar filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/gpgv filter=lfs diff=lfs merge=lfs -text
+home/macos/bin/kbxutil filter=lfs diff=lfs merge=lfs -text
 home/macos/.local/gnupg/libexec/** filter=lfs diff=lfs merge=lfs -text
-home/macos/.local/gnupg/sbin/** filter=lfs diff=lfs merge=lfs -text
