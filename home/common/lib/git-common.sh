@@ -430,6 +430,14 @@ DOOMED=' '
 doom_branch() { has "$1" "$DOOMED" || DOOMED="$DOOMED$1 "; return 0; }
 doomed_branch() { has "$1" "$DOOMED"; }
 
+# Every branch, remote branch or tag containing the commit, short names, space
+# delimited, origin/ stripped and duplicates dropped. Asked once so a caller can
+# filter it against a set that keeps changing without asking git again.
+refs_containing() (
+  git for-each-ref --contains "$1" --format='%(refname:short)' refs/heads refs/remotes refs/tags 2>/dev/null |
+    sed 's@^origin/@@' | sort -u | tr '\n' ' '
+)
+
 # The first branch, remote branch or tag containing the commit, or empty. Local
 # branches sort ahead of remotes and tags, so a local name is preferred.
 #

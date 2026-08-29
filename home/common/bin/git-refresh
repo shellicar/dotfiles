@@ -118,26 +118,45 @@ step 'indexing main ...'
 build_shared_main_index
 step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 
-# FACTS is what the analysis produced and never changes again. One line per
-# target: kind, name, worktree, head, class, ahead, why.
+# EVERYTHING THAT ASKS GIT ANYTHING HAPPENS HERE, once. What is left for derive
+# is string work, because derive runs on every keystroke. Getting this wrong is
+# not a small cost: a git status per worktree is most of a second on a tree with
+# node_modules in it, and there is no budget for that between keypresses.
+#
+# The only thing derive may not know yet is which branches you have picked to
+# remove, so anything that depends on that is left as raw material: the refs
+# holding a detached commit are listed here and filtered there.
 step 'reading branches and worktrees ...'
-FACTS=''
-fact() { FACTS="$FACTS$1$TAB$2$TAB$3$TAB$4$TAB$5$TAB$6$TAB$7$NL"; }
+
+# name, worktree, class, ahead, why, behind, block, update action, its detail
+BFACTS=''
+# name, worktree, head, in main, merged PR, open PR, closed PR, block, refs
+DFACTS=''
 
 for b in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
+  [ "$b" = "$MAIN" ] && continue
   verdict=$(branch_verdict "$b")
   IFS="$TAB" read -r class n ahead gone wt <<EOF
 $verdict
 EOF
   [ "$gone" = true ] && why='remote gone' || why='-'
   [ "$class" = review ] && why="$n on top"
-  fact branch "$b" "${wt:--}" '-' "$class" "$ahead" "$why"
+
+  block='-'; behind=0; uact='-'; udetail='-'
+  if [ -n "$wt" ]; then
+    b_reason=$(worktree_block_reason "$wt")
+    [ -n "$b_reason" ] && block=$b_reason
+    behind=$(git -C "$wt" rev-list --count "HEAD..origin/$MAIN" 2>/dev/null || echo 0)
+    # An unclean worktree cannot be updated either, so it says so once rather
+    # than appearing twice under two headings.
+    if [ "$block" = - ] && [ "$behind" != 0 ]; then
+      uv=$(update_verdict "$wt" "$b")
+      uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
+    fi
+  fi
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$NL"
 done
 
-# Only the expensive half of a detached worktree's verdict is settled here: is
-# its work in main, and what do its pull requests say. Whether a branch still
-# holds the commit is left to derive, because that answer changes the moment you
-# select the removal of the branch in question.
 while IFS="$TAB" read -r head p; do
   [ -z "$head" ] && continue
   inmain=no
@@ -145,11 +164,13 @@ while IFS="$TAB" read -r head p; do
   mpr=$(detached_pr "$head" merged)
   opr=$(detached_pr "$head" open)
   cpr=$(detached_pr "$head" closed)
-  fact detached "$(basename "$p")" "$p" "$head" "$inmain" "${mpr:--}" "${opr:--}${TAB}${cpr:--}"
+  b_reason=$(worktree_block_reason "$p")
+  refs=$(refs_containing "$head")
+  DFACTS="$DFACTS$(basename "$p")$TAB$p$TAB$head$TAB$inmain$TAB${mpr:--}$TAB${opr:--}$TAB${cpr:--}$TAB${b_reason:--}$TAB${refs:--}$NL"
 done <<EOF
 $DETACHED
 EOF
-step_done "$(printf '%s' "$FACTS" | grep -c .) targets"
+step_done "$(printf '%s%s' "$BFACTS" "$DFACTS" | grep -c .) targets"
 
 # ── deriving the operations, after every keystroke ──────────────────────────
 
@@ -203,61 +224,32 @@ emit() {
   return 0
 }
 
-# id, state, kind, action, target, why.
+# Rows: id, state, kind, action, target, why. Forks nothing, because this runs
+# again on every keystroke. Branches first, so that by the time a detached
+# worktree is judged, every removal that could orphan its commit is counted.
 derive() {
   ROWS=''
   COUNT=0
   PICKED=0
   BLOCKED=' '
   NOTED=''
-  # Rebuilt every time, because which branches are going means which commits
-  # still have a home. Branch facts come before detached ones, so by the time a
-  # worktree is judged every removal above it has been counted.
   DOOMED=' '
-  while IFS="$TAB" read -r what name wt head class ahead why; do
-    [ -z "$what" ] && continue
+
+  while IFS="$TAB" read -r name wt class ahead why behind block uact udetail; do
+    [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
-    [ "$name" = "$MAIN" ] && [ "$what" = branch ] && continue
 
-    if [ "$what" = detached ]; then
-      # class=in-main, ahead=merged PR, why=open PR then closed PR.
-      opr=${why%%"$TAB"*}; cpr=${why#*"$TAB"}
-      block=$(worktree_block_reason "$wt")
-      if [ -n "$block" ]; then NOTED="$NOTED$name$TAB$block$NL"; continue; fi
-
-      if [ "$class" = yes ]; then
-        det=on; reason='work already in main'
-      elif [ "$ahead" != - ]; then
-        det=on; reason="merged in $ahead"
-      else
-        # The selection-dependent one. A branch being removed this run is not a
-        # home for anything.
-        held=$(commit_on_ref "$head")
-        if [ -n "$held" ]; then NOTED="$NOTED$name${TAB}on $held$NL"; continue; fi
-        if [ "$opr" != - ]; then NOTED="$NOTED$name$TAB$opr is open$NL"; continue; fi
-        det=off
-        [ "$cpr" != - ] && reason="$cpr closed without merging" || reason='on no branch, in no pull request'
-      fi
-
-      note_default "${name}R" "$det"
-      st=off; has "${name}R" "$SELECTED" && st=on
-      emit "${name}R" "$st" remove "remove worktree $name" "$wt" "$reason"
-      continue
-    fi
-
-    # A branch whose work has landed: one removal, and nothing else on offer.
     removal=''
     case "$class" in
-      merged) removal="remove $name"; def=on ;;
-      empty)  removal="remove $name"; def=on ;;
-      suspect) removal="remove $name"; def=off ;;
-      review) removal="rescue $why off $name, then remove it"; def=off ;;
+      merged|empty) removal="remove $name"; def=on ;;
+      suspect)      removal="remove $name"; def=off ;;
+      review)       removal="rescue $why off $name, then remove it"; def=off ;;
     esac
     if [ -n "$removal" ]; then
       [ -n "$wt" ] && removal="$removal and its worktree"
-      block=$(worktree_block_reason "$wt")
-      if [ -n "$block" ]; then
+      if [ "$block" != - ]; then
         NOTED="$NOTED$name$TAB$block$NL"
+        removal=''
       else
         note_default "${name}R" "$def"
         st=off; has "${name}R" "$SELECTED" && st=on
@@ -267,27 +259,52 @@ derive() {
       fi
     fi
 
-    # The update, which exists only while the removal is not taking the target.
-    [ -z "$wt" ] && continue
-    behind=$(git -C "$wt" rev-list --count "HEAD..origin/$MAIN" 2>/dev/null || echo 0)
-    [ "$behind" = 0 ] && continue
-    dirty=$(git -C "$wt" status --porcelain 2>/dev/null)
-    [ -n "$dirty" ] && { NOTED="$NOTED$name$TAB""uncommitted changes, not updated$NL"; continue; }
-    uv=$(update_verdict "$wt" "$name")
-    IFS="$TAB" read -r act detail <<EOF
-$uv
-EOF
-    [ "$act" = none ] && { NOTED="$NOTED$name$TAB$detail$NL"; continue; }
+    [ "$uact" = - ] && continue
+    if [ "$uact" = none ]; then NOTED="$NOTED$name$TAB$udetail$NL"; continue; fi
     if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
       block_op "${name}U"
-      emit "${name}U" skip "$act" "$act $name onto $MAIN" "$wt" "skipped, the removal above takes it"
+      emit "${name}U" skip "$uact" "$uact $name onto $MAIN" "$wt" "skipped, the removal above takes it"
     else
       note_default "${name}U" on
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$act" "$act $name onto $MAIN" "$wt" "$behind behind"
+      emit "${name}U" "$st" "$uact" "$uact $name onto $MAIN" "$wt" "$behind behind"
     fi
   done <<EOF
-$FACTS
+$BFACTS
+EOF
+
+  while IFS="$TAB" read -r name wt head inmain mpr opr cpr block refs; do
+    [ -z "$name" ] && continue
+    if [ "$block" != - ]; then NOTED="$NOTED$name$TAB$block$NL"; continue; fi
+
+    if [ "$inmain" = yes ]; then
+      det=on; reason='work already in main'
+    elif [ "$mpr" != - ]; then
+      det=on; reason="merged in $mpr"
+    else
+      # The one selection-dependent question: a branch you are removing is not a
+      # home for anything, so it does not count as holding this commit.
+      held=''
+      if [ "$refs" != - ]; then
+        oifs=$IFS; IFS=' '
+        for r in $refs; do
+          doomed_branch "$r" && continue
+          held=$r
+          break
+        done
+        IFS=$oifs
+      fi
+      if [ -n "$held" ]; then NOTED="$NOTED$name${TAB}on $held$NL"; continue; fi
+      if [ "$opr" != - ]; then NOTED="$NOTED$name$TAB$opr is open$NL"; continue; fi
+      det=off
+      [ "$cpr" != - ] && reason="$cpr closed without merging" || reason='on no branch, in no pull request'
+    fi
+
+    note_default "${name}R" "$det"
+    st=off; has "${name}R" "$SELECTED" && st=on
+    emit "${name}R" "$st" remove "remove worktree $name" "$wt" "$reason"
+  done <<EOF
+$DFACTS
 EOF
 }
 
