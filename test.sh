@@ -1,7 +1,7 @@
 #!/bin/sh
 # Parse every shell script in this repo, then lint them with shellcheck. Quiet on
-# success; a finding exits 1, and a missing linter exits 64. A zsh fragment is
-# parsed too, by zsh, though shellcheck cannot lint it.
+# success; a finding exits 1, and a missing linter exits 64. The shell fragments
+# are parsed too, each by its own shell, though shellcheck cannot lint them.
 #
 # Each file is parsed by the interpreter its shebang names, before anything is
 # linted, because shellcheck has its own parser and it is more permissive than
@@ -40,10 +40,11 @@ command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck is not installed: br
 # Built as positional parameters so the paths stay quoted, and via a here-doc
 # rather than a pipe so the loop is not a subshell and the list survives it.
 #
-# A .zsh file is matched by name rather than by `file`, which is the one exception
-# to the rule above it: these are fragments meant to be sourced, so they carry no
-# shebang and `file` reports plain text. They are parsed and not linted, shellcheck
-# having no zsh.
+# The loader's fragments are matched by name rather than by `file`, the one exception
+# to the rule above it. load.sh sources `<shell>/interactive.<shell>`, and a sourced
+# fragment carries no shebang, so `file` reports plain text and the name is the only
+# handle on which shell it belongs to. They are parsed and not linted, shellcheck
+# having neither zsh nor a way to know.
 set --
 unparseable=
 note_unparseable() {
@@ -53,7 +54,8 @@ $1"
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
-    *.zsh) zsh -n "$f" || note_unparseable "$f"; continue ;;
+    *.zsh)  zsh -n "$f" || note_unparseable "$f"; continue ;;
+    *.bash) bash -n "$f" || note_unparseable "$f"; continue ;;
   esac
   case $(file "$f") in
     *'Bourne-Again shell script'*) set -- "$@" "$f"; bash -n "$f" || note_unparseable "$f" ;;
