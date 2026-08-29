@@ -139,15 +139,18 @@ $verdict
 EOF
   [ "$gone" = true ] && why='remote gone' || why='-'
   [ "$class" = review ] && why="$n on top"
+  [ "$class" = inconclusive ] && why="$(distance_from_main "refs/heads/$b") behind, not evaluated"
 
   block='-'; behind=0; uact='-'; udetail='-'
   if [ -n "$wt" ]; then
     b_reason=$(worktree_block_reason "$wt")
     [ -n "$b_reason" ] && block=$b_reason
     behind=$(git -C "$wt" rev-list --count "HEAD..$MAIN_REF" 2>/dev/null || echo 0)
-    # An unclean worktree cannot be updated either, so it says so once rather
-    # than appearing twice under two headings.
-    if [ "$block" = - ] && [ "$behind" != 0 ]; then
+    # No update for a branch whose work is already in the trunk. There is
+    # nothing to bring in, and replaying its commits onto a trunk that already
+    # has their content duplicates them and pushes them to a branch the merge
+    # deleted. An unclean worktree cannot be updated either, and says so once.
+    if [ "$block" = - ] && [ "$behind" != 0 ] && [ "$class" != merged ]; then
       uv=$(update_verdict "$wt" "$b")
       uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
     fi
@@ -246,18 +249,25 @@ derive() {
       suspect)      removal="remove $name"; def=off ;;
       review)       removal="rescue $why off $name, then remove it"; def=off ;;
     esac
-    if [ -n "$removal" ]; then
+    if [ -n "$removal" ] && [ "$block" = - ]; then
       [ -n "$wt" ] && removal="$removal and its worktree"
-      if [ "$block" != - ]; then
-        NOTED="$NOTED$name$TAB$block$NL"
-        removal=''
-      else
-        note_default "${name}R" "$def"
-        st=off; has "${name}R" "$SELECTED" && st=on
-        [ "$st" = on ] && doom_branch "$name"
-        [ "$class" = review ] && k=rescue || k=remove
-        emit "${name}R" "$st" "$k" "$removal" "$wt" "$why"
-      fi
+      note_default "${name}R" "$def"
+      st=off; has "${name}R" "$SELECTED" && st=on
+      [ "$st" = on ] && doom_branch "$name"
+      [ "$class" = review ] && k=rescue || k=remove
+      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why"
+    else
+      removal=''
+    fi
+
+    # Nothing on offer is still worth saying when the reason is that the tree is
+    # dirty or that the branch could not be evaluated. Reported outside the
+    # removal branch above, or a target with no removal to attach it to is
+    # silently absent, which is what happened to the trunk itself.
+    if [ "$block" != - ]; then
+      NOTED="$NOTED$name$TAB$block$NL"
+    elif [ "$class" = inconclusive ]; then
+      NOTED="$NOTED$name$TAB$why, run --old$NL"
     fi
 
     [ "$uact" = - ] && continue
