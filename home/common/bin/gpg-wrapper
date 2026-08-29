@@ -54,7 +54,7 @@ bell_tty() {
   # ps prints ?? for no terminal, which would otherwise glob against the cwd.
   set -f
   pid=$$
-  while [ "$pid" -gt 1 ]; do
+  while [ "$pid" -gt 0 ]; do
     # shellcheck disable=SC2046 # splitting ps's two fields is the point
     set -- $(ps -o ppid=,tty= -p "$pid")
     [ "$#" -eq 2 ] || break
@@ -89,6 +89,8 @@ while [ "$attempt" -lt "$attempts" ]; do
     status=$?
   fi
 done
+
+set -e
 
 cat "$out"
 cat "$err" >&2
