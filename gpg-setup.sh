@@ -209,7 +209,7 @@ EOF
     # discard the cached passphrase, so the next signature prompts again. The
     # card keeps PW1 verified on its own; only scdaemon throws it away. Needs the
     # patched build from setup/macos/build-gnupg.sh.
-    if grep -q 'keep-chv-on-timeout' "$SCDAEMON_CONF" 2>/dev/null; then
+    if [ -f "$SCDAEMON_CONF" ] && grep -q 'keep-chv-on-timeout' "$SCDAEMON_CONF"; then
       echo "  scdaemon: keep-chv-on-timeout already set"
     else
       echo "keep-chv-on-timeout" >> "$SCDAEMON_CONF"
