@@ -55,9 +55,13 @@ WS_FILE="$WS_DIR/$SERVER.code-workspace"
 # directory has gone. That removal restarts the extension host, which prompts for
 # confirmation when an extension editor such as a preview is open. An unparseable
 # file has already lost its folder list, so rebuild from this repo.
+#
+# Only an entry whose path is a string with no newline is kept, because the resolve
+# below carries one line per entry through a pipe: a newline inside a path would add
+# a line and pair every later entry with another entry's answer.
 EXISTING='[]'
 if [ -f "$WS_FILE" ]; then
-  EXISTING=$("$JQ" -c 'if (.folders | type) == "array" then .folders else [] end' "$WS_FILE" 2>/dev/null) || EXISTING='[]'
+  EXISTING=$("$JQ" -c '[ (if (.folders | type) == "array" then .folders else [] end)[] | select((.path | type) == "string" and (.path | contains("\n") | not)) ]' "$WS_FILE" 2>/dev/null) || EXISTING='[]'
   [ -z "$EXISTING" ] && EXISTING='[]'
 fi
 
@@ -102,7 +106,10 @@ NEW=$("$JQ" -n \
 # Retarget: rewrite the workspace file only when something actually changed.
 # Written through a rename so a reader never sees a half-written file. VS Code
 # behaves the same whether the file is replaced or truncated in place.
-if [ ! -f "$WS_FILE" ] || [ "$NEW" != "$(cat "$WS_FILE")" ]; then
+#
+# A failed merge leaves nothing to write, and writing that would replace the folder
+# list with an empty file, so the last good one stands instead.
+if [ -n "$NEW" ] && { [ ! -f "$WS_FILE" ] || [ "$NEW" != "$(cat "$WS_FILE")" ]; }; then
   printf '%s\n' "$NEW" > "$WS_FILE.tmp"
   mv "$WS_FILE.tmp" "$WS_FILE"
 fi
