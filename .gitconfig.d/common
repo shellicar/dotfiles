@@ -63,6 +63,12 @@
 	useConfigOnly = true
 [commit]
 	gpgsign = true
+[gpg]
+	; git calls this instead of gpg to sign, so a signature rings the terminal
+	; when the key wants a touch and asks again when the blink was missed. Named
+	; rather than pathed, because ~/bin is on PATH on every platform and an
+	; absolute path would not be
+	program = gpg-wrapper
 
 [includeIf "hasconfig:remote.*.url:https://github.com/shellicar/**"]
 	path = ~/dotfiles/.gitconfig.d/shellicar
