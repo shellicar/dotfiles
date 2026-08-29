@@ -16,6 +16,13 @@
 #   N commits not in main  → merged + N on top → review (kept)
 #   no join point found    → not merged        → keep
 #
+# A MERGED PULL REQUEST IS NOT THE SAME CLAIM. It answers the squash case, where
+# none of the branch's commits are in main and the content walk has nothing to
+# find, but it only speaks for the commits it carried. So it counts only when the
+# branch tip is EXACTLY the source tip the PR merged. One commit added after the
+# merge and the branch is a normal branch again, judged by content like any
+# other, because that commit is in main nowhere.
+#
 # GONE IS ONLY AN INDICATOR. The remote branch being deleted says nothing about
 # content; it is a cross-check against the verdict, and only matters when the
 # two disagree:
@@ -158,9 +165,10 @@ ado_coordinates() (
   printf '%s\t%s\t%s\n' "$(printf '%s' "$path" | cut -d/ -f1)" "$(printf '%s' "$path" | cut -d/ -f2)" "$(printf '%s' "$path" | cut -d/ -f3)"
 )
 
-# One bulk fetch of every merged PR's source branch + merge commit, instead of
-# an API call per branch (~0.5s network round-trip each — 50 branches would be
-# 25s of pure latency). Populated once, in the tab-separated table
+# One bulk fetch of every merged PR's source branch, its tip at merge, and the
+# merge commit it made on main, instead of an API call per branch (~0.5s network
+# round-trip each — 50 branches would be 25s of pure latency). Populated once,
+# in the tab-separated table
 # PR_MERGE_TABLE looks up from. Azure DevOps reports the source branch as a full
 # ref, so it is stripped to match the plain branch names on the other side.
 # az answers an auth failure with a blanket 'az logout; az login', which tears
@@ -211,12 +219,12 @@ fetch_pr_merges() {
       token=$(az account get-access-token --subscription "$sub" --resource "$ADO_RESOURCE" --query accessToken -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, no token for subscription'; log "ado token error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub" force; return 0; }
       # $top is an OData parameter, single-quoted so no shell expands it away.
       # Without it the API returns its default first page of 101, not the lot.
-      raw=$(az rest --method get --skip-authorization-header --headers "Authorization=Bearer $token" --url "https://dev.azure.com/$org/$project/_apis/git/repositories/$repo/pullrequests" --uri-parameters searchCriteria.status=completed '$top=1000' api-version=7.1 --query 'value[?lastMergeCommit.commitId!=null].[sourceRefName, lastMergeCommit.commitId]' -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, query failed'; log "ado query error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub"; return 0; }
+      raw=$(az rest --method get --skip-authorization-header --headers "Authorization=Bearer $token" --url "https://dev.azure.com/$org/$project/_apis/git/repositories/$repo/pullrequests" --uri-parameters searchCriteria.status=completed '$top=1000' api-version=7.1 --query 'value[?lastMergeCommit.commitId!=null && lastMergeSourceCommit.commitId!=null].[sourceRefName, lastMergeSourceCommit.commitId, lastMergeCommit.commitId]' -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, query failed'; log "ado query error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub"; return 0; }
       # An expired session gets Azure DevOps's HTML sign-in page with a 200, so az
       # exits 0, skips --query because the body is not JSON, and prints the page.
       # Rows are therefore validated, not trusted: branch, tab, 40 hex characters.
       ADO_TOKEN=$token; ADO_ORG=$org; ADO_PROJECT=$project; ADO_REPO=$repo
-      PR_MERGE_TABLE=$(printf '%s' "$raw" | sed 's@^refs/heads/@@' | awk -F'\t' 'NF==2 && $2 ~ /^[0-9a-f]{40}$/')
+      PR_MERGE_TABLE=$(printf '%s' "$raw" | sed 's@^refs/heads/@@' | awk -F'\t' 'NF==3 && $2 ~ /^[0-9a-f]{40}$/ && $3 ~ /^[0-9a-f]{40}$/')
       log "ado rows=$(printf '%s' "$PR_MERGE_TABLE" | grep -c .) of $(printf '%s' "$raw" | grep -c .) lines"
       if [ -z "$PR_MERGE_TABLE" ] && [ -n "$raw" ]; then
         PR_SOURCE='azure devops, not signed in'
@@ -226,16 +234,33 @@ fetch_pr_merges() {
     github)
       command -v gh >/dev/null 2>&1 || { PR_SOURCE='github, gh missing'; return 0; }
       PR_SOURCE='github'
-      PR_MERGE_TABLE=$(gh pr list --state merged --json headRefName,mergeCommit --limit 1000 --jq '.[] | select(.mergeCommit != null) | [.headRefName, .mergeCommit.oid] | @tsv' 2>/dev/null) || { PR_SOURCE='github, query failed'; return 0; }
+      PR_MERGE_TABLE=$(gh pr list --state merged --json headRefName,headRefOid,mergeCommit --limit 1000 --jq '.[] | select(.mergeCommit != null) | [.headRefName, .headRefOid, .mergeCommit.oid] | @tsv' 2>/dev/null) || { PR_SOURCE='github, query failed'; return 0; }
       ;;
   esac
 }
 
-# The squash/merge commit of a merged PR for this branch, looked up from the
-# table fetch_pr_merges built once up front. Empty if none.
-pr_merge_commit() {
+# The SOURCE BRANCH TIP as it was when the PR merged, looked up from the table
+# fetch_pr_merges built once up front. Empty if none. This is the commit the
+# branch has to still be sitting on for the PR to speak for it.
+pr_head() {
   printf '%s\n' "$PR_MERGE_TABLE" | awk -F'\t' -v b="$1" '$1==b{print $2; exit}'
 }
+
+# The squash/merge commit the PR created ON MAIN. Not evidence about the branch:
+# only a base to replay onto when a rescue cannot use main.
+pr_merge_commit() {
+  printf '%s\n' "$PR_MERGE_TABLE" | awk -F'\t' -v b="$1" '$1==b{print $3; exit}'
+}
+
+# The branch is exactly what the PR merged, and nothing since. An exact match is
+# the whole test: anything else means commits the PR never carried, and those
+# have to be found in main by content like any other branch's would.
+pr_covers_branch() (
+  head=$(pr_head "$1") || return 1
+  [ -n "$head" ] || return 1
+  tip=$(git rev-parse --verify --quiet "$1") || return 1
+  [ "$tip" = "$head" ]
+)
 
 # Which pull requests carry each detached commit, as sha/kind/label rows. A
 # failed lookup is the same as no pull request, which sends a worktree towards
@@ -334,8 +359,9 @@ compute_max_walk_depth() (
     [ "$branch" = "$MAIN" ] && continue
     base=$(git merge-base "$branch" "origin/$MAIN" 2>/dev/null) || continue
     git merge-base --is-ancestor "$branch" "origin/$MAIN" 2>/dev/null && continue
-    pr_mc=$(pr_merge_commit "$branch")
-    [ -n "$pr_mc" ] && ref_exists "$pr_mc" && continue
+    # Same test the verdict uses, or the index is sized for fewer branches than
+    # actually reach the content walk and their answers come out wrong.
+    pr_covers_branch "$branch" && continue
     branch_beyond_cap "$branch" && continue
     dist=$(git rev-list --count "$base..origin/$MAIN" 2>/dev/null) || continue
     [ "$dist" -gt "$max" ] && max=$dist
@@ -366,30 +392,24 @@ build_shared_main_index() {
 # is found within WALK_DEPTH, or -2 if the branch is past the evaluation cap and
 # the content walk was never run.
 #
-# PR checked FIRST — it's authoritative and one API call (batched, see
-# fetch_pr_merges), versus walking potentially hundreds of commits. The
-# content walk is the fallback, against the shared MAIN_IDX built once
-# up front by build_shared_main_index — no per-branch walk of main at all.
+# PR checked FIRST, and only ever as an EXACT MATCH: the branch tip is the same
+# commit the PR merged, so the PR is a statement about this branch and not just
+# about some commits it once had. A squash merge leaves none of the branch's
+# commits in main, so without this the content walk has nothing to find and the
+# branch reads as unmerged, which is what the PR is here to answer.
+#
+# Anything short of an exact match falls through. A merged PR does NOT mean the
+# branch is in main: commit to it afterwards and the extra work exists nowhere
+# else, while the PR still says merged. An earlier version trusted the PR in
+# that case and deleted a branch, its worktree, and the one commit that had been
+# added after the merge. The content walk below is what covers the difference.
 commits_not_in_main() (
   branch=$1
   base=$(git merge-base "$branch" "origin/$MAIN" 2>/dev/null) || { echo -1; return; }
   # Fully contained in main (0 unique commits — includes a branch sitting at main).
   git merge-base --is-ancestor "$branch" "origin/$MAIN" && { echo 0; return; }
 
-  pr_mc=$(pr_merge_commit "$branch")
-  if [ -n "$pr_mc" ] && ref_exists "$pr_mc"; then
-    pr_join=$(git merge-base "$pr_mc" "origin/$MAIN" 2>/dev/null)
-    if [ -n "$pr_join" ] && git merge-base --is-ancestor "$pr_join" "origin/$MAIN" 2>/dev/null; then
-      i=0
-      for c in $(git rev-list -n "$WALK_DEPTH" "$base..$branch"); do
-        [ "$c" = "$pr_join" ] && { echo "$i"; return; }
-        i=$((i + 1))
-      done
-      # PR merged, but its merge commit isn't among the branch's own recent
-      # tip commits (e.g. squashed) — trust the PR: fully merged.
-      echo 0; return
-    fi
-  fi
+  pr_covers_branch "$branch" && { echo 0; return; }
 
   # Cheap checks done and unresolved; only the expensive one is left.
   branch_beyond_cap "$branch" && { echo -2; return; }
