@@ -235,6 +235,9 @@ do_delete() {
   fi
 
   plan_add delete "$branch" - - "${wt:--}"
+  # Recorded here, not read back out of the plan: a detached worktree judged
+  # later must not be kept "because this branch holds its commit".
+  doom_branch "$branch"
   say "  ${RED}${WOULDREMOVE}${RESET} $branch $meta ${DIM}($desc — will $what)${RESET}"
   say_ignored "$ignored"
 }

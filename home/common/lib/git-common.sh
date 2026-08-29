@@ -420,11 +420,15 @@ worktree_of() {
 
 worktree_dirty() { [ -n "$(git -C "$1" status --porcelain 2>/dev/null)" ]; }
 
-# A branch this run is going to delete. Its name is in the plan, which the branch
-# pass finishes building before the detached pass starts.
-doomed_branch() {
-  printf '%s' "$PLAN" | awk -F"$TAB" -v b="$1" '$1=="delete" && $2==b {found=1} END {exit !found}'
-}
+# Is this string in that space-delimited list?
+has() { case "$2" in *" $1 "*) return 0 ;; esac; return 1; }
+
+# Branches this run is going to delete. The caller fills it, because the two
+# front-ends know at different moments: cleanup as it builds its plan, refresh
+# every time you change what is selected.
+DOOMED=' '
+doom_branch() { has "$1" "$DOOMED" || DOOMED="$DOOMED$1 "; return 0; }
+doomed_branch() { has "$1" "$DOOMED"; }
 
 # The first branch, remote branch or tag containing the commit, or empty. Local
 # branches sort ahead of remotes and tags, so a local name is preferred.
