@@ -1,14 +1,16 @@
 #!/bin/sh
 # Parse every shell script in this repo, then lint them with shellcheck. Quiet on
-# success; a finding exits 1, and a missing linter exits 64.
+# success; a finding exits 1, and a missing linter exits 64. A zsh fragment is
+# parsed too, by zsh, though shellcheck cannot lint it.
 #
 # Each file is parsed by the interpreter its shebang names, before anything is
 # linted, because shellcheck has its own parser and it is more permissive than
 # the shell. A `case` inside `$( )` is fine to shellcheck and a syntax error to
-# the bash 3.2 that is /bin/sh on macOS, so a green lint has never meant the
-# script can run. The parse check goes first because `set -e` ends the run on
-# shellcheck's own findings, and the failure that stops a script working must not
-# be the one that gets skipped.
+# the bash 3.2 that is /bin/sh on macOS, so a green lint has never meant the script
+# can run. The parse check goes first because `set -e` ends the run on a lint
+# finding, and the failure that stops a script working must not be the one that
+# gets skipped. A comment must not open with the linter's name, or the linter reads
+# it as a directive and stops analysing the file there.
 #
 # A SILENT PASS IS THE ONE OUTCOME THIS MUST NEVER PRODUCE. The original wrote
 # the lint as `cmd "$f" && echo ok`, and set -e never fires for the left side of
@@ -37,13 +39,25 @@ command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck is not installed: br
 
 # Built as positional parameters so the paths stay quoted, and via a here-doc
 # rather than a pipe so the loop is not a subshell and the list survives it.
+#
+# A .zsh file is matched by name rather than by `file`, which is the one exception
+# to the rule above it: these are fragments meant to be sourced, so they carry no
+# shebang and `file` reports plain text. They are parsed and not linted, shellcheck
+# having no zsh.
 set --
 unparseable=
+note_unparseable() {
+  unparseable="$unparseable
+$1"
+}
 while IFS= read -r f; do
   [ -n "$f" ] || continue
+  case "$f" in
+    *.zsh) zsh -n "$f" || note_unparseable "$f"; continue ;;
+  esac
   case $(file "$f") in
-    *'Bourne-Again shell script'*) set -- "$@" "$f"; bash -n "$f" || unparseable="$unparseable $f" ;;
-    *'shell script'*)              set -- "$@" "$f"; /bin/sh -n "$f" || unparseable="$unparseable $f" ;;
+    *'Bourne-Again shell script'*) set -- "$@" "$f"; bash -n "$f" || note_unparseable "$f" ;;
+    *'shell script'*)              set -- "$@" "$f"; /bin/sh -n "$f" || note_unparseable "$f" ;;
   esac
 done <<EOF
 $(find . -type f -not -path './.git/*' -not -path '*/node_modules/*')
@@ -51,6 +65,6 @@ EOF
 
 [ "$#" -gt 0 ] || { echo "found no shell scripts to lint" >&2; exit 64; }
 
-[ -z "$unparseable" ] || { echo "will not parse:$unparseable" >&2; exit 1; }
+[ -z "$unparseable" ] || { printf 'will not parse:%s\n' "$unparseable" >&2; exit 1; }
 
 shellcheck --format=gcc "$@"
