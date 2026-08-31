@@ -143,8 +143,9 @@ require_one_card() {
   fi
 }
 
+# The '>' is quoted because gpg-card parses it, not the shell.
 read_cert_openpgp() {
-  gpg-card --no-history readcert --openpgp 3 '>' /dev/stdout | base64
+  gpg-card --no-history readcert --openpgp 3 '>' /dev/stdout 2>/dev/null | base64
 }
 
 read_cert_raw_size() {
@@ -158,11 +159,12 @@ import_pubkey_from_card() {
     bytes=$(read_cert_raw_size)
     if [ "$bytes" -lt 16 ]; then
       echo "ERROR: no public key on this card ($bytes bytes in the slot)" >&2
+      echo "  write one with:" >&2
     else
       echo "ERROR: this card holds $bytes bytes in the slot, but not the" >&2
       echo "       container gpg-card writes" >&2
+      echo "  overwrite it with:" >&2
     fi
-    echo "  write one with:" >&2
     echo "  gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>" >&2
     exit 1
   fi
