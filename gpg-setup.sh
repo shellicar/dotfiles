@@ -27,7 +27,8 @@ usage() {
   echo "  --configure    Configure gpg-agent, keychain, and pinentry"
   echo "  --configure --hardware"
   echo "                 As above, but for card-only use: no cache expiry,"
-  echo "                 and removes the daily kill from cron"
+  echo "                 removes the daily kill from cron, and imports the"
+  echo "                 public key from the card. Needs exactly one inserted"
   echo "  --schedule     Set up daily cron to kill gpg-agent (default 6am)"
   echo "  --reset        Kill gpg-agent now (next sign prompts)"
   exit 1
@@ -74,14 +75,14 @@ test_sign() {
     read -r email
 
     if [ -z "$email" ]; then
-      echo "Error: email is required"
+      echo "ERROR: email is required" >&2
       exit 1
     fi
 
     key_id=$(find_key_by_email "$email")
 
     if [ -z "$key_id" ]; then
-      echo "Error: no key found for $email"
+      echo "ERROR: no key found for $email" >&2
       exit 1
     fi
     label="$email"
@@ -118,38 +119,15 @@ schedule_reset() {
   echo "Done."
 }
 
-# Walks the four DER headers wrapping the keyblock and prints the 1-based offset
-# of the payload, or nothing if the structure is not what writecert produces.
-# Each header is a tag byte, then either a short-form length or 0x8N followed by
-# N length bytes, so the total width depends on the payload size.
-der_payload_offset() {
-  xxd -p -c 256 "$1" | tr -d '\n' | awk '
-    BEGIN {
-      for (i = 0; i < 16; i++) { h[sprintf("%x", i)] = i; h[sprintf("%X", i)] = i }
-      expect[0] = 48; expect[1] = 6; expect[2] = 160; expect[3] = 4
-    }
-    function byte(i,   s) {
-      s = substr($0, i * 2 + 1, 2)
-      if (length(s) < 2) return -1
-      return h[substr(s, 1, 1)] * 16 + h[substr(s, 2, 1)]
-    }
-    {
-      pos = 0
-      for (i = 0; i < 4; i++) {
-        if (byte(pos) != expect[i]) exit
-        pos++
-        len = byte(pos); pos++
-        if (len > 128) pos += len - 128
-        else if (i == 1) pos += len   # the OID is a leaf, step over its contents
-      }
-      print pos + 1
-    }'
-}
-
 # Exactly one card, or the operation is ambiguous: scdaemon binds to a single
 # card, so with two inserted the commands below would silently address whichever
 # it picked.
 require_one_card() {
+  if ! command -v ykman >/dev/null 2>&1; then
+    echo "ERROR: ykman not found; install it with 'brew install ykman'" >&2
+    exit 1
+  fi
+
   serials=$(ykman list --serials 2>/dev/null || true)
   count=$(printf '%s\n' "$serials" | grep -c . || true)
 
@@ -165,37 +143,23 @@ require_one_card() {
 }
 
 # A card holds the private key, and the public key alongside it in a certificate
-# data object. Without that public key in the keyring gpg cannot build the stub
-# that points at the card, so a machine that has never seen the key cannot use
-# it however many times the card is inserted.
+# data object written once per key with:
 #
-# readcert --openpgp is meant to unwrap the keyblock itself, but rejects the
-# container gpg-card's own writecert produced, so the raw object is read and the
-# DER header stripped by hand.
+#   gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>
 #
-# The header is a SEQUENCE, an OID, a [0] context tag and an OCTET STRING. Their
-# lengths use DER's long form, whose width depends on the payload size, so the
-# offset is derived from the headers rather than assumed: a larger or smaller
-# keyblock would move it.
+# Without that public key in the keyring gpg cannot build the stub that points
+# at the card, so a machine that has never seen the key cannot use it however
+# many times the card is inserted.
 import_pubkey_from_card() {
-  raw=$(mktemp)
   key=$(mktemp)
-  trap 'rm -f "$raw" "$key"' EXIT
+  trap 'rm -f "$key"' EXIT
 
-  if ! gpg-card --no-history readcert 3 '>' "$raw" 2>/dev/null || [ ! -s "$raw" ]; then
+  if ! gpg-card --no-history readcert --openpgp 3 '>' "$key" 2>/dev/null \
+    || [ ! -s "$key" ]; then
     echo "ERROR: no public key on this card; write one with:" >&2
     echo "  gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>" >&2
     exit 1
   fi
-
-  offset=$(der_payload_offset "$raw")
-  if [ -z "$offset" ]; then
-    echo "ERROR: the card's certificate object is not the expected container" >&2
-    echo "  first bytes: $(xxd -l 16 -p "$raw")" >&2
-    exit 1
-  fi
-
-  tail -c "+$offset" "$raw" > "$key"
 
   fpr=$(gpg --no-options --with-colons --show-keys "$key" 2>/dev/null \
     | awk -F: '/^fpr:/ { print $10; exit }')
@@ -306,9 +270,11 @@ EOF
   echo "  config: $GPG_AGENT_CONF"
 
   if [ "$hardware" -eq 1 ]; then
-    import_pubkey_from_card
-
-    # Without this, a touch that times out makes scdaemon de-verify the card and
+    # Written before the card is touched: reading the card starts scdaemon, and
+    # reloading the agent afterwards does not restart it, so a scdaemon spawned
+    # first would run without this until it next exits.
+    #
+    # Without it, a touch that times out makes scdaemon de-verify the card and
     # discard the cached passphrase, so the next signature prompts again. The
     # card keeps PW1 verified on its own; only scdaemon throws it away. Needs the
     # patched build from setup/macos/build-gnupg.sh.
@@ -318,6 +284,8 @@ EOF
       echo "keep-chv-on-timeout" >> "$SCDAEMON_CONF"
       echo "  scdaemon: keep-chv-on-timeout added"
     fi
+
+    import_pubkey_from_card
     remove_cron
   fi
   echo ""

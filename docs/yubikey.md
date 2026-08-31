@@ -318,7 +318,18 @@ one UID; add the remaining four with `--quick-add-uid`; set the signature slot's
 policy to `cached`. Key B repeats it and produces different key material, which is
 inherent to on-card generation.
 
-**4. Publish the public keys.** One GitHub account covers both `github.com/shellicar` and
+**4. Write the public key onto the card.** A card holds the private key, and the
+public key only if it is put there:
+
+```
+gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>
+```
+
+Without it a machine that has never seen the key cannot build the stub that points at
+the card, so the card is unusable there however many times it is inserted. Once per key,
+and `gpg-setup.sh --configure --hardware` reads it back.
+
+**5. Publish the public keys.** One GitHub account covers both `github.com/shellicar` and
 the `Hellicar-Solutions` organisation, so it takes a single export carrying those two
 UIDs. The three client UIDs are exported nowhere, which achieves the separation more
 completely than filtering per platform would.
@@ -333,14 +344,14 @@ actually proves it.
 Both keys go up at this point rather than when one fails, and the old keys stay: they are
 what verifies every commit signed before the switch.
 
-**5. Update `.gitconfig.d/`.** All five files take the same `signingkey`, since the five
+**6. Update `.gitconfig.d/`.** All five files take the same `signingkey`, since the five
 identities now share one key. The `includeIf` selection still picks the right email per
 remote, which is what it is actually for.
 
-**6. Bitwarden.** Create the Families organization, bring the five accounts in, enable
+**7. Bitwarden.** Create the Families organization, bring the five accounts in, enable
 WebAuthn on each with both keys, and print every recovery code.
 
-**7. The credential pass.** The real work, and the reason for the ordering above.
+**8. The credential pass.** The real work, and the reason for the ordering above.
 Microsoft Authenticator has no clean seed export, so every credential is a manual
 re-enrolment regardless of destination.
 
