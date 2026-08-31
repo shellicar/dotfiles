@@ -5,6 +5,11 @@ set -e
 GPG_AGENT_CONF="$HOME/.gnupg/gpg-agent.conf"
 GPG_CONF="$HOME/.gnupg/gpg.conf"
 SCDAEMON_CONF="$HOME/.gnupg/scdaemon.conf"
+# The card has three certificate slots, one per key. 1 and 2 belong to the
+# signature and encryption keys and are free for certificates on those; 3
+# belongs to the authentication key, which is unused here, so it is the slot
+# least likely to be wanted for anything else.
+CERT_SLOT=3
 KEYCHAIN_NAME="gpg.keychain"
 KEYCHAIN_PATH="$HOME/Library/Keychains/${KEYCHAIN_NAME}-db"
 KEYCHAIN_TIMEOUT=1
@@ -23,11 +28,13 @@ usage() {
   echo "Commands:"
   echo "  --test-sign    Test signing with an on-disk key (prompts for email)"
   echo "  --test-sign --hardware"
-  echo "                 Test signing with the key on the inserted card"
+  echo "                 Test signing with the key on the inserted card."
+  echo "                 Needs exactly one inserted"
   echo "  --configure    Configure gpg-agent, keychain, and pinentry"
   echo "  --configure --hardware"
   echo "                 As above, but for card-only use: no cache expiry,"
-  echo "                 and removes the daily kill from cron"
+  echo "                 removes the daily kill from cron, and imports the"
+  echo "                 public key from the card. Needs exactly one inserted"
   echo "  --schedule     Set up daily cron to kill gpg-agent (default 6am)"
   echo "  --reset        Kill gpg-agent now (next sign prompts)"
   exit 1
@@ -62,9 +69,10 @@ find_card_key() {
 
 test_sign() {
   if [ "${1:-}" = "--hardware" ]; then
+    require_one_card
     key_id=$(find_card_key)
     if [ -z "$key_id" ]; then
-      echo "Error: no card inserted, or it holds no signature key"
+      echo "ERROR: the inserted card holds no signature key" >&2
       exit 1
     fi
     label="card"
@@ -73,14 +81,14 @@ test_sign() {
     read -r email
 
     if [ -z "$email" ]; then
-      echo "Error: email is required"
+      echo "ERROR: email is required" >&2
       exit 1
     fi
 
     key_id=$(find_key_by_email "$email")
 
     if [ -z "$key_id" ]; then
-      echo "Error: no key found for $email"
+      echo "ERROR: no key found for $email" >&2
       exit 1
     fi
     label="$email"
@@ -117,6 +125,75 @@ schedule_reset() {
   echo "Done."
 }
 
+# Exactly one card, or the operation is ambiguous: scdaemon binds to a single
+# card, so with two inserted the commands below would silently address whichever
+# it picked.
+require_one_card() {
+  if ! command -v ykman >/dev/null 2>&1; then
+    echo "ERROR: ykman not found; install it with 'brew install ykman'" >&2
+    exit 1
+  fi
+
+  serials=$(ykman list --serials 2>/dev/null || true)
+  count=$(printf '%s\n' "$serials" | grep -c . || true)
+
+  if [ "$count" -eq 0 ]; then
+    echo "ERROR: no YubiKey inserted" >&2
+    exit 1
+  fi
+  if [ "$count" -gt 1 ]; then
+    echo "ERROR: more than one YubiKey inserted; unplug all but one" >&2
+    printf '%s\n' "$serials" | sed 's/^/  /' >&2
+    exit 1
+  fi
+}
+
+# The '>' is quoted because gpg-card parses it, not the shell.
+read_cert_openpgp() {
+  gpg-card --no-history readcert --openpgp "$CERT_SLOT" '>' /dev/stdout 2>/dev/null \
+    | base64
+}
+
+read_cert_raw_size() {
+  gpg-card --no-history readcert "$CERT_SLOT" '>' /dev/stdout | wc -c | tr -d ' '
+}
+
+import_pubkey_from_card() {
+  key=$(read_cert_openpgp)
+
+  if [ -z "$key" ]; then
+    bytes=$(read_cert_raw_size)
+    if [ "$bytes" -lt 16 ]; then
+      echo "ERROR: no public key on this card ($bytes bytes in the slot)" >&2
+      echo "  write one with:" >&2
+    else
+      echo "ERROR: this card holds $bytes bytes in the slot, but not the" >&2
+      echo "       container gpg-card writes" >&2
+      echo "  overwrite it with:" >&2
+    fi
+    echo "  gpg-card --no-history writecert --openpgp OPENPGP.$CERT_SLOT <fingerprint>" >&2
+    exit 1
+  fi
+
+  fpr=$(printf '%s' "$key" | base64 -d \
+    | gpg --no-options --with-colons --show-keys 2>/dev/null \
+    | awk -F: '/^fpr:/ { print $10; exit }')
+  if [ -z "$fpr" ]; then
+    echo "ERROR: the card's certificate object is not an OpenPGP key" >&2
+    exit 1
+  fi
+
+  printf '%s' "$key" | base64 -d | gpg --no-options --quiet --import
+  echo "  imported $fpr from the card"
+
+  # Trust is per machine and does not travel with the key.
+  printf '%s:6:\n' "$fpr" | gpg --no-options --quiet --import-ownertrust
+
+  # Builds the stub that points gpg at the card.
+  gpg --no-options --card-status >/dev/null
+  echo "  card stub created"
+}
+
 remove_cron() {
   if crontab -l 2>/dev/null | grep -q 'gpgconf --kill gpg-agent'; then
     crontab -l 2>/dev/null | grep -v 'gpgconf --kill gpg-agent' | crontab -
@@ -139,6 +216,9 @@ reset_agent() {
 # longer exists. Both only make sense while on-disk keys are still in use.
 configure_agent() {
   if [ "${1:-}" = "--hardware" ]; then
+    # Checked before anything is written, so a run without a card leaves the
+    # machine as it was rather than half configured.
+    require_one_card
     CACHE_TTL="$CACHE_TTL_HARDWARE"
     hardware=1
   else
@@ -205,7 +285,11 @@ EOF
   echo "  config: $GPG_AGENT_CONF"
 
   if [ "$hardware" -eq 1 ]; then
-    # Without this, a touch that times out makes scdaemon de-verify the card and
+    # Written before the card is touched: reading the card starts scdaemon, and
+    # reloading the agent afterwards does not restart it, so a scdaemon spawned
+    # first would run without this until it next exits.
+    #
+    # Without it, a touch that times out makes scdaemon de-verify the card and
     # discard the cached passphrase, so the next signature prompts again. The
     # card keeps PW1 verified on its own; only scdaemon throws it away. Needs the
     # patched build from setup/macos/build-gnupg.sh.
@@ -215,6 +299,8 @@ EOF
       echo "keep-chv-on-timeout" >> "$SCDAEMON_CONF"
       echo "  scdaemon: keep-chv-on-timeout added"
     fi
+
+    import_pubkey_from_card
     remove_cron
   fi
   echo ""

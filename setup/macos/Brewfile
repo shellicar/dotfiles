@@ -18,6 +18,7 @@ brew "libksba"
 brew "npth"
 brew "gnutls"
 brew "pinentry-mac" # gpg-agent's pinentry-program
+brew "ykman"        # gpg-setup.sh --hardware, and ykwhich
 brew "autoconf"     # build-gnupg.sh runs autogen.sh
 brew "automake"
 brew "pkg-config"
