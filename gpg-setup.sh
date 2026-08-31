@@ -5,6 +5,11 @@ set -e
 GPG_AGENT_CONF="$HOME/.gnupg/gpg-agent.conf"
 GPG_CONF="$HOME/.gnupg/gpg.conf"
 SCDAEMON_CONF="$HOME/.gnupg/scdaemon.conf"
+# The card has three certificate slots, one per key. 1 and 2 belong to the
+# signature and encryption keys and are free for certificates on those; 3
+# belongs to the authentication key, which is unused here, so it is the slot
+# least likely to be wanted for anything else.
+CERT_SLOT=3
 KEYCHAIN_NAME="gpg.keychain"
 KEYCHAIN_PATH="$HOME/Library/Keychains/${KEYCHAIN_NAME}-db"
 KEYCHAIN_TIMEOUT=1
@@ -145,11 +150,12 @@ require_one_card() {
 
 # The '>' is quoted because gpg-card parses it, not the shell.
 read_cert_openpgp() {
-  gpg-card --no-history readcert --openpgp 3 '>' /dev/stdout 2>/dev/null | base64
+  gpg-card --no-history readcert --openpgp "$CERT_SLOT" '>' /dev/stdout 2>/dev/null \
+    | base64
 }
 
 read_cert_raw_size() {
-  gpg-card --no-history readcert 3 '>' /dev/stdout | wc -c | tr -d ' '
+  gpg-card --no-history readcert "$CERT_SLOT" '>' /dev/stdout | wc -c | tr -d ' '
 }
 
 import_pubkey_from_card() {
@@ -165,7 +171,7 @@ import_pubkey_from_card() {
       echo "       container gpg-card writes" >&2
       echo "  overwrite it with:" >&2
     fi
-    echo "  gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>" >&2
+    echo "  gpg-card --no-history writecert --openpgp OPENPGP.$CERT_SLOT <fingerprint>" >&2
     exit 1
   fi
 
