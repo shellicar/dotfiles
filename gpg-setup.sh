@@ -143,32 +143,39 @@ require_one_card() {
   fi
 }
 
-# A card holds the private key, and the public key alongside it in a certificate
-# data object written once per key with:
-#
-#   gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>
-#
-# Without that public key in the keyring gpg cannot build the stub that points
-# at the card, so a machine that has never seen the key cannot use it however
-# many times the card is inserted.
-import_pubkey_from_card() {
-  key=$(mktemp)
-  trap 'rm -f "$key"' EXIT
+read_cert_openpgp() {
+  gpg-card --no-history readcert --openpgp 3 '>' /dev/stdout | base64
+}
 
-  if ! gpg-card --no-history readcert --openpgp 3 '>' "$key" || [ ! -s "$key" ]; then
-    echo "ERROR: no public key on this card; write one with:" >&2
+read_cert_raw_size() {
+  gpg-card --no-history readcert 3 '>' /dev/stdout | wc -c | tr -d ' '
+}
+
+import_pubkey_from_card() {
+  key=$(read_cert_openpgp)
+
+  if [ -z "$key" ]; then
+    bytes=$(read_cert_raw_size)
+    if [ "$bytes" -lt 16 ]; then
+      echo "ERROR: no public key on this card ($bytes bytes in the slot)" >&2
+    else
+      echo "ERROR: this card holds $bytes bytes in the slot, but not the" >&2
+      echo "       container gpg-card writes" >&2
+    fi
+    echo "  write one with:" >&2
     echo "  gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>" >&2
     exit 1
   fi
 
-  fpr=$(gpg --no-options --with-colons --show-keys "$key" 2>/dev/null \
+  fpr=$(printf '%s' "$key" | base64 -d \
+    | gpg --no-options --with-colons --show-keys 2>/dev/null \
     | awk -F: '/^fpr:/ { print $10; exit }')
   if [ -z "$fpr" ]; then
     echo "ERROR: the card's certificate object is not an OpenPGP key" >&2
     exit 1
   fi
 
-  gpg --no-options --quiet --import "$key"
+  printf '%s' "$key" | base64 -d | gpg --no-options --quiet --import
   echo "  imported $fpr from the card"
 
   # Trust is per machine and does not travel with the key.
