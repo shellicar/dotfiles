@@ -23,7 +23,8 @@ usage() {
   echo "Commands:"
   echo "  --test-sign    Test signing with an on-disk key (prompts for email)"
   echo "  --test-sign --hardware"
-  echo "                 Test signing with the key on the inserted card"
+  echo "                 Test signing with the key on the inserted card."
+  echo "                 Needs exactly one inserted"
   echo "  --configure    Configure gpg-agent, keychain, and pinentry"
   echo "  --configure --hardware"
   echo "                 As above, but for card-only use: no cache expiry,"
@@ -154,8 +155,7 @@ import_pubkey_from_card() {
   key=$(mktemp)
   trap 'rm -f "$key"' EXIT
 
-  if ! gpg-card --no-history readcert --openpgp 3 '>' "$key" 2>/dev/null \
-    || [ ! -s "$key" ]; then
+  if ! gpg-card --no-history readcert --openpgp 3 '>' "$key" || [ ! -s "$key" ]; then
     echo "ERROR: no public key on this card; write one with:" >&2
     echo "  gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>" >&2
     exit 1
