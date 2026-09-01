@@ -347,8 +347,10 @@ Options:
   -v, --verbose    log progress to stderr
   -h, --help       show this help
 
-Default (no flag) is a dry-run report. A branch whose worktree is dirty, or that
-you are standing in, is never touched, and the same holds for a detached one.
+Default (no flag) is a dry-run report. A branch whose worktree has uncommitted
+changes is never touched, and the same holds for a detached one. The worktree you
+are standing in is not protected: it is removed like any other, leaving your
+shell in a directory that has gone.
 
 Azure DevOps repos read git config 'cleanup.subscription' for a subscription in
 the org's tenant, which is what resolves the identity to authenticate as. Set it
