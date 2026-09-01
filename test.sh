@@ -74,4 +74,4 @@ EOF
 # front-ends reads as unused, and every function the front-end calls reads as
 # undefined. The path is resolved by the source-path=SCRIPTDIR directive in each
 # command, so it works from any working directory.
-shellcheck -x --format=gcc "$@"
+shellcheck -x --source-path=SCRIPTDIR --format=gcc "$@"
