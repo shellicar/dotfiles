@@ -65,7 +65,7 @@ TOOL='git cleanup'
 # than against whatever directory it happens to be run from.
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../lib/git-common.sh
-. "$DIR/../lib/git-common.sh"
+command -v resolve_main >/dev/null 2>&1 || . "$DIR/../lib/git-common.sh"
 
 # The Azure DevOps resource ID: the token audience az rest has to ask for.
 ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
@@ -368,6 +368,9 @@ APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; APPLY_DETACHED=false; RESCUE=f
 # The evaluation cap. Both must be exceeded before a branch is left unevaluated.
 MAX_DISTANCE=100; MAX_AGE_DAYS=30
 
+TAB=$(printf '\t')
+
+parse_args() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=true ;;
@@ -387,7 +390,9 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+}
 
+setup() {
 ensure_in_git_repository
 command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
 
@@ -403,8 +408,10 @@ cd "$MAIN_WT" || exit 1
 CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
 NOW=$(date +%s)
-TAB=$(printf '\t')
 resolve_main
+}
+
+report() {
 
 if [ "$EVALUATE_OLD" = true ]; then
   CAP_NOTE='cap off (--old)'
@@ -509,3 +516,17 @@ else
   printf '\n'
   say "${DIM}removed $REMOVED_COUNT, rescued $RESCUED_COUNT this run${RESET}"
 fi
+
+}
+
+main() {
+  parse_args "$@"
+  setup
+  report
+}
+
+# Sourcing this file defines its functions and runs nothing, so a test can call
+# any one of them with data of its own. Only running it as the command executes.
+case "${0##*/}" in
+  git-cleanup) main "$@" ;;
+esac
