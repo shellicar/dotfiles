@@ -26,10 +26,16 @@ TOOL='git spread'
 # to the command after it, so both must sit against the source line itself.
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../lib/git-common.sh
-. "$DIR/../lib/git-common.sh"
+command -v resolve_main >/dev/null 2>&1 || . "$DIR/../lib/git-common.sh"
 
 apply=0
 stash=0
+TAB=$(printf '\t')
+PLAN=''
+VERBOSE=false
+BASE_OVERRIDE=''
+
+parse_args() {
 for arg in "$@"; do
   case "$arg" in
     --apply) apply=1 ;;
@@ -37,12 +43,9 @@ for arg in "$@"; do
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
+}
 
-TAB=$(printf '\t')
-PLAN=''
-VERBOSE=false
-BASE_OVERRIDE=''
-
+setup() {
 ensure_in_git_repository
 # run_update writes git's own failure message here so it can report the real
 # reason rather than calling everything a conflict.
@@ -53,7 +56,9 @@ echo "fetching origin (prune)..."
 git fetch --quiet --prune origin || { echo "❌ fetch failed" >&2; exit 1; }
 resolve_main
 target=$(git rev-parse --verify --quiet "$MAIN_REF")
+}
 
+plan_worktrees() {
 # Fed by here-doc, not by a pipe: a while loop downstream of a pipe runs in a
 # subshell, and the plan it built would be discarded at 'done'.
 WORKTREES=$(git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}')
@@ -142,7 +147,9 @@ EOF
 done <<EOF
 $WORKTREES
 EOF
+}
 
+run_it() {
 if [ "$apply" -eq 0 ]; then
   echo
   echo "run: git spread --apply"
@@ -188,3 +195,18 @@ while IFS="$TAB" read -r action branch stash_first push_after wt; do
 done <<EOF
 $PLAN
 EOF
+
+}
+
+main() {
+  parse_args "$@"
+  setup
+  plan_worktrees
+  run_it
+}
+
+# Sourcing this file defines its functions and runs nothing, so a test can call
+# any one of them with data of its own. Only running it as the command executes.
+case "${0##*/}" in
+  git-spread) main "$@" ;;
+esac
