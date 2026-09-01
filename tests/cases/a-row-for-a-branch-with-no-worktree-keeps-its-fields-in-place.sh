@@ -22,9 +22,9 @@ guard_path
 . "$REPO/home/common/bin/git-refresh"
 
 ROWS=''
-emit fooR on remove 'remove foo' '' 'remote gone'
+emit fooR on remove 'remove foo' '' 'remote gone' -
 
-IFS="$TAB" read -r op state kind action target why <<EOF
+IFS="$TAB" read -r op state kind action target why ign <<EOF
 $ROWS
 EOF
 
