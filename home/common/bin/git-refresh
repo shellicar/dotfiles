@@ -6,6 +6,11 @@
 #   git refresh          look at everything, then pick what runs
 #   git refresh --plan   print the plan and stop, for when there is no terminal
 #
+#   --no-fetch           skip the initial 'git fetch --prune origin'
+#   --old                evaluate branches too far behind to be worth walking
+#   -v, --verbose        log progress to stderr
+#   -h, --help           show this
+#
 # WHY IT IS ONE COMMAND. Cleanup and spread have to happen in that order, and
 # getting it wrong is not a matter of taste. Spread rebases; rebasing rewrites
 # committer dates, so a spread first makes every branch look freshly touched to
@@ -54,7 +59,7 @@ for arg in "$@"; do
     --old) EVALUATE_OLD=true ;;
     -v|--verbose) VERBOSE=true ;;
     -h|--help)
-      sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
