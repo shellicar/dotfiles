@@ -6,7 +6,9 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  home/macos/.hammerspoon:
     devDependencies:
       '@tsconfig/node24':
         specifier: ^24.0.4
