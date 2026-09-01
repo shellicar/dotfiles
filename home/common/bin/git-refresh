@@ -40,7 +40,7 @@ TOOL='git refresh'
 # to the command after it, so both must sit against the source line itself.
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../lib/git-common.sh
-. "$DIR/../lib/git-common.sh"
+command -v resolve_main >/dev/null 2>&1 || . "$DIR/../lib/git-common.sh"
 
 plan_only=false
 NO_FETCH=false
@@ -52,46 +52,57 @@ WALK_DEPTH=5
 MAX_DISTANCE=100; MAX_AGE_DAYS=30
 ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
 
-for arg in "$@"; do
-  case "$arg" in
-    --plan) plan_only=true ;;
-    --no-fetch) NO_FETCH=true ;;
-    --old) EVALUATE_OLD=true ;;
-    -v|--verbose) VERBOSE=true ;;
-    -h|--help)
-      sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'
-      exit 0 ;;
-    *) echo "unknown option: $arg" >&2; exit 2 ;;
-  esac
-done
-
-[ -t 0 ] || plan_only=true
-
-ensure_in_git_repository
-command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
-
-# Run from the main working tree, which git refuses to remove, so this is never
-# standing on what it deletes.
-MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')
-[ -n "$MAIN_WT" ] || { echo "Error: cannot find the main working tree" >&2; exit 1; }
-cd "$MAIN_WT" || exit 1
-
-CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
-mkdir -p "$CACHE_DIR"
-NOW=$(date +%s)
+# Constants, not state: they belong outside the phases so sourcing this file
+# gives a caller the same values the command runs with. NL is a literal newline
+# and its closing quote has to stay at column zero.
 TAB=$(printf '\t')
 NL='
 '
 E=$(printf '\033')
 STRIKE="${E}[9m"; UNSTRIKE="${E}[29m"; INV="${E}[7m"
-resolve_main
 
-PLAN=''
-REMOVED_COUNT=0
-RESCUED_COUNT=0
+parse_args() {
+  for arg in "$@"; do
+    case "$arg" in
+      --plan) plan_only=true ;;
+      --no-fetch) NO_FETCH=true ;;
+      --old) EVALUATE_OLD=true ;;
+      -v|--verbose) VERBOSE=true ;;
+      -h|--help)
+        sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0 ;;
+      *) echo "unknown option: $arg" >&2; exit 2 ;;
+    esac
+  done
+
+  # No terminal means no selector, so there is nothing to pick from and the plan
+  # is the whole of what it can offer.
+  [ -t 0 ] || plan_only=true
+}
+
+setup() {
+  ensure_in_git_repository
+  command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
+
+  # Run from the main working tree, which git refuses to remove, so this is never
+  # standing on what it deletes.
+  MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')
+  [ -n "$MAIN_WT" ] || { echo "Error: cannot find the main working tree" >&2; exit 1; }
+  cd "$MAIN_WT" || exit 1
+
+  CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
+  mkdir -p "$CACHE_DIR"
+  NOW=$(date +%s)
+  resolve_main
+
+  PLAN=''
+  REMOVED_COUNT=0
+  RESCUED_COUNT=0
+}
 
 # ── the analysis, once ──────────────────────────────────────────────────────
 
+analyse() {
 step 'fetch origin ...'
 fetch_origin
 if [ "$NO_FETCH" = true ]; then step_done 'skipped (--no-fetch)'; else step_done 'done'; fi
@@ -177,6 +188,7 @@ done <<EOF
 $DETACHED
 EOF
 step_done "$(printf '%s%s' "$BFACTS" "$DFACTS" | grep -c .) targets"
+}
 
 # ── deriving the operations, after every keystroke ──────────────────────────
 
@@ -223,8 +235,12 @@ icon_of() {
   esac
 }
 
+# An absent worktree is written as '-', never as nothing. Tab is IFS
+# whitespace, so a run of tabs is one delimiter: an empty field does not survive
+# being read back, it disappears and drags every later field one place left.
+# plan_add has carried this rule since it was written; this is the same rule.
 emit() {
-  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB$5$TAB$6$NL"
+  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$NL"
   COUNT=$((COUNT + 1))
   [ "$2" = on ] && PICKED=$((PICKED + 1))
   return 0
@@ -438,6 +454,10 @@ EOF
 
 # ── picking, then doing ─────────────────────────────────────────────────────
 
+main() {
+parse_args "$@"
+setup
+analyse
 derive
 
 if [ "$plan_only" = true ]; then
@@ -514,3 +534,11 @@ printf '\n%bstarting in 5 seconds, ctrl-c to abort%b\n\n' "$BOLD" "$RESET"
 sleep 5
 run_plan
 printf '\n%bremoved %s, rescued %s this run%b\n' "$DIM" "$REMOVED_COUNT" "$RESCUED_COUNT" "$RESET"
+
+}
+
+# Sourcing this file defines its functions and runs nothing, so a test can call
+# any one of them with data of its own. Only running it as the command executes.
+case "${0##*/}" in
+  git-refresh) main "$@" ;;
+esac
