@@ -157,8 +157,9 @@ EOF
   [ "$class" = review ] && why="$n on top"
   [ "$class" = inconclusive ] && why="$(distance_from_main "refs/heads/$b") behind, not evaluated"
 
-  block='-'; behind=0; uact='-'; udetail='-'
+  block='-'; behind=0; uact='-'; udetail='-'; ign='-'
   if [ -n "$wt" ]; then
+    ign=$(worktree_ignored "$wt"); ign=${ign:--}
     b_reason=$(worktree_block_reason "$wt")
     [ -n "$b_reason" ] && block=$b_reason
     behind=$(git -C "$wt" rev-list --count "HEAD..$MAIN_REF" 2>/dev/null || echo 0)
@@ -171,7 +172,7 @@ EOF
       uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$NL"
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$NL"
 done
 
 while IFS="$TAB" read -r head p; do
@@ -183,7 +184,8 @@ while IFS="$TAB" read -r head p; do
   cpr=$(detached_pr "$head" closed)
   b_reason=$(worktree_block_reason "$p")
   refs=$(refs_containing "$head")
-  DFACTS="$DFACTS$(basename "$p")$TAB$p$TAB$head$TAB$inmain$TAB${mpr:--}$TAB${opr:--}$TAB${cpr:--}$TAB${b_reason:--}$TAB${refs:--}$NL"
+  ign=$(worktree_ignored "$p")
+  DFACTS="$DFACTS$(basename "$p")$TAB$p$TAB$head$TAB$inmain$TAB${mpr:--}$TAB${opr:--}$TAB${cpr:--}$TAB${b_reason:--}$TAB${refs:--}$TAB${ign:--}$NL"
 done <<EOF
 $DETACHED
 EOF
@@ -240,7 +242,7 @@ icon_of() {
 # being read back, it disappears and drags every later field one place left.
 # plan_add has carried this rule since it was written; this is the same rule.
 emit() {
-  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$NL"
+  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$NL"
   COUNT=$((COUNT + 1))
   [ "$2" = on ] && PICKED=$((PICKED + 1))
   return 0
@@ -257,7 +259,7 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead why behind block uact udetail; do
+  while IFS="$TAB" read -r name wt class ahead why behind block uact udetail ign; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
 
@@ -276,7 +278,7 @@ derive() {
       st=off; has "${name}R" "$SELECTED" && st=on
       [ "$st" = on ] && doom_branch "$name"
       [ "$class" = review ] && k=rescue || k=remove
-      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why"
+      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign"
     else
       removal=''
     fi
@@ -300,17 +302,17 @@ derive() {
     esac
     if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
       block_op "${name}U"
-      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it"
+      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" -
     else
       note_default "${name}U" on
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind"
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" -
     fi
   done <<EOF
 $BFACTS
 EOF
 
-  while IFS="$TAB" read -r name wt head inmain mpr opr cpr block refs; do
+  while IFS="$TAB" read -r name wt head inmain mpr opr cpr block refs ign; do
     [ -z "$name" ] && continue
     if [ "$block" != - ]; then NOTED="$NOTED$name$TAB$block$NL"; continue; fi
 
@@ -340,9 +342,9 @@ EOF
     # Kind 'detach', not 'remove': the plan routes on it, and a worktree with no
     # branch loses only the directory. Inferring that later from whether the name
     # matched the directory's basename removed the worktree and left the branch.
-    note_default "${name}R" "$det"
-    st=off; has "${name}R" "$SELECTED" && st=on
-    emit "${name}R" "$st" detach "remove worktree $name" "$wt" "$reason"
+    note_default "${name}D" "$det"
+    st=off; has "${name}D" "$SELECTED" && st=on
+    emit "${name}D" "$st" detach "remove worktree $name" "$wt" "$reason" "$ign"
   done <<EOF
 $DFACTS
 EOF
@@ -370,7 +372,7 @@ draw() {
     "$BOLD" "$MAIN" "$RESET" "$DIM" "$RESET"
 
   i=0
-  while IFS="$TAB" read -r op state kind action target why; do
+  while IFS="$TAB" read -r op state kind action target why ign; do
     [ -z "$op" ] && continue
     i=$((i + 1))
     [ "$i" -lt "$TOP" ] && continue
@@ -430,12 +432,13 @@ readkey() {
 # being asked to confirm something you can no longer see is not being asked.
 say_selected() {
   printf '\n%b%s%b\n' "$BOLD" "$1" "$RESET"
-  while IFS="$TAB" read -r op state kind action target why; do
+  while IFS="$TAB" read -r op state kind action target why ign; do
     [ -z "$op" ] && continue
     [ "$state" = on ] || continue
     [ "$why" = - ] && why=''
     icon_of "$kind"
     printf '  %s %s  %b%s%b\n' "$IC" "$action" "$DIM" "$why" "$RESET"
+    [ "$ign" = - ] || say_ignored "$ign"
   done <<EOF
 $ROWS
 EOF
@@ -501,7 +504,7 @@ trap - EXIT INT TERM
 
 # The plan is built from what is selected, in the order the rows were derived,
 # which puts every removal before the update of anything that survives it.
-while IFS="$TAB" read -r op state kind action target why; do
+while IFS="$TAB" read -r op state kind action target why ign; do
   [ -z "$op" ] && continue
   [ "$state" = on ] || continue
   case "$kind" in
@@ -509,7 +512,7 @@ while IFS="$TAB" read -r op state kind action target why; do
       plan_add delete "${op%R}" - - "${target:--}"
       ;;
     detach)
-      plan_add detached "${op%R}" - - "$target"
+      plan_add detached "${op%D}" - - "$target"
       ;;
     rescue)
       b=${op%R}
