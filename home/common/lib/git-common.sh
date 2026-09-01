@@ -636,10 +636,7 @@ EOF
 # and force-pushes them back rewritten under new ids.
 fork_point() (
   b=$1
-  others=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes |
-    grep -vxF "refs/heads/$b" | grep -vxF "refs/remotes/origin/$b") || others=''
-  # shellcheck disable=SC2086  # deliberate split: --not takes many refs
-  oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" --not $others | tail -1)
+  oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" | tail -1)
   [ -n "$oldest" ] || return 1
   git rev-parse --verify --quiet "$oldest^"
 )
@@ -762,12 +759,25 @@ plan_add() {
 "
 }
 
+# A rescue branch that is already there was made by an earlier rescue, and holds
+# commits nothing else reaches. Refuse rather than write over it: the abort path
+# in run_rescue deletes $dst, which would take the earlier rescue with it.
+rescue_refuse_existing() {
+  git rev-parse --verify --quiet "refs/heads/$1" >/dev/null || return 0
+  say "     ${YELLOW}already exists, left for manual: $1${RESET}"
+  return 1
+}
+
 # Replay the stray commits (join..branch) onto rescue/<branch> in an isolated
 # scratch worktree, so a failed attempt never touches your branches or
 # checkouts, then delete the original. Main first; on conflict the PR merge
 # commit; if both conflict, left alone.
+
 run_rescue() {
-  local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" tmp base_used pr_mc rc outcome
+  local branch=$1 join=$2 n=$3 wt=$4 tmp base_used pr_mc rc outcome dst
+  dst="rescue/$branch"
+
+  rescue_refuse_existing "$dst" || return 1
 
   tmp=$(mktemp -d) || return 1
   git worktree add -q --detach "$tmp" "$MAIN_REF" 2>/dev/null || {
@@ -775,14 +785,14 @@ run_rescue() {
     say "     ${YELLOW}↳ rescue setup failed${RESET}"; return 1; }
 
   base_used=main
-  ( cd "$tmp" && git switch -q -c "$dst" "$branch" && git rebase -q --onto "$MAIN_REF" "$join" ) 2>/dev/null
+  ( cd "$tmp" && git switch -q -c "$dst" "refs/heads/$branch" && git rebase -q --onto "$MAIN_REF" "$join" ) 2>/dev/null
   rc=$?
   if [ "$rc" -ne 0 ]; then
     ( cd "$tmp" && git rebase --abort >/dev/null 2>&1; git switch -q --detach 2>/dev/null; git branch -D "$dst" >/dev/null 2>&1 )
     pr_mc=$(pr_merge_commit "$branch")
     if [ -n "$pr_mc" ]; then
       base_used="PR merge ${pr_mc}"
-      ( cd "$tmp" && git switch -q -c "$dst" "$branch" && git rebase -q --onto "$pr_mc" "$join" ) 2>/dev/null
+      ( cd "$tmp" && git switch -q -c "$dst" "refs/heads/$branch" && git rebase -q --onto "$pr_mc" "$join" ) 2>/dev/null
       rc=$?
       [ "$rc" -ne 0 ] && ( cd "$tmp" && git rebase --abort >/dev/null 2>&1; git switch -q --detach 2>/dev/null; git branch -D "$dst" >/dev/null 2>&1 )
     fi

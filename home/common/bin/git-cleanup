@@ -277,7 +277,8 @@ do_delete_worktree() {
 # The gates are decisions, so they stay in the pass. run_rescue is the doing
 # half and runs from the plan.
 do_rescue() {
-  local branch=$1 join=$2 n=$3 wt=$4 dst="rescue/$branch" block ignored
+  local branch=$1 join=$2 n=$3 wt=$4 block ignored dst
+  dst="rescue/$branch"
 
   git show-ref --verify --quiet "refs/heads/$dst" && { say "     ${DIM}↳ rescue skipped — $dst already exists${RESET}"; return 0; }
   block=$(worktree_block_reason "$wt")
