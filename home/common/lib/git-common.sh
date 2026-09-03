@@ -636,9 +636,15 @@ EOF
 # and force-pushes them back rewritten under new ids.
 fork_point() (
   b=$1
-  oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" | tail -1)
-  [ -n "$oldest" ] || return 1
-  git rev-parse --verify --quiet "$oldest^"
+  others=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes |
+    grep -vxF "refs/heads/$b" | grep -vxF "refs/remotes/origin/$b") || others=''
+  # shellcheck disable=SC2086  # deliberate split: --not takes many refs
+  oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" --not $others | tail -1)
+  [ -n "$oldest" ] && { git rev-parse --verify --quiet "$oldest^"; return; }
+  # Nothing of its own that no other ref reaches: the bottom of a stack, whose
+  # commits are all on the branch cut from it. Still cut from main, so the
+  # merge-base is the right base and a rebase replays only its own work.
+  git merge-base "refs/heads/$b" "$MAIN_REF"
 )
 
 # The branch this one was cut from, or empty for the normal case of one cut from
@@ -684,10 +690,8 @@ update_verdict() (
   base=$(fork_point "$b") || base=''
   parent=$(branch_cut_from "$b" "$base")
   [ -n "$parent" ] && { printf 'none\tcut from %s, not from %s\n' "$parent" "$MAIN"; return 0; }
-  # No commit of its own that nothing else reaches, which happens at the bottom
-  # of a stack: the branch cut from this one has all of them, so there is no
-  # fork point to replay from.
-  [ -z "$base" ] && { printf 'none\tanother branch already has every commit on it\n'; return 0; }
+  # Only reachable when the branch and the trunk share no history at all.
+  [ -z "$base" ] && { printf 'none\tshares no history with %s\n' "$MAIN"; return 0; }
   printf 'rebase\t%s\n' "$base"
 )
 
@@ -759,9 +763,22 @@ plan_add() {
 "
 }
 
+
+# Undo a failed attempt, inside the scratch worktree and nowhere else. Every
+# command sits behind the same cd, because `cd x && a; b; c` binds the && to the
+# first command only: a failed cd would run the detach and the branch delete in
+# the main working tree, silently.
+rescue_abort() {
+  ( cd "$1" || exit 1
+    git rebase --abort >/dev/null 2>&1
+    git switch -q --detach 2>/dev/null
+    git branch -D "$2" >/dev/null 2>&1 )
+  return 0
+}
+
 # A rescue branch that is already there was made by an earlier rescue, and holds
-# commits nothing else reaches. Refuse rather than write over it: the abort path
-# in run_rescue deletes $dst, which would take the earlier rescue with it.
+# commits nothing else reaches. Refuse rather than write over it: rescue_abort
+# deletes $dst, which would take the earlier rescue with it.
 rescue_refuse_existing() {
   git rev-parse --verify --quiet "refs/heads/$1" >/dev/null || return 0
   say "     ${YELLOW}already exists, left for manual: $1${RESET}"
@@ -788,20 +805,20 @@ run_rescue() {
   ( cd "$tmp" && git switch -q -c "$dst" "refs/heads/$branch" && git rebase -q --onto "$MAIN_REF" "$join" ) 2>/dev/null
   rc=$?
   if [ "$rc" -ne 0 ]; then
-    ( cd "$tmp" && git rebase --abort >/dev/null 2>&1; git switch -q --detach 2>/dev/null; git branch -D "$dst" >/dev/null 2>&1 )
+    rescue_abort "$tmp" "$dst"
     pr_mc=$(pr_merge_commit "$branch")
     if [ -n "$pr_mc" ]; then
       base_used="PR merge ${pr_mc}"
       ( cd "$tmp" && git switch -q -c "$dst" "refs/heads/$branch" && git rebase -q --onto "$pr_mc" "$join" ) 2>/dev/null
       rc=$?
-      [ "$rc" -ne 0 ] && ( cd "$tmp" && git rebase --abort >/dev/null 2>&1; git switch -q --detach 2>/dev/null; git branch -D "$dst" >/dev/null 2>&1 )
+      [ "$rc" -ne 0 ] && rescue_abort "$tmp" "$dst"
     fi
   fi
 
   git worktree remove "$tmp" >/dev/null 2>&1 || git worktree prune >/dev/null 2>&1
 
   if [ "$rc" -ne 0 ]; then
-    say "     ${YELLOW}↳ conflicts on both bases — left for manual${RESET}"; return 1
+    say "     ${YELLOW}↳ could not replay onto $base_used, left for manual${RESET}"; return 1
   fi
 
   # Stray is now preserved on $dst; the original's merged part is in main.

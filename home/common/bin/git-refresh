@@ -500,6 +500,11 @@ done
 restore
 trap - EXIT INT TERM
 
+# The list of what was looked at and passed over only exists on the alternate
+# screen, which has just gone. Print it here too, or an interactive run never
+# tells you a worktree was skipped for being dirty.
+say_noted
+
 [ "$VERDICT" = quit ] && { printf 'nothing done\n'; exit 0; }
 
 # The plan is built from what is selected, in the order the rows were derived,

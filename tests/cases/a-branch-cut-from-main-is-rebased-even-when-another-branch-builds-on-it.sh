@@ -4,37 +4,35 @@ TESTS=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../harness.sh
 . "$TESTS/harness.sh"
+# shellcheck source=../fake-git.sh
+. "$TESTS/fake-git.sh"
 
-describe "a branch cut from main is rebased even when another branch builds on it"
+describe "a branch cut from main is rebased from where it was cut, not from where a child was"
 
 # feature/base was cut from main and feature/top was cut from base, so every
 # commit on base is also on top. That says nothing about base: it was cut from
-# main and a rebase onto main is exactly right for it. Refusing leaves the
-# bottom of every stack behind.
+# main and a rebase onto main is right for it, replaying its own two commits and
+# no more.
+#
+#   main   A - B - C
+#   base        \ X1 - X2
+#   top                  \ Y1
+commit A
+commit B A
+commit C B
+commit X1 B
+commit X2 X1
+commit Y1 X2
 
-git_says() {
-  case "$*" in
-    # No merge of main into it, so a rebase is the strategy.
-    "-C . rev-list --merges --parents refs/remotes/origin/HEAD..HEAD") return 0 ;;
-    # Two commits of its own.
-    "rev-list --count refs/remotes/origin/HEAD..refs/heads/feature/base") echo 2 ;;
-    # Both of them are also on feature/top.
-    "for-each-ref --format=%(refname) refs/heads refs/remotes")
-      printf '%s\n' refs/heads/feature/base refs/heads/feature/top refs/heads/main ;;
-    "rev-list refs/remotes/origin/HEAD..refs/heads/feature/base --not "*) : ;;
-    "rev-list refs/remotes/origin/HEAD..refs/heads/feature/base")
-      printf '%s\n' base-commit-2 base-commit-1 ;;
-    "rev-parse --verify --quiet base-commit-1^") echo cut-from-here ;;
-    # Where it was cut is on main, so it was cut from main.
-    "merge-base --is-ancestor cut-from-here refs/remotes/origin/HEAD") return 0 ;;
-    *) fail "unexpected: git $*" ;;
-  esac
-}
+ref_set refs/heads/main C
+ref_set refs/remotes/origin/HEAD C
+ref_set refs/heads/feature/base X2
+ref_set refs/heads/feature/top Y1
 
 guard_path
 # shellcheck source=../../home/common/lib/git-common.sh
 . "$REPO/home/common/lib/git-common.sh"
 
-expected="rebase${TAB}cut-from-here"
+expected="rebase${TAB}B"
 actual=$(update_verdict . feature/base)
 assert_eq "$actual" "$expected"
