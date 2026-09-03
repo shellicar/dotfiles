@@ -1,0 +1,92 @@
+#!/bin/sh
+# Read a passphrase off a passcard, given its seed and a start position.
+#
+# The card is meant to be read by eye, and that stays the normal way in: this puts the
+# passphrase into a shell, which is the one thing the card-and-path split exists to
+# avoid. It is for checking what you read, and for the times tracing a grid on paper is
+# not worth it.
+#
+# It reprints the row colour and column symbol alongside, so a position that does not
+# match the printed card is visible rather than silently producing the wrong string.
+#
+# The grid is one continuous string, row 1 left to right then row 2, wrapping from the
+# last character back to the first. That is why every position is a valid start.
+set -e
+
+cols=""
+rows=""
+seed=""
+pos=""
+len=""
+
+usage() {
+  echo "Usage: $(basename "$0") -s SEED -c COLS -r ROWS -p ROW,COL -n LENGTH"
+  echo ""
+  echo "  -s SEED     the seed passcard printed to stderr"
+  echo "  -c COLS     columns, must match the printed card"
+  echo "  -r ROWS     rows, must match the printed card"
+  echo "  -p ROW,COL  the start position passpath gave you"
+  echo "  -n LENGTH   how many characters"
+  exit 1
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -s) seed="$2"; shift 2 ;;
+    -c) cols="$2"; shift 2 ;;
+    -r) rows="$2"; shift 2 ;;
+    -p) pos="$2"; shift 2 ;;
+    -n) len="$2"; shift 2 ;;
+    *)  usage ;;
+  esac
+done
+
+[ -n "$seed" ] && [ -n "$cols" ] && [ -n "$rows" ] && [ -n "$pos" ] && [ -n "$len" ] || usage
+
+symbols='$ ▪ △ ▲ ⊙ ♥ □ ¡ ♦ ◐ ♠ ◆ ✳ ⊛ ★ ☺ ¥ ○ ⊤ € ? ● ¿ ! ♪ ♣ £ ◪ ▴ § ¶ ± ÷ × ¤ ∞ ≠ ≈ ⌘ ⌂ ☼ ☽ ♫ ♯ ⚑ ⚐ ⌥ ⎋ ⇧ ⇪ ⌦ ⏎ ␣ ∂ ∆ ∑ √ ∫ ≤ ≥ ⊂ ⊃ ∈ ∴'
+colours='red orange yellow green teal blue purple pink'
+alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+
+row=${pos%,*}
+col=${pos#*,}
+[ "$row" != "$pos" ] && [ "$col" != "$pos" ] || { echo "passread: -p wants ROW,COL" >&2; exit 1; }
+[ "$row" -ge 1 ] && [ "$row" -le "$rows" ] || { echo "passread: row $row is outside 1-$rows" >&2; exit 1; }
+[ "$col" -ge 1 ] && [ "$col" -le "$cols" ] || { echo "passread: column $col is outside 1-$cols" >&2; exit 1; }
+
+# Identical derivation to passcard, so the same seed and dimensions give the same grid.
+# HMAC-SHA256 over a counter rather than a seeded PRNG: deterministic yet unpredictable
+# without the seed, which is what a PRF is for.
+total=$((cols * rows))
+# -v, because od collapses repeated lines to a single '*' without it, and a seed whose
+# bytes repeat on a 16-byte boundary then produces a hexkey containing an asterisk.
+hexkey=$(printf '%s' "$seed" | od -An -v -tx1 | tr -d ' \n')
+blocks=$((total / 25 + 2))
+counter=0
+all=$(while [ "$counter" -lt "$blocks" ]; do
+  printf '%s' "$counter" |
+    openssl dgst -sha256 -mac HMAC -macopt "hexkey:$hexkey" |
+    sed 's/.*= *//'
+  counter=$((counter + 1))
+done | awk -v need="$total" -v alpha="$alphabet" '
+  BEGIN { for (i = 0; i < 16; i++) { h[sprintf("%x", i)] = i; h[sprintf("%X", i)] = i } }
+  { s = s $0 }
+  END {
+    for (i = 1; i < length(s) && n < need; i += 2) {
+      v = h[substr(s, i, 1)] * 16 + h[substr(s, i + 1, 1)]
+      if (v >= 248) continue
+      printf "%s", substr(alpha, v % 62 + 1, 1)
+      n++
+    }
+    if (n < need) { exit 1 }
+  }')
+
+[ "${#all}" -eq "$total" ] || { echo "passread: derived $(printf %s "$all" | wc -c) of $total characters" >&2; exit 1; }
+
+start=$(( (row - 1) * cols + col ))
+# Doubled, so a passphrase running off the end wraps to the beginning without arithmetic.
+phrase=$(printf '%s%s' "$all" "$all" | cut -c"$start-$((start + len - 1))")
+
+printf 'row %s (%s)   column %s (%s)\n' \
+  "$row" "$(printf '%s' "$colours" | cut -d' ' -f"$(( (row - 1) % 8 + 1 ))")" \
+  "$col" "$(printf '%s' "$symbols" | cut -d' ' -f"$col")"
+printf '%s\n' "$phrase"
