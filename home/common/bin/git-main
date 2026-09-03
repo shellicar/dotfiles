@@ -33,12 +33,17 @@ set -eu
 
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repo" >&2; exit 2; }
 
-main=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo "cannot determine the default branch from origin/HEAD" >&2; exit 2; }
+# Full ref for anything git resolves, plain name only for what is printed. A
+# local branch called "origin/main" answers to the short form, because git
+# searches refs/heads before refs/remotes, and then every answer here is about
+# the wrong commit.
+main_ref=refs/remotes/origin/HEAD
+main=$(git symbolic-ref --quiet --short "$main_ref") || { echo "cannot determine the default branch from origin/HEAD" >&2; exit 2; }
 main=${main#origin/}
 
 git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
 
-target=$(git rev-parse --verify --quiet "origin/$main") || { echo "no origin/$main" >&2; exit 1; }
+target=$(git rev-parse --verify --quiet "$main_ref") || { echo "no $main_ref" >&2; exit 1; }
 
 current=$(git symbolic-ref --quiet --short HEAD) || current=''
 
@@ -84,4 +89,4 @@ fi
 # Before the switch, not after: -C is what makes them unreachable.
 [ -z "$tag" ] || git tag "$tag" "$local_sha"
 
-git switch -m -C "$main" "origin/$main"
+git switch -m -C "$main" "$main_ref"

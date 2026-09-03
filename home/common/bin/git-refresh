@@ -1,0 +1,552 @@
+#!/bin/sh
+#
+# git refresh — clean up what has landed, then bring the default branch into
+# what is left, in one pass over one snapshot of the repository.
+#
+#   git refresh          look at everything, then pick what runs
+#   git refresh --plan   print the plan and stop, for when there is no terminal
+#
+#   --no-fetch           skip the initial 'git fetch --prune origin'
+#   --old                evaluate branches too far behind to be worth walking
+#   -v, --verbose        log progress to stderr
+#   -h, --help           show this
+#
+# WHY IT IS ONE COMMAND. Cleanup and spread have to happen in that order, and
+# getting it wrong is not a matter of taste. Spread rebases; rebasing rewrites
+# committer dates, so a spread first makes every branch look freshly touched to
+# the age signals cleanup reads. It also replays commits onto branches that are
+# about to be deleted, conflicting on exactly the ones that were about to go. As
+# two commands the order is something you have to remember. As one it cannot be
+# expressed wrongly.
+#
+# THE PLAN DEPENDS ON WHAT YOU PICK, and only in one direction. Cleanup's
+# operations depend on nothing. The update operations depend on which removals
+# you took, because a worktree that survives the run is a worktree that can be
+# updated. So the analysis runs once and the operations are derived again after
+# every keystroke. The expensive half — the fetch, the pull request queries, the
+# content walk, the index of main — is the half that never changes.
+#
+# A TARGET IS REMOVED OR UPDATED, NEVER BOTH. That is not a policy, it falls out
+# of what git allows: a branch with no worktree can only be deleted, a worktree
+# with no branch can only be removed, and only a branch with a worktree has two
+# possibilities, decided by whether its work has landed.
+
+set -u
+
+DIR=$(cd "$(dirname "$0")" && pwd)
+TOOL='git refresh'
+# SCRIPTDIR makes shellcheck resolve the path below against this file rather
+# than against whatever directory it happens to be run from. A directive applies
+# to the command after it, so both must sit against the source line itself.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/git-common.sh
+command -v resolve_main >/dev/null 2>&1 || . "$DIR/../lib/git-common.sh"
+
+plan_only=false
+NO_FETCH=false
+VERBOSE=false
+BASE_OVERRIDE=''
+EVALUATE_OLD=false
+ONLY_BRANCHES=''
+WALK_DEPTH=5
+MAX_DISTANCE=100; MAX_AGE_DAYS=30
+ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
+
+# Constants, not state: they belong outside the phases so sourcing this file
+# gives a caller the same values the command runs with. NL is a literal newline
+# and its closing quote has to stay at column zero.
+TAB=$(printf '\t')
+NL='
+'
+E=$(printf '\033')
+STRIKE="${E}[9m"; UNSTRIKE="${E}[29m"; INV="${E}[7m"
+
+parse_args() {
+  for arg in "$@"; do
+    case "$arg" in
+      --plan) plan_only=true ;;
+      --no-fetch) NO_FETCH=true ;;
+      --old) EVALUATE_OLD=true ;;
+      -v|--verbose) VERBOSE=true ;;
+      -h|--help)
+        sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0 ;;
+      *) echo "unknown option: $arg" >&2; exit 2 ;;
+    esac
+  done
+
+  # No terminal means no selector, so there is nothing to pick from and the plan
+  # is the whole of what it can offer.
+  [ -t 0 ] || plan_only=true
+}
+
+setup() {
+  ensure_in_git_repository
+  command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
+
+  # Run from the main working tree, which git refuses to remove, so this is never
+  # standing on what it deletes.
+  MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10); exit}')
+  [ -n "$MAIN_WT" ] || { echo "Error: cannot find the main working tree" >&2; exit 1; }
+  cd "$MAIN_WT" || exit 1
+
+  CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
+  mkdir -p "$CACHE_DIR"
+  NOW=$(date +%s)
+  resolve_main
+
+  PLAN=''
+  REMOVED_COUNT=0
+  RESCUED_COUNT=0
+}
+
+# ── the analysis, once ──────────────────────────────────────────────────────
+
+analyse() {
+step 'fetch origin ...'
+fetch_origin
+if [ "$NO_FETCH" = true ]; then step_done 'skipped (--no-fetch)'; else step_done 'done'; fi
+
+step 'merged PRs ...'
+fetch_pr_merges
+step_done "$(printf '%s' "$PR_MERGE_TABLE" | grep -c .) found ($PR_SOURCE)"
+[ -n "$PR_HINT" ] && say "$PR_HINT"
+
+WT_MAP=$(git worktree list --porcelain | awk '
+  /^worktree /   { p = substr($0, 10) }
+  /^branch refs\/heads\// { print substr($0, 19) "\t" p }
+')
+DETACHED=$(git worktree list --porcelain | awk '
+  /^worktree /   { p = substr($0, 10) }
+  /^HEAD /       { h = substr($0, 6) }
+  /^detached/    { print h "\t" p }
+')
+
+DETACHED_PR_TABLE=''
+if [ -n "$DETACHED" ]; then
+  step 'detached worktree PRs ...'
+  fetch_detached_prs
+  step_done "$(printf '%s' "$DETACHED_PR_TABLE" | grep -c .) found"
+fi
+
+step 'indexing main ...'
+build_shared_main_index
+step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
+
+# EVERYTHING THAT ASKS GIT ANYTHING HAPPENS HERE, once. What is left for derive
+# is string work, because derive runs on every keystroke. Getting this wrong is
+# not a small cost: a git status per worktree is most of a second on a tree with
+# node_modules in it, and there is no budget for that between keypresses.
+#
+# The only thing derive may not know yet is which branches you have picked to
+# remove, so anything that depends on that is left as raw material: the refs
+# holding a detached commit are listed here and filtered there.
+step 'reading branches and worktrees ...'
+
+# name, worktree, class, ahead, why, behind, block, update action, its detail
+BFACTS=''
+# name, worktree, head, in main, merged PR, open PR, closed PR, block, refs
+DFACTS=''
+
+for b in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
+  verdict=$(branch_verdict "$b")
+  IFS="$TAB" read -r class n ahead gone wt <<EOF
+$verdict
+EOF
+  [ "$gone" = true ] && why='remote gone' || why='-'
+  [ "$class" = review ] && why="$n on top"
+  [ "$class" = inconclusive ] && why="$(distance_from_main "refs/heads/$b") behind, not evaluated"
+
+  block='-'; behind=0; uact='-'; udetail='-'; ign='-'
+  if [ -n "$wt" ]; then
+    ign=$(worktree_ignored "$wt"); ign=${ign:--}
+    b_reason=$(worktree_block_reason "$wt")
+    [ -n "$b_reason" ] && block=$b_reason
+    behind=$(git -C "$wt" rev-list --count "HEAD..$MAIN_REF" 2>/dev/null || echo 0)
+    # No update for a branch whose work is already in the trunk. There is
+    # nothing to bring in, and replaying its commits onto a trunk that already
+    # has their content duplicates them and pushes them to a branch the merge
+    # deleted. An unclean worktree cannot be updated either, and says so once.
+    if [ "$block" = - ] && [ "$behind" != 0 ] && [ "$class" != merged ]; then
+      uv=$(update_verdict "$wt" "$b")
+      uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
+    fi
+  fi
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$NL"
+done
+
+while IFS="$TAB" read -r head p; do
+  [ -z "$head" ] && continue
+  inmain=no
+  [ "$(commits_not_in_main "$head")" = 0 ] && inmain=yes
+  mpr=$(detached_pr "$head" merged)
+  opr=$(detached_pr "$head" open)
+  cpr=$(detached_pr "$head" closed)
+  b_reason=$(worktree_block_reason "$p")
+  refs=$(refs_containing "$head")
+  ign=$(worktree_ignored "$p")
+  DFACTS="$DFACTS$(basename "$p")$TAB$p$TAB$head$TAB$inmain$TAB${mpr:--}$TAB${opr:--}$TAB${cpr:--}$TAB${b_reason:--}$TAB${refs:--}$TAB${ign:--}$NL"
+done <<EOF
+$DETACHED
+EOF
+step_done "$(printf '%s%s' "$BFACTS" "$DFACTS" | grep -c .) targets"
+}
+
+# ── deriving the operations, after every keystroke ──────────────────────────
+
+SELECTED=' '
+SEEN=' '
+BLOCKED=' '
+ROWS=''
+COUNT=0
+PICKED=0
+CUR=1
+TOP=1
+IC='  '
+
+select_op() { has "$1" "$SELECTED" || SELECTED="$SELECTED$1 "; return 0; }
+# Parameter expansion, not sed: nearly every branch name has a slash in it and
+# sed would read it as the end of the pattern.
+deselect_op() {
+  case "$SELECTED" in
+    *" $1 "*) SELECTED="${SELECTED%%" $1 "*} ${SELECTED#*" $1 "}" ;;
+  esac
+  return 0
+}
+mark_seen() { has "$1" "$SEEN" || SEEN="$SEEN$1 "; return 0; }
+block_op() { has "$1" "$BLOCKED" || BLOCKED="$BLOCKED$1 "; return 0; }
+
+# First sight applies the default; after that the choice is yours, and an
+# operation that becomes unavailable is masked rather than deselected so it
+# comes back the way you left it.
+note_default() {
+  has "$1" "$SEEN" && return 0
+  mark_seen "$1"
+  [ "$2" = on ] && select_op "$1"
+  return 0
+}
+
+icon_of() {
+  case "$1" in
+    remove|detach) IC='🔥' ;;
+    rescue) IC='🛟' ;;
+    ff)     IC='⏩' ;;
+    merge)  IC='🔀' ;;
+    rebase) IC='🔁' ;;
+    *)      IC='  ' ;;
+  esac
+}
+
+# An absent worktree is written as '-', never as nothing. Tab is IFS
+# whitespace, so a run of tabs is one delimiter: an empty field does not survive
+# being read back, it disappears and drags every later field one place left.
+# plan_add has carried this rule since it was written; this is the same rule.
+emit() {
+  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$NL"
+  COUNT=$((COUNT + 1))
+  [ "$2" = on ] && PICKED=$((PICKED + 1))
+  return 0
+}
+
+# Rows: id, state, kind, action, target, why. Forks nothing, because this runs
+# again on every keystroke. Branches first, so that by the time a detached
+# worktree is judged, every removal that could orphan its commit is counted.
+derive() {
+  ROWS=''
+  COUNT=0
+  PICKED=0
+  BLOCKED=' '
+  NOTED=''
+  DOOMED=' '
+
+  while IFS="$TAB" read -r name wt class ahead why behind block uact udetail ign; do
+    [ -z "$name" ] && continue
+    [ "$wt" = - ] && wt=''
+
+    # The trunk is here for its update and nothing else. Left to the verdict it
+    # reads as "empty", being an ancestor of itself with nothing ahead, and would
+    # be offered for deletion.
+    removal=''
+    [ "$name" = "$MAIN" ] || case "$class" in
+      merged|empty) removal="remove $name"; def=on ;;
+      suspect)      removal="remove $name"; def=off ;;
+      review)       removal="rescue $why off $name, then remove it"; def=off ;;
+    esac
+    if [ -n "$removal" ] && [ "$block" = - ]; then
+      [ -n "$wt" ] && removal="$removal and its worktree"
+      note_default "${name}R" "$def"
+      st=off; has "${name}R" "$SELECTED" && st=on
+      [ "$st" = on ] && doom_branch "$name"
+      [ "$class" = review ] && k=rescue || k=remove
+      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign"
+    else
+      removal=''
+    fi
+
+    # Nothing on offer is still worth saying when the reason is that the tree is
+    # dirty or that the branch could not be evaluated. Reported outside the
+    # removal branch above, or a target with no removal to attach it to is
+    # silently absent, which is what happened to the trunk itself.
+    if [ "$block" != - ]; then
+      NOTED="$NOTED$name$TAB$block$NL"
+    elif [ "$class" = inconclusive ]; then
+      NOTED="$NOTED$name$TAB$why, run --old$NL"
+    fi
+
+    [ "$uact" = - ] && continue
+    if [ "$uact" = none ]; then NOTED="$NOTED$name$TAB$udetail$NL"; continue; fi
+    case "$uact" in
+      ff)     act="fast-forward $name" ;;
+      merge)  act="merge $MAIN into $name" ;;
+      *)      act="rebase $name onto $MAIN" ;;
+    esac
+    if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
+      block_op "${name}U"
+      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" -
+    else
+      note_default "${name}U" on
+      st=off; has "${name}U" "$SELECTED" && st=on
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" -
+    fi
+  done <<EOF
+$BFACTS
+EOF
+
+  while IFS="$TAB" read -r name wt head inmain mpr opr cpr block refs ign; do
+    [ -z "$name" ] && continue
+    if [ "$block" != - ]; then NOTED="$NOTED$name$TAB$block$NL"; continue; fi
+
+    if [ "$inmain" = yes ]; then
+      det=on; reason='work already in main'
+    elif [ "$mpr" != - ]; then
+      det=on; reason="merged in $mpr"
+    else
+      # The one selection-dependent question: a branch you are removing is not a
+      # home for anything, so it does not count as holding this commit.
+      held=''
+      if [ "$refs" != - ]; then
+        oifs=$IFS; IFS=' '
+        for r in $refs; do
+          doomed_branch "$r" && continue
+          held=$r
+          break
+        done
+        IFS=$oifs
+      fi
+      if [ -n "$held" ]; then NOTED="$NOTED$name${TAB}on $held$NL"; continue; fi
+      if [ "$opr" != - ]; then NOTED="$NOTED$name$TAB$opr is open$NL"; continue; fi
+      det=off
+      [ "$cpr" != - ] && reason="$cpr closed without merging" || reason='on no branch, in no pull request'
+    fi
+
+    # Kind 'detach', not 'remove': the plan routes on it, and a worktree with no
+    # branch loses only the directory. Inferring that later from whether the name
+    # matched the directory's basename removed the worktree and left the branch.
+    note_default "${name}D" "$det"
+    st=off; has "${name}D" "$SELECTED" && st=on
+    emit "${name}D" "$st" detach "remove worktree $name" "$wt" "$reason" "$ign"
+  done <<EOF
+$DFACTS
+EOF
+}
+
+# ── the screen ──────────────────────────────────────────────────────────────
+
+draw() {
+  size=$(stty size 2>/dev/null) || size='24 80'
+  height=${size%% *}
+  width=${size##* }
+  case "$height" in ''|*[!0-9]*) height=24 ;; esac
+  case "$width" in ''|*[!0-9]*) width=80 ;; esac
+  avail=$((height - 5))
+  [ "$avail" -lt 3 ] && avail=3
+  text=$((width - 10))
+  [ "$text" -lt 20 ] && text=20
+
+  [ "$CUR" -lt "$TOP" ] && TOP=$CUR
+  [ "$CUR" -ge $((TOP + avail)) ] && TOP=$((CUR - avail + 1))
+  [ "$TOP" -lt 1 ] && TOP=1
+
+  printf '%b[?2026h%b[H%b[2J' "$E" "$E" "$E"
+  printf '%b%s%b  %b[x] runs, [ ] does not, [-] unavailable%b\n' \
+    "$BOLD" "$MAIN" "$RESET" "$DIM" "$RESET"
+
+  i=0
+  while IFS="$TAB" read -r op state kind action target why ign; do
+    [ -z "$op" ] && continue
+    i=$((i + 1))
+    [ "$i" -lt "$TOP" ] && continue
+    [ "$i" -ge $((TOP + avail)) ] && continue
+    if [ "$i" -eq "$CUR" ]; then point="$INV>$RESET"; else point=' '; fi
+    [ "$why" = - ] && why=''
+    body="$action  $why"
+    if [ "$state" = on ]; then icon_of "$kind"; else IC='• '; fi
+    case "$state" in
+      on)   printf ' %b %b[x]%b %s %.*s\n' "$point" "$GREEN" "$RESET" "$IC" "$text" "$body" ;;
+      off)  printf ' %b %b[ ] %s %.*s%b\n' "$point" "$DIM" "$IC" "$text" "$body" "$RESET" ;;
+      skip) printf ' %b %b[-] %s %b%.*s%b\n' "$point" "$DIM" "$IC" "$STRIKE" "$text" "$body" "$UNSTRIKE$RESET" ;;
+    esac
+  done <<EOF
+$ROWS
+EOF
+
+  last=$((TOP + avail - 1))
+  [ "$last" -gt "$COUNT" ] && last=$COUNT
+  printf '\n%b%s of %s selected   showing %s-%s of %s%b\n' \
+    "$DIM" "$PICKED" "$COUNT" "$TOP" "$last" "$COUNT" "$RESET"
+  printf '%bup/down move, space toggles, r runs, q quits. enter does nothing.%b' "$DIM" "$RESET"
+  printf '%b[?2026l' "$E"
+}
+
+toggle_current() {
+  op=$(printf '%s' "$ROWS" | awk -F"$TAB" -v k="$CUR" 'NR==k{print $1; exit}')
+  [ -z "$op" ] && return 0
+  has "$op" "$BLOCKED" && return 0
+  if has "$op" "$SELECTED"; then deselect_op "$op"; else select_op "$op"; fi
+  return 0
+}
+
+readkey() {
+  k=$(dd bs=1 count=1 2>/dev/null)
+  if [ "$k" = "$E" ]; then
+    k=$(dd bs=1 count=1 2>/dev/null)
+    [ "$k" = '[' ] || { KEY=other; return 0; }
+    k=$(dd bs=1 count=1 2>/dev/null)
+    case "$k" in A) KEY=up ;; B) KEY=down ;; *) KEY=other ;; esac
+    return 0
+  fi
+  case "$k" in
+    '')  KEY=enter ;;
+    ' ') KEY=space ;;
+    q|Q) KEY=quit ;;
+    r|R) KEY=run ;;
+    j|J) KEY=down ;;
+    k|K) KEY=up ;;
+    *)   KEY=other ;;
+  esac
+  return 0
+}
+
+# What is selected, in the order it will happen. Printed before the countdown as
+# well as by --plan: leaving the alternate screen takes the list with it, and
+# being asked to confirm something you can no longer see is not being asked.
+say_selected() {
+  printf '\n%b%s%b\n' "$BOLD" "$1" "$RESET"
+  while IFS="$TAB" read -r op state kind action target why ign; do
+    [ -z "$op" ] && continue
+    [ "$state" = on ] || continue
+    [ "$why" = - ] && why=''
+    icon_of "$kind"
+    printf '  %s %s  %b%s%b\n' "$IC" "$action" "$DIM" "$why" "$RESET"
+    [ "$ign" = - ] || say_ignored "$ign"
+  done <<EOF
+$ROWS
+EOF
+}
+
+say_noted() {
+  [ -z "$NOTED" ] && return 0
+  printf '\n%bLooked at, nothing on offer%b\n' "$BOLD" "$RESET"
+  while IFS="$TAB" read -r n w; do
+    [ -z "$n" ] && continue
+    printf '  %b%s  %s%b\n' "$DIM" "$n" "$w" "$RESET"
+  done <<EOF
+$NOTED
+EOF
+}
+
+# ── picking, then doing ─────────────────────────────────────────────────────
+
+main() {
+parse_args "$@"
+setup
+analyse
+derive
+
+if [ "$plan_only" = true ]; then
+  say_selected 'Would run'
+  say_noted
+  printf '\n%bplan only, nothing was touched%b\n' "$DIM" "$RESET"
+  exit 0
+fi
+
+SAVED=$(stty -g)
+restore() { stty "$SAVED" 2>/dev/null; printf '%b[?2026l%b[?25h%b[?1049l' "$E" "$E" "$E"; }
+# INT and TERM exit as well as restore. Restoring alone lets the loop carry on
+# against a terminal that is no longer in raw mode.
+trap 'restore; exit 130' INT
+trap 'restore; exit 143' TERM
+trap 'restore' EXIT
+
+stty -icanon -echo min 1 time 0
+printf '%b[?1049h%b[?25l' "$E" "$E"
+
+VERDICT=quit
+while :; do
+  derive
+  [ "$CUR" -gt "$COUNT" ] && CUR=$COUNT
+  [ "$CUR" -lt 1 ] && CUR=1
+  draw
+  readkey
+  case "$KEY" in
+    up)    [ "$CUR" -gt 1 ] && CUR=$((CUR - 1)) ;;
+    down)  [ "$CUR" -lt "$COUNT" ] && CUR=$((CUR + 1)) ;;
+    space) toggle_current ;;
+    run)   VERDICT=run; break ;;
+    quit)  VERDICT=quit; break ;;
+  esac
+done
+
+restore
+trap - EXIT INT TERM
+
+# The list of what was looked at and passed over only exists on the alternate
+# screen, which has just gone. Print it here too, or an interactive run never
+# tells you a worktree was skipped for being dirty.
+say_noted
+
+[ "$VERDICT" = quit ] && { printf 'nothing done\n'; exit 0; }
+
+# The plan is built from what is selected, in the order the rows were derived,
+# which puts every removal before the update of anything that survives it.
+while IFS="$TAB" read -r op state kind action target why ign; do
+  [ -z "$op" ] && continue
+  [ "$state" = on ] || continue
+  case "$kind" in
+    remove)
+      plan_add delete "${op%R}" - - "${target:--}"
+      ;;
+    detach)
+      plan_add detached "${op%D}" - - "$target"
+      ;;
+    rescue)
+      b=${op%R}
+      base=$(git merge-base "refs/heads/$b" "$MAIN_REF")
+      n=${why% on top}
+      join=$(git rev-list "$base..refs/heads/$b" | sed -n "$((n + 1))p")
+      plan_add rescue "$b" "$join" "$n" "${target:--}"
+      ;;
+    ff|merge|rebase)
+      b=${op%U}
+      plan_add "$kind" "$b" - - "$target"
+      ;;
+  esac
+done <<EOF
+$ROWS
+EOF
+
+[ -z "$PLAN" ] && { printf 'nothing selected\n'; exit 0; }
+
+say_selected 'Will run'
+printf '\n%bstarting in 5 seconds, ctrl-c to abort%b\n\n' "$BOLD" "$RESET"
+sleep 5
+run_plan
+printf '\n%bremoved %s, rescued %s this run%b\n' "$DIM" "$REMOVED_COUNT" "$RESCUED_COUNT" "$RESET"
+
+}
+
+# Sourcing this file defines its functions and runs nothing, so a test can call
+# any one of them with data of its own. Only running it as the command executes.
+case "${0##*/}" in
+  git-refresh) main "$@" ;;
+esac
