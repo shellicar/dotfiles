@@ -118,7 +118,7 @@ if [ -n "$merged_at" ]; then
   exit 0
 fi
 
-base=$(fork_point "$branch") || { echo "no commits on $branch that another branch does not already have" >&2; exit 1; }
+base=$(fork_point "$branch") || { echo "$branch has no commits of its own to replay" >&2; exit 1; }
 [ -n "$base" ] || { echo "cannot resolve the fork point of $branch" >&2; exit 1; }
 git merge-base --is-ancestor "$base" HEAD || { echo "fork point $base is not an ancestor of $branch" >&2; exit 1; }
 

@@ -22,6 +22,10 @@ for case_file in "$TESTS"/cases/*.sh; do
   work=$(mktemp -d) || { echo "cannot make a working directory" >&2; exit 64; }
   out=$(WORK=$work sh "$case_file" 2>&1)
   status=$?
+  # A case whose exit status is 0 can still have failed: most of what it calls
+  # runs in a subshell, where fail's exit ends the subshell and nothing else.
+  # fail leaves this behind so the failure cannot be swallowed.
+  [ -f "$work/failed" ] && status=1
   rm -rf "$work"
 
   if [ "$status" -ne 0 ]; then
@@ -34,7 +38,8 @@ done
 [ "$ran" -eq 0 ] && { echo "no cases found" >&2; exit 64; }
 
 if [ "$failed" -ne 0 ]; then
-  printf '\n%d of %d failed\n' "$failed" "$ran"
+  printf '\ntests: %d of %d FAILED\n' "$failed" "$ran"
   exit 1
 fi
+printf 'tests: %d passed\n' "$ran"
 exit 0

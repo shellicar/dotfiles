@@ -81,6 +81,9 @@ refs() {
   sort "$REFS"
 }
 
+# Overridden by a case that needs a branch to have an upstream configured.
+git_config_says() { return 1; }
+
 replayed() {
   printf 'replayed-onto-%s-from-%s' "$1" "$2"
 }
@@ -109,7 +112,11 @@ range() {
   done
 }
 
-git_says() {
+# A subshell, so the names it works with cannot reach the code under test. As a
+# plain function it shared a scope with its caller: `b` and `a` are used here and
+# in the library, and a fork point was computed against a branch name the fake
+# had overwritten mid-loop.
+git_says() (
   case "$*" in
     "rev-parse --verify --quiet "*)
       name=$(last_word "$@")
@@ -163,8 +170,13 @@ git_says() {
     "-C "*" rev-list --merges --parents "*)
       return 0 ;;
     "config --get branch."*)
-      # No upstream configured unless a case says otherwise.
-      return 1 ;;
+      key=$(last_word "$@")
+      git_config_says "$key" || return 1
+      # branch.<name>.remote answers origin; branch.<name>.merge answers the ref.
+      case "$key" in
+        *.remote) printf 'origin\n' ;;
+        *.merge) printf 'refs/heads/%s\n' "$(printf '%s' "$key" | sed 's/^branch\.//; s/\.merge$//')" ;;
+      esac ;;
     "for-each-ref --format=%(refname:short) refs/heads/")
       cut -f1 "$REFS" | sed -n 's@^refs/heads/@@p' ;;
     "merge-base --is-ancestor "*)
@@ -198,4 +210,4 @@ git_says() {
     *)
       fail "the fake does not model: git $*" ;;
   esac
-}
+)

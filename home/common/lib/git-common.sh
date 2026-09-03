@@ -636,15 +636,22 @@ EOF
 # and force-pushes them back rewritten under new ids.
 fork_point() (
   b=$1
-  others=$(git for-each-ref --format='%(refname)' refs/heads refs/remotes |
-    grep -vxF "refs/heads/$b" | grep -vxF "refs/remotes/origin/$b") || others=''
+  tip=$(git rev-parse --verify --quiet "refs/heads/$b") || return 1
+  # A ref that already contains this branch's tip was built ON it, so it says
+  # nothing about where this branch was cut and must not hide the branch's own
+  # commits. Excluding it anyway is what made the bottom of a stack look like it
+  # had no commits, and excluding everything made the middle of one look like it
+  # was cut from main and replay the branch below it.
+  others=''
+  for r in $(git for-each-ref --format='%(refname)' refs/heads refs/remotes); do
+    case "$r" in refs/heads/"$b"|refs/remotes/origin/"$b") continue ;; esac
+    git merge-base --is-ancestor "$tip" "$r" 2>/dev/null && continue
+    others="$others $r"
+  done
   # shellcheck disable=SC2086  # deliberate split: --not takes many refs
   oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" --not $others | tail -1)
-  [ -n "$oldest" ] && { git rev-parse --verify --quiet "$oldest^"; return; }
-  # Nothing of its own that no other ref reaches: the bottom of a stack, whose
-  # commits are all on the branch cut from it. Still cut from main, so the
-  # merge-base is the right base and a rebase replays only its own work.
-  git merge-base "refs/heads/$b" "$MAIN_REF"
+  [ -n "$oldest" ] || return 1
+  git rev-parse --verify --quiet "$oldest^"
 )
 
 # The branch this one was cut from, or empty for the normal case of one cut from

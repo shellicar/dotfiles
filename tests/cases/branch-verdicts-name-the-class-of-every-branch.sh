@@ -9,34 +9,63 @@ REPO=$(cd "$TESTS/.." && pwd)
 
 describe "branch_verdict names the class of every branch shape"
 
-# This is the function that decides what gets deleted. Every class it can
-# return is here, so a change that quietly moves a branch from one class to
+# This is the function that decides what gets deleted, and all six classes it
+# can return are asserted here, so a change that moves a branch from one to
 # another has to move a line in this file to do it.
 #
-#   main      A - B - C
-#   empty         B          (sitting on main's history, nothing of its own)
-#   unmerged        \ U1     (own work, not in main)
-#   merged      squashed into C, tip still its own commits
+#   main         A - B - C
+#   empty            B              nothing of its own
+#   merged             \ M1         content landed in main as C
+#   review             \ R1 - R2    landed, then two more on top
+#   unmerged           \ U1         own work, nowhere in main
+#   suspect            \ S1         same, but its remote is gone
+#   ancient            \ P1         too far behind to be worth walking
 commit A
 commit B A
 commit C B
+commit M1 B
+commit R1 B
+commit R2 R1
 commit U1 B
+commit S1 B
+commit P1 B
 
 ref_set refs/heads/main C
 ref_set refs/remotes/origin/HEAD C
 ref_set refs/heads/empty B
+ref_set refs/heads/merged M1
+ref_set refs/heads/review R2
 ref_set refs/heads/unmerged U1
+ref_set refs/heads/suspect S1
+ref_set refs/heads/ancient P1
+# unmerged still has its remote branch; suspect's was deleted, which is what
+# separates "gone, and the content is nowhere" from "local-only work".
+ref_set refs/remotes/origin/unmerged U1
 
 guard_path
 # shellcheck source=../../home/common/lib/git-common.sh
 . "$REPO/home/common/lib/git-common.sh"
 
+# The content walk's hashing is not the subject: each commit hashes to its own
+# name, and main's index holds the one commit whose content landed.
+content_hash_cached() { printf 'content-of-%s\n' "$2"; }
 MAIN_IDX=$WORK/idx
-: > "$MAIN_IDX"
-WT_MAP=''
+printf 'content-of-M1\ncontent-of-R1\n' > "$MAIN_IDX"
 
-# Computed before the read: a here-doc is expanded as part of setting up the
-# command it feeds, so the substitution would run with IFS already set to tab.
+# Both track origin; only unmerged's remote ref still exists, above.
+git_config_says() {
+  case "$1" in
+    branch.suspect.*|branch.unmerged.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# ancient is past the cap; nothing else is.
+branch_beyond_cap() { [ "$1" = refs/heads/ancient ]; }
+
+WT_MAP=''
+WALK_DEPTH=5
+
 class_of() {
   v=$(branch_verdict "$1")
   IFS="$TAB" read -r class _ _ _ _ <<EOF
@@ -45,6 +74,6 @@ EOF
   printf '%s' "$class"
 }
 
-expected="empty=empty unmerged=unmerged"
-actual="empty=$(class_of empty) unmerged=$(class_of unmerged)"
+expected="empty merged review unmerged suspect inconclusive"
+actual="$(class_of empty) $(class_of merged) $(class_of review) $(class_of unmerged) $(class_of suspect) $(class_of ancient)"
 assert_eq "$actual" "$expected"

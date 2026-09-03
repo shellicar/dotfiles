@@ -19,8 +19,14 @@ NL='
 CASE_NAME=''
 describe() { CASE_NAME=$1; }
 
+FAILED=$WORK/failed
+
+# Marks a file as well as exiting, because most of the functions under test are
+# subshells: `exit 1` inside one ends the subshell and the case carries on. A
+# case that ended green over a call the fake refused is what this is for.
 fail() {
   printf '%s\n' "$1" >&2
+  : > "$FAILED"
   exit 1
 }
 
