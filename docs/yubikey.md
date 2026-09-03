@@ -7,53 +7,56 @@ YubiKey 5C NFC throughout. USB-C for the machine, NFC so a phone can reach the k
 without a cable, which the Nano and 5Ci form factors cannot do. A Nano also sits flush,
 making the per-signature touch a fingernail operation.
 
-## Three keys, by write frequency
+## Three keys, and why not two
 
-**FIDO2 credentials cannot be copied between keys.** Not exported, not cloned, not
-backed up. Each service holds a separate credential per key, so every key must be
-registered at every service, by hand, and a key can only be enrolled while you still have
-access. Enrol a service with one key present and that service has a single point of
-failure.
+**A backup that has to be opened is not a backup.** FIDO2 credentials cannot be copied
+between keys: not exported, not cloned, not backed up. Each service holds a separate
+credential per key, so every key must be registered at every service by hand, and a key
+can only be enrolled while you still have access. On two keys, every new signup opens
+the envelope, and a sealed key that comes out weekly is sealed in name only.
 
-That forces the layout, because the credentials divide on how often they are *written*
-while being identical in how often they are *read*.
+So the layout follows the **write** cadence, not the read cadence. Everything here is
+read daily. What differs is how often it is written, and that splits the accounts on
+recoverability.
 
-| Credential | Read | Written |
-|---|---|---|
-| GPG signing key | Every commit | Once, ever |
-| Core passkeys: Bitwarden, Apple, Microsoft | Daily | Once per account, and accounts are rare |
-| Everyday passkeys | Daily | Every new service |
-| OATH seeds | Daily | Every new TOTP-only service |
+Apple, Microsoft, Bitwarden and Gmail are the identity roots. There is no email path
+back to them because they are the email path back to everything else, and they are also
+the accounts that never change. Every other service recovers by email, and is where the
+weekly enrolments land.
 
-A credential written once can be sealed away and stay correct indefinitely. A credential
-written weekly cannot: a sealed copy is wrong the day after it is made, and the wrongness
-is invisible until it is needed. **Both kinds on one device forces the write-once half
-into the wrong regime**, because the accruing half drags the device out of storage.
+| Layer | Pair | Written | Second key |
+|---|---|---|---|
+| Core: Apple, Microsoft, Bitwarden, Gmail | A + B | Rarely | Sealed, opened in an emergency |
+| Everyday: passkeys, OATH | A + C | Weekly | To hand, used on demand |
 
-Hence three keys rather than two:
+Two pairs sharing A. Three keys rather than two because each layer needs its own
+redundant pair and the two cadences cannot share one: put the accruing half on B and B
+stops being a backup.
 
 | Key | Role | Holds | Handled |
 |---|---|---|---|
-| A | Working 1 | GPG, OATH, all passkeys | Carried, used daily |
-| C | Working 2 | OATH, everyday passkeys | To hand, present at every new signup |
-| B | Archive | GPG, core passkeys | Sealed, written once |
+| A | Primary | GPG, core, everyday | Carried, used daily |
+| B | Backup | GPG, core | Sealed, opened when a core account appears |
+| C | Secondary | GPG, everyday | To hand, present at every new signup |
 
-B is the archive because it already holds the core credentials, and those are the
-expensive ones to re-create. C takes the accruing work, which is re-enrollable a service
-at a time.
+B is the sealed one rather than C because the core credentials are the expensive ones to
+re-create, and C's everyday work is re-enrollable a service at a time.
 
-Nothing is on three keys. Access needs one key, so a credential needs exactly two: the
-one in use and the one that replaces it. A third registration adds nothing.
-
-The archive is opened only when a new core account appears, which is a few times a year
-against a few times a week for everyday services. That ratio is the whole justification.
-
-Apple enforces exactly two security keys per account, so core credentials could not be on
+Apple enforces exactly two security keys per account, so the core layer could not be on
 all three even if that were wanted.
 
-OATH has no archive. A seed can only be written when the service shows it, so an archived
-copy would be permanently stale. TOTP is the recoverable tier by design: losing it means
-re-enrolling, not losing access.
+**A third registration adds nothing, and closes nothing.** Access needs one key, so a
+credential needs exactly two: the one in use and the one that replaces it. Anything
+platform-managed can still go onto a third key later on a whim, because adding it is
+plug in and enrol, on any day, from anywhere.
+
+**GPG is the exception, and not because it is hard.** Adding it to a card later means
+repeating the whole key-generation session. The decision is expensive to revisit rather
+than expensive to make, so all three carry it and it is settled once, at generation.
+
+OATH has no archive. A seed can only be written when the service shows it, so an
+archived copy would be permanently stale. TOTP is the recoverable tier by design: losing
+it means re-enrolling, not losing access.
 
 ## The signals, and what a passphrase costs
 
@@ -114,14 +117,25 @@ which is the friction above. What it entails:
 | Yubico OTP | Secret, if programmed externally | Nothing |
 | HMAC challenge-response | Secret | Nothing |
 
-## GPG: one key, five UIDs, generated on-card
+## GPG: one identity, five UIDs, three cards
 
-The OpenPGP application has three slots: one signature, one encryption, one
-authentication. **One signing key per YubiKey.** The five identities in `.gitconfig.d/`
-do not fit as five separate keys.
+The OpenPGP application has three key slots: one signature, one encryption, one
+authentication. The five identities in `.gitconfig.d/` do not fit as five separate keys.
 
-One key carries all five UIDs. Exports are filtered so a platform sees only the addresses
-relevant to it.
+One key carries all five UIDs. Exports are filtered so a platform sees only the
+addresses relevant to it.
+
+**The primary key certifies and nothing else.** It signs the UIDs onto itself and signs
+the subkeys into the key, and that is the whole of what it can do. It cannot sign a
+commit, so it has no reason to be on a card, so it is never on one. Three subkeys do the
+work and those are what fill the three slots.
+
+That split is what the setup turns on. A primary that can also sign has to be on a card
+in order to sign with, which puts the identity on the card, which means every card needs
+its own. **Two cards therefore meant two identities**, both asserting the same five
+addresses, and a commit signed on one traced back to a different key than a commit
+signed on the other. Collapsing that into a single identity behind all three cards is
+what this is.
 
 **Why not five SSH keys instead.** Git can sign with `ed25519-sk` keys, which are
 FIDO2-backed and unbounded, so five identities would fit. Rejected because an SSH key is
@@ -132,20 +146,45 @@ identity and verification is self-contained. Five SSH keys would be five anonymo
 keypairs plus an external table, which removes the identity concept rather than
 separating it.
 
-**Why filter the UIDs.** Separation of concerns, not secrecy. Nothing in a UID is a
-secret; the name and address are already plaintext in every commit object. The point is
-that a personal GitHub profile should not carry a list of contracting clients. Filtering
-is a keyring-and-upload concern only: **UIDs are not on the card at all**, so this never
-touches the hardware.
+**Why filter the UIDs.** Not secrecy. Nothing in a UID is a secret, and the name and
+address are already plaintext in every commit object. It is that publishing the key once
+should not settle for good what every platform sees. Filtering keeps that a per-platform
+decision rather than a consequence of having published at all. It is a
+keyring-and-upload concern only: **UIDs are not on the card at all**, so it never touches
+the hardware.
 
 Only GitHub holds a published key. Its export carries two UIDs; the three client
 addresses are published nowhere.
 
-**Generated on-card**, so the private key has never existed on disk and there is nothing
-to back up or leak. This costs interchangeability: each key holds different key material,
-every public key must be published, and switching keys means changing `signingkey` in the
-relevant `.gitconfig.d/` file. Both public keys stay in the keyring
-permanently, or inserting a card produces a stub for material gpg cannot identify.
+**Generated off-card, then written to all three.** One shared key gives one fingerprint,
+one `signingkey` across all five `.gitconfig.d/` files, one public key to publish, and
+any card in the port signs.
+
+The cost is that private key material exists off a card at all, so there is now something
+to back up and something to lose. It is never on a daily machine, and the backup is
+encrypted and offline.
+
+**Nothing expires.** The primary key is offline, so its exposure is physical rather than
+time-based. An expiry only earns its place where a key is compromised and you cannot tell
+anyone, and every place a signature of yours is verified is a place you control: GitHub,
+and a workflow checking fingerprints. Revocation reaches all of them the same afternoon,
+so a standing appointment to renew buys nothing.
+
+**One keygrip, one stub, one serial.** All three cards hold the same key, so gpg keeps a
+single stub for it and that stub records whichever card it last saw. Rebinding it to the
+card actually inserted is `gpg-connect-agent "scd serialno" "learn --force" /bye`.
+
+What is not yet known is when that is needed. Signing after a card swap has been observed
+to work with the stub still bound to the previous serial, so gpg is more tolerant here
+than expected. `gpg-wrapper` does not run the relearn: it rings the terminal and retries
+once, for the touch, and nothing more.
+
+`learn --force` replaces an on-disk secret with a shadow stub when the card reports the
+same keygrip. That is why it belongs only where the secret is never on disk, which is
+every machine this repo configures.
+
+Superseded on-card public keys stay in the keyring and stay published. They are what
+verifies every commit signed before they were replaced.
 
 ## Touch policy: `cached`
 
@@ -297,11 +336,11 @@ See `https://bitwarden.com/help/account-recovery/`.
 Use **FIDO2 WebAuthn**, not the YubiKey OTP option: OTP validates against Yubico's
 servers, WebAuthn stays between the browser and the key.
 
-## Moving to this setup
+## Building this
 
-**Both keys in hand before starting.** Every enrolment below has to happen twice, and
-the second key cannot be added retrospectively. Doing this once is the entire point of
-the ordering.
+**All three keys in hand before starting.** Every FIDO2 enrolment happens on two keys
+and the second cannot be added retrospectively, and the GPG session writes all three
+cards at once. Doing this once is the entire point of the ordering.
 
 **1. Cards first, printed, before anything is set.** Generate both with `passcard`,
 capture the seeds, pick the paths with `passpath`, and print. A passphrase that exists
@@ -309,16 +348,22 @@ only in a browser tab and short-term memory is lost to a reboot, which costs a f
 factory reset of both applications and everything built on them.
 
 **2. Passphrases on every key.** P1 from card User on FIDO2 and OpenPGP user, P2 from
-card Admin on OpenPGP admin. Add PIV's pair only if PIV is enabled, and note PIV caps at
-8 characters where the others do not.
+card Admin on OpenPGP admin. Add PIV's pair only if PIV is enabled, and note PIV caps
+at 8 characters where the others do not.
 
-**3. GPG, per key.** Set the key attributes to ed25519 first, since a card at factory
-defaults generates RSA-2048 without asking. Generate on-card, which creates the key with
-one UID; add the remaining four with `--quick-add-uid`; set the signature slot's touch
-policy to `cached`. Key B repeats it and produces different key material, which is
-inherent to on-card generation.
+**3. GPG, all three cards at once.** The primary key and its subkeys are made away from
+any daily machine and written to all three cards in one go.
 
-**4. Write the public key onto the card.** A card holds the private key, and the
+Everything needing the primary key happens then, because reaching it again is expensive:
+the five UIDs, the revocation certificate, and the subkeys on every card.
+
+Nothing else has to. Touch policy, passphrases and the certificate slot below all work on
+any machine with the card in hand.
+
+A slot's algorithm is set before a key goes into it, and setting it wipes whatever the
+slot held, including the touch policy. So the touch policy is set afterwards, per card.
+
+**4. Write the public key onto each card.** A card holds the private key, and the
 public key only if it is put there:
 
 ```
@@ -326,66 +371,61 @@ gpg-card --no-history writecert --openpgp OPENPGP.3 <fingerprint>
 ```
 
 Without it a machine that has never seen the key cannot build the stub that points at
-the card, so the card is unusable there. Once per key, and
-`gpg-setup.sh --configure --hardware` takes it back off.
+the card, so the card is unusable there. This is what makes a machine disposable:
+`gpg-setup.sh --configure --hardware` reads the key back off the card and rebuilds
+everything from it, so nothing on a working machine's disk is worth keeping. One
+keyblock, written to all three cards.
 
-The card has three certificate slots, one per key. 1 and 2 belong to the signature and
-encryption keys and are free for certificates on those; 3 belongs to the authentication
-key, which is unused here, so it is the slot least likely to be wanted for anything
-else. `gpg-setup.sh` reads the same slot from `CERT_SLOT`.
+The card's three certificate references are storage separate from the three key slots,
+despite sharing their numbering. **Only reference 3 accepts an OpenPGP keyblock**: 1 and
+2 are rejected with `Invalid argument`, and 4 with `CERTREF must be OPENPGP.N or just N
+with N being 1..3`. So the choice is not open, and `gpg-setup.sh` reads the same slot
+from `CERT_SLOT`.
 
-One keyblock goes in, carrying the primary key, both subkeys and every UID, so the slot
-holds the whole key rather than one key's public half.
+Writing it needs the card authenticated, and `gpg-card` has no way to be given a PIN
+without a pinentry dialog. Where there is none, it only succeeds because the subkey
+transfers immediately before it have already authenticated the card.
 
-**5. Publish the public keys.** One GitHub account covers both `github.com/shellicar` and
-the `Hellicar-Solutions` organisation, so it takes a single export carrying those two
-UIDs. The three client UIDs are exported nowhere, which achieves the separation more
-completely than filtering per platform would.
+One keyblock goes in, carrying the primary key, all three subkeys and every UID, so the
+slot holds the whole key rather than one key's public half.
 
-Publishing is not what makes a signature worth having. The signature lives in the commit
-object and is verified by tooling, so a platform that displays no badge changes nothing.
-GitHub's own "require signed commits" is weaker than it looks: it checks a signature
-resolves to some verified key on the account, not that the commit was signed with a key
-you control. A workflow that validates against known fingerprints before a merge is what
-actually proves it.
+**5. Publish the public key.** One GitHub account covers both `github.com/shellicar`
+and the `Hellicar-Solutions` organisation, so it takes a single export carrying those
+two UIDs. The three client UIDs are exported nowhere, which achieves the separation
+more completely than filtering per platform would.
 
-Both keys go up at this point rather than when one fails, and the old keys stay: they are
-what verifies every commit signed before the switch.
+Publishing is not what makes a signature worth having. The signature lives in the
+commit object and is verified by tooling, so a platform that displays no badge changes
+nothing. GitHub's own "require signed commits" is weaker than it looks: it checks a
+signature resolves to some verified key on the account, not that the commit was signed
+with a key you control. A workflow that validates against known fingerprints before a
+merge is what actually proves it.
 
-**6. Update `.gitconfig.d/`.** All five files take the same `signingkey`, since the five
-identities now share one key. The `includeIf` selection still picks the right email per
-remote, which is what it is actually for.
+Superseded keys stay up alongside it. They are what verifies every commit signed before
+they were replaced.
+
+**6. `signingkey` moves into `.gitconfig.d/common`.** One identity means one value, and
+repeating it across five files is five places to get wrong. The per-org files keep
+`user.email` and their `[cleanup]` block, so `includeIf` still selects the identity per
+remote, which is the thing it is for. Signing is no longer per-org, because it is no
+longer per-key.
 
 **7. Bitwarden.** Create the Families organization, bring the five accounts in, enable
-WebAuthn on each with both keys, and print every recovery code.
+WebAuthn on each with A and B, and print every recovery code.
 
 **8. The credential pass.** The real work, and the reason for the ordering above.
 Microsoft Authenticator has no clean seed export, so every credential is a manual
 re-enrolment regardless of destination.
 
-One visit per service, doing all of it: register both keys via FIDO2 and delete TOTP
-where supported, otherwise place the TOTP by tier, and drop SMS 2FA wherever it is still
+One visit per service, doing all of it: register the layer's pair via FIDO2, A and B
+for a core account and A and C for everything else, delete TOTP where FIDO2 is
+supported and otherwise place it by tier, and drop SMS 2FA wherever it is still
 enabled. Walking a hundred services twice is the outcome to avoid.
 
-## Splitting into three keys
+**9. Seal B.** With card Admin, the revocation certificates and the recovery codes.
 
-From a two-key build, where A and B both hold everything, to the three-key layout:
-
-**1. Enrol C as Working 2.** Passphrases from the same cards, then everyday passkeys and
-OATH. No GPG key: signing stays on A and B. Each OATH seed has to come from the service
-again, since seeds cannot be copied between keys.
-
-**2. Strip C's work from B.** `ykman fido credentials delete` for everyday passkeys,
-`ykman oath accounts delete` for OATH seeds. B keeps GPG and the core passkeys, which is
-what makes it the archive.
-
-**3. Remove B from the services it no longer serves**, or they still believe it has
-access. Not urgent while B is in your possession.
-
-**4. Seal B.** With card Admin, the revocation certificates and the recovery codes.
-
-The order matters: C has to be working before B is stripped, or there is a window with
-only one key holding the everyday credentials.
+The order matters: C has to be carrying the everyday credentials before B is sealed, or
+there is a window with only one key holding them.
 
 ## Operating notes
 
