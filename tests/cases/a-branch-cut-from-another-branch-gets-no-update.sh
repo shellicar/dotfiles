@@ -4,31 +4,33 @@ TESTS=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../harness.sh
 . "$TESTS/harness.sh"
+# shellcheck source=../fake-git.sh
+. "$TESTS/fake-git.sh"
 
-describe "a branch cut from another branch is left alone and names the branch"
+describe "a branch cut from another branch is left alone and names that branch"
 
-# The pair to the case above, so the fix for one cannot quietly undo the other.
 # Neither rebase is right here: a plain one copies the parent's commits onto
-# this branch, a fork-point one drops them and leaves it built on nothing.
+# this branch and force-pushes them, a fork-point one drops them and leaves it
+# built on nothing.
+#
+# Built as a graph, not as canned answers. An earlier version of this case
+# stubbed the reachability questions, and the state it described was one git
+# cannot produce, so it passed while the behaviour was broken.
+#
+#   main   A - B - C
+#   base        \ X1 - X2
+#   top                  \ Y1
+commit A
+commit B A
+commit C B
+commit X1 B
+commit X2 X1
+commit Y1 X2
 
-git_says() {
-  case "$*" in
-    "-C . rev-list --merges --parents refs/remotes/origin/HEAD..HEAD") return 0 ;;
-    "rev-list --count refs/remotes/origin/HEAD..refs/heads/feature/top") echo 3 ;;
-    "for-each-ref --format=%(refname) refs/heads refs/remotes")
-      printf '%s\n' refs/heads/feature/base refs/heads/feature/top refs/heads/main ;;
-    "rev-list refs/remotes/origin/HEAD..refs/heads/feature/top --not "*)
-      printf '%s\n' top-commit-3 top-commit-2 top-commit-1 ;;
-    "rev-list refs/remotes/origin/HEAD..refs/heads/feature/top")
-      printf '%s\n' top-commit-3 top-commit-2 top-commit-1 ;;
-    "rev-parse --verify --quiet top-commit-1^") echo tip-of-base ;;
-    # Where it was cut is not on main: it was cut from another branch.
-    "merge-base --is-ancestor tip-of-base refs/remotes/origin/HEAD") return 1 ;;
-    "for-each-ref --contains tip-of-base --format=%(refname:short) refs/heads refs/remotes")
-      printf '%s\n' feature/base feature/top ;;
-    *) fail "unexpected: git $*" ;;
-  esac
-}
+ref_set refs/heads/main C
+ref_set refs/remotes/origin/HEAD C
+ref_set refs/heads/feature/base X2
+ref_set refs/heads/feature/top Y1
 
 guard_path
 # shellcheck source=../../home/common/lib/git-common.sh

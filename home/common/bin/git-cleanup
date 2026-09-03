@@ -88,7 +88,7 @@ process_branch() {
 $verdict
 EOF
 
-  last=$(git log -1 --format=%cr "$branch" 2>/dev/null)
+  last=$(git log -1 --format=%cr "refs/heads/$branch" 2>/dev/null)
   # The commit count stays full-brightness (not dimmed) — it's the number
   # that actually matters when deciding whether a branch is worth a look.
   meta="${DIM}[${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
@@ -142,7 +142,7 @@ EOF
   # searched'.
   if [ "$class" = inconclusive ]; then
     INCONCLUSIVE_COUNT=$((INCONCLUSIVE_COUNT + 1))
-    note="$(distance_from_main "$branch") behind, not evaluated"
+    note="$(distance_from_main "refs/heads/$branch") behind, not evaluated"
     [ "$gone" = true ] && note="$note [gone]"
     [ -n "$wt" ] && note="$note, worktree"
     say "  ${YELLOW}${UNKNOWN}${RESET} $branch $meta ${DIM}($note — run --old)${RESET}"

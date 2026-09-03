@@ -130,7 +130,9 @@ EOF
 
   extra=""
   [ "$stash_first" -eq 1 ] && extra=" (stash first)"
-  if [ "$push_after" -eq 1 ]; then
+  # A fast-forward is not pushed: it moves the branch to the trunk and leaves
+  # nothing of its own to publish, so the line must not promise one.
+  if [ "$push_after" -eq 1 ] && [ "$action" != ff ]; then
     if [ "$action" = merge ]; then
       extra="$extra + push"
     else
