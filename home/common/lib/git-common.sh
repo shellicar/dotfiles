@@ -627,24 +627,6 @@ EOF
   return 1
 )
 
-# Where the branch was cut: the parent of the oldest commit on it that no other
-# PUBLISHED branch can reach. Empty when the branch has nothing of its own.
-#
-# This is what a rebase has to be given. Plain 'git rebase origin/$MAIN' replays
-# everything back to the merge-base, which for a branch cut from another branch
-# is where THAT branch left main, so it replays the other branch's commits too
-# and force-pushes them back rewritten under new ids.
-# The trunk carrying commits its remote does not have, described, or empty.
-#
-# Worth its own line because it is the one state where none of the other verdicts
-# are the point. Every one of them is measured against the remote trunk, so they
-# stay correct, but you do not have branches or worktrees to tidy: you have
-# commits sitting on the trunk that need a decision first, and only you know
-# whether that is to push them or to move them off.
-#
-# The two shapes read differently. Commits no branch has are work that exists
-# nowhere else. Commits a branch also has are the accidental commit to main,
-# where the branch already holds the work and the trunk is what is wrong.
 # What every command must report before it says anything of its own. Each
 # command decides how to lay out its own targets, but the state of the
 # repository is not the command's to choose: leaving it out is how git refresh
@@ -657,6 +639,17 @@ say_environment() {
   say "\n${RED}${WARN}${RESET}$note"
 }
 
+# The trunk carrying commits its remote does not have, described, or empty.
+#
+# Worth its own line because it is the one state where none of the other verdicts
+# are the point. Every one of them is measured against the remote trunk, so they
+# stay correct, but you do not have branches or worktrees to tidy: you have
+# commits sitting on the trunk that need a decision first, and only you know
+# whether that is to push them or to move them off.
+#
+# The two shapes read differently. Commits no branch has are work that exists
+# nowhere else. Commits a branch also has are the accidental commit to main,
+# where the branch already holds the work and the trunk is what is wrong.
 local_trunk_ahead() (
   n=$(git rev-list --count "$MAIN_REF..refs/heads/$MAIN" 2>/dev/null) || return 0
   [ "${n:-0}" -gt 0 ] || return 0
@@ -684,6 +677,13 @@ live_refs() {
   printf 'refs/heads/%s\n' "$MAIN"
 }
 
+# Where the branch was cut: the parent of the oldest commit on it that no other
+# LIVE branch can reach. Empty when the branch has nothing of its own.
+#
+# This is what a rebase has to be given. Plain 'git rebase origin/$MAIN' replays
+# everything back to the merge-base, which for a branch cut from another branch
+# is where THAT branch left main, so it replays the other branch's commits too
+# and force-pushes them back rewritten under new ids.
 fork_point() (
   b=$1
   tip=$(git rev-parse --verify --quiet "refs/heads/$b") || return 1
