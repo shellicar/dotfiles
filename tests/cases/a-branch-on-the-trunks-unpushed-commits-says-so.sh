@@ -27,7 +27,9 @@ ref_set refs/remotes/origin/HEAD B
 ref_set refs/heads/main C
 ref_set refs/heads/feature/x X1
 
-worktree_for refs/heads/main /repo
+# Deliberately no worktree for main. The trunk is protected because it is the
+# trunk, not because someone is standing on it: with a single worktree you are
+# usually standing on the branch, which is exactly when this has to hold.
 
 guard_path
 # shellcheck source=../../home/common/lib/git-common.sh

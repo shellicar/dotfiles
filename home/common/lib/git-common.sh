@@ -665,6 +665,11 @@ local_trunk_ahead() (
 live_refs() {
   git for-each-ref --format='%(refname)' refs/remotes
   git worktree list --porcelain | sed -n 's/^branch //p'
+  # The trunk, always, and not because it might be checked out: it is the branch
+  # every other verdict is measured against, so replaying its commits under new
+  # ids is never right. Left to the worktree test it was protected only while you
+  # happened to be standing on it, which is the opposite of when you need it.
+  printf 'refs/heads/%s\n' "$MAIN"
 }
 
 fork_point() (
