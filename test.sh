@@ -69,4 +69,16 @@ EOF
 
 [ -z "$unparseable" ] || { printf 'will not parse:%s\n' "$unparseable" >&2; exit 1; }
 
-shellcheck --format=gcc "$@"
+# -x follows a sourced file, so a command and the library under home/common/lib
+# are analysed together. Without it every variable the library defines for its
+# front-ends reads as unused, and every function the front-end calls reads as
+# undefined. The path is resolved by the source-path=SCRIPTDIR directive in each
+# command, so it works from any working directory.
+shellcheck -x --source-path=SCRIPTDIR --format=gcc "$@" || lint_failed=1
+
+# The behavioural suite runs here too, because a suite nothing reaches is a
+# suite that goes stale. It builds no repository and touches nothing: git is a
+# shell function backed by a fake, so it is as cheap as the linting.
+sh "$(dirname "$0")/tests/run.sh" || tests_failed=1
+
+[ -z "${lint_failed:-}${tests_failed:-}" ] || exit 1

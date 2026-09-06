@@ -67,18 +67,21 @@ if [ "$mode" != new ] && [ -n "$base" ]; then
   exit 2
 fi
 
+# Full refs throughout. A short name is resolved by a search that reaches
+# refs/heads before refs/remotes, so a local branch called "origin/x" answers
+# for the remote one, and the worktree gets cut from the wrong commit.
 case $mode in
   local)
-    git worktree add "$dest" "$branch" >&2 || exit 1
+    git worktree add "$dest" "refs/heads/$branch" >&2 || exit 1
     ;;
   remote)
-    git worktree add --track -b "$branch" "$dest" "origin/$branch" >&2 || exit 1
+    git worktree add --track -b "$branch" "$dest" "refs/remotes/origin/$branch" >&2 || exit 1
     ;;
   new)
     if [ -z "$base" ]; then
-      base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD) || { echo "cannot determine the default branch from origin/HEAD" >&2; exit 2; }
+      base=refs/remotes/origin/HEAD
     elif git rev-parse --verify --quiet "refs/remotes/origin/$base" >/dev/null; then
-      base="origin/$base"
+      base="refs/remotes/origin/$base"
     fi
     git worktree add --no-track -b "$branch" "$dest" "$base" >&2 || exit 1
     ;;

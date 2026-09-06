@@ -42,6 +42,14 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 - `get-os.sh` — OS detection oracle
 - `home/common/bin/` — executables linked per-file into `~/bin`, which `path.sh`
   prepends to `PATH` (see Commands)
+- `home/common/lib/` — sourced by the commands in `bin/`, linked into `~/lib`.
+  `git-common.sh` holds every decision the git commands make: which branches are
+  merged, what a detached worktree is, how to bring the trunk in, so a command
+  in `bin/` is argument parsing and a call to `main`. `yubikeys.sh` holds the
+  three serials.
+- `tests/` — behavioural tests for the above. No repository is built: `git` is a
+  shell function backed by a fake commit graph, so a case states a situation
+  directly instead of committing its way to one.
 - `home/{common,<os>}/`, `os/`, `setup/<os>/`, `.gitconfig.d/`, `.vscode/`
 - `.local/bin/` — not linked into `$HOME`; called by repo path
 - `docs/yubikey.md`: hardware-backed signing and auth decisions, and their reasoning
@@ -54,6 +62,11 @@ resolves a file named `git-foo` there as the subcommand `git foo`, no alias need
 `.gitconfig.d/common`. A one-line alias is the wrong home for anything with real
 logic: extract it here instead.
 
+- `git-refresh` — cleanup and spread in one pass over one snapshot: remove what
+  has landed, then bring the trunk into what survives. The operations come from
+  an interactive list rather than flags, and the update half depends on which
+  removals you keep, so declining one can reveal another. `--plan` prints and
+  stops, which is also what happens with no terminal.
 - `git-cleanup` — delete local branches, and their worktrees, whose work is
   already in main. The verdict is the merge check alone; a `gone` upstream is only
   a cross-check. Reads `[cleanup]` config (see Git).
@@ -124,8 +137,18 @@ one; it holds the why that the code cannot.
 
 ## Testing
 
-`./test.sh` shellchecks every shell script here. Run it after changing one. It is
-quiet on success, exits 1 on a finding, and exits 64 when it cannot lint at all —
+`./test.sh` parses every shell script here, then shellchecks it, then runs the
+behavioural suite in `tests/`. Run it after changing one.
+
+It exits 1 on this tree today and always has: 53 deliberate shellcheck findings,
+mostly `local` (not POSIX, used throughout on purpose) and unquoted expansions
+that are meant to split. Every one of those classes has a counterpart on main, so
+none of them is new. The exit status therefore cannot tell you a test failed. The
+suite prints its own verdict instead, `tests: N passed` or `tests: N of M
+FAILED`, and that line is what to read. The bar for a change is no new finding
+*class*, not a clean exit.
+
+It exits 64 when it cannot lint at all —
 never 0 for "did not actually run". Targets are
 found with `file`, not by extension, because most scripts here are commands on
 `PATH` with no extension. Nothing in `setup/` installs shellcheck, so it falls
@@ -133,3 +156,20 @@ back to the `koalaman/shellcheck` container when the binary is absent.
 
 The scripts are POSIX `sh`, and the environments span BSD and GNU coreutils, so a
 GNU-only flag to `sed` or `date` passes on Linux and fails on the Mac.
+
+`tests/integration/run.sh` is the other half, and is not part of `./test.sh`: it
+needs docker and takes about ten seconds. It builds real repositories in a
+container and runs the commands with `--apply`, because deciding and doing are
+different code and the pure suite can only reach the first. It covers `run_plan`,
+`run_update`, `remove_branch` against a real worktree, a real rescue rebase, and
+the force-push. The container is what makes running it safe: it deletes branches
+and worktrees for real, and none of them are yours. It skips with a message when
+docker is absent.
+
+A case in `tests/cases/` builds no repository. It sources the library, replaces
+`git` with a shell function backed by a fake commit graph, and asserts on what
+came back. Two rules earn their keep: assert on state rather than on which
+commands were issued, so a rewrite that reaches the same end still passes; and
+model reachability properly, because a case that stubs `rev-list` can describe a
+repository git cannot produce, and one written that way stayed green while the
+behaviour it claimed to cover was broken.
