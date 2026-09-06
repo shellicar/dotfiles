@@ -139,14 +139,15 @@ one; it holds the why that the code cannot.
 `./test.sh` parses every shell script here, then shellchecks it, then runs the
 behavioural suite in `tests/`. Run it after changing one.
 
-It exits 1 on this tree today and always has: there are 53 deliberate shellcheck
-findings, the same ones on main, mostly `local` (not POSIX, used throughout on
-purpose) and unquoted expansions that are meant to split. So the exit status
-cannot tell you a test failed. The suite prints its own verdict instead, `tests:
-N passed` or `tests: N of M FAILED`, and that line is what to read. The bar for a
-change is no new finding *class*, not a clean exit.
+It exits 1 on this tree today and always has: 53 deliberate shellcheck findings,
+mostly `local` (not POSIX, used throughout on purpose) and unquoted expansions
+that are meant to split. Every one of those classes has a counterpart on main, so
+none of them is new. The exit status therefore cannot tell you a test failed. The
+suite prints its own verdict instead, `tests: N passed` or `tests: N of M
+FAILED`, and that line is what to read. The bar for a change is no new finding
+*class*, not a clean exit.
 
-It exits 1 on a finding, and exits 64 when it cannot lint at all —
+It exits 64 when it cannot lint at all —
 never 0 for "did not actually run", which is the bug it used to have. Targets are
 found with `file`, not by extension, because most scripts here are commands on
 `PATH` with no extension. Nothing in `setup/` installs shellcheck, so it falls

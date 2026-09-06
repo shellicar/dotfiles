@@ -35,9 +35,14 @@ fail() {
 GIT_LOG=$WORK/git.log
 : > "$GIT_LOG"
 
+# git_says runs in a subshell, so whatever names it uses cannot reach the code
+# under test. Isolating it here rather than in each definition means a case can
+# write a plain function without reopening the hole: the fake once had its own
+# `a` and `b` overwrite a caller's mid-loop, and a fork point was computed
+# against a branch name that was no longer the branch.
 git() {
   printf '%s\n' "$*" >> "$GIT_LOG"
-  git_says "$@"
+  ( git_says "$@" )
 }
 
 # A case overrides this. Anything it does not answer fails rather than guesses:

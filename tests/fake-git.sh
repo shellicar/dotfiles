@@ -112,10 +112,8 @@ range() {
   done
 }
 
-# A subshell, so the names it works with cannot reach the code under test. As a
-# plain function it shared a scope with its caller: `b` and `a` are used here and
-# in the library, and a fork point was computed against a branch name the fake
-# had overwritten mid-loop.
+# The harness runs this in a subshell, so its names cannot reach the code under
+# test.
 git_says() (
   case "$*" in
     "rev-parse --verify --quiet "*)
@@ -155,6 +153,13 @@ git_says() (
       return 0 ;;
     "for-each-ref --format=%(refname) refs/heads refs/remotes")
       cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' ;;
+    "for-each-ref --format=all %(refname) refs/heads refs/remotes")
+      cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' | sed 's/^/all /' ;;
+    "for-each-ref --contains "*" --format=built %(refname) "*)
+      sha=$(commit_of "$(nth_word 3 "$@")") || return 1
+      cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' | while read -r r; do
+        reaches "$(ref_of "$r")" "$sha" && printf 'built %s\n' "$r"
+      done ;;
     "for-each-ref --contains "*)
       sha=$(commit_of "$(nth_word 3 "$@")") || return 1
       short=no

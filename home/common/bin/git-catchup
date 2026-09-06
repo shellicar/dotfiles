@@ -126,7 +126,7 @@ git merge-base --is-ancestor "$base" HEAD || { echo "fork point $base is not an 
 # the parent branch's commits and a plain one would duplicate them, so neither is
 # offered and you are told what it is tangled with.
 parent=$(branch_cut_from "$branch" "$base")
-[ -z "$parent" ] || { echo "$branch was cut from $parent, not from $main — rebase it onto $parent yourself" >&2; exit 1; }
+[ -z "$parent" ] || { echo "$branch shares history with $parent past $main, so neither rebase is right here — sort them out by hand" >&2; exit 1; }
 
 echo "plan: rebase $branch onto origin/$main and force-push it"
 echo "  branch      $branch at $local_head"

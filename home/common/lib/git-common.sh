@@ -642,20 +642,34 @@ fork_point() (
   # commits. Excluding it anyway is what made the bottom of a stack look like it
   # had no commits, and excluding everything made the middle of one look like it
   # was cut from main and replay the branch below it.
-  others=''
-  for r in $(git for-each-ref --format='%(refname)' refs/heads refs/remotes); do
-    case "$r" in refs/heads/"$b"|refs/remotes/origin/"$b") continue ;; esac
-    git merge-base --is-ancestor "$tip" "$r" 2>/dev/null && continue
-    others="$others $r"
-  done
+  #
+  # Two git calls and one pass, not one call per ref: --contains answers the same
+  # question for every ref at once, and asking per ref cost a second and a half
+  # on a repository with four hundred of them.
+  # Both lists come down one stream, tagged by the format string, because a -v
+  # value containing newlines is a GNU extension and BSD awk rejects it.
+  others=$(
+    { git for-each-ref --contains "$tip" --format='built %(refname)' refs/heads refs/remotes
+      git for-each-ref --format='all %(refname)' refs/heads refs/remotes
+    } | awk -v self="refs/heads/$b" -v remote="refs/remotes/origin/$b" '
+        $1 == "built" { on[$2] = 1; next }
+        $2 != self && $2 != remote && !($2 in on) { print $2 }
+      '
+  )
   # shellcheck disable=SC2086  # deliberate split: --not takes many refs
   oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" --not $others | tail -1)
   [ -n "$oldest" ] || return 1
   git rev-parse --verify --quiet "$oldest^"
 )
 
-# The branch this one was cut from, or empty for the normal case of one cut from
-# main. One cheap test does the discriminating: if the fork parent is on main
+# A branch this one shares history with past main, or empty for the normal case
+# of one cut from main.
+#
+# It does NOT say which was cut from which, and cannot: when a branch is cut from
+# an earlier commit of another, the fork point sits on both and each names the
+# other. Only one of those readings is true and nothing here can tell which. The
+# caller refuses either way, which is right either way, so it reports the tangle
+# and not a direction. One cheap test does the discriminating: if the fork parent is on main
 # there is nothing to look at, and a ref lookup on it would otherwise match every
 # branch cut from main at or after that commit, which is all of them.
 #
@@ -696,7 +710,7 @@ update_verdict() (
     { printf 'ff\t-\n'; return 0; }
   base=$(fork_point "$b") || base=''
   parent=$(branch_cut_from "$b" "$base")
-  [ -n "$parent" ] && { printf 'none\tcut from %s, not from %s\n' "$parent" "$MAIN"; return 0; }
+  [ -n "$parent" ] && { printf 'none\tshares history with %s past %s\n' "$parent" "$MAIN"; return 0; }
   # Only reachable when the branch and the trunk share no history at all.
   [ -z "$base" ] && { printf 'none\tshares no history with %s\n' "$MAIN"; return 0; }
   printf 'rebase\t%s\n' "$base"

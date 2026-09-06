@@ -7,7 +7,7 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../fake-git.sh
 . "$TESTS/fake-git.sh"
 
-describe "a branch cut from another branch is left alone and names that branch"
+describe "a branch tangled with another past main is left alone and names it"
 
 # Neither rebase is right here: a plain one copies the parent's commits onto
 # this branch and force-pushes them, a fork-point one drops them and leaves it
@@ -36,6 +36,6 @@ guard_path
 # shellcheck source=../../home/common/lib/git-common.sh
 . "$REPO/home/common/lib/git-common.sh"
 
-expected="none${TAB}cut from feature/base, not from main"
+expected="none${TAB}shares history with feature/base past main"
 actual=$(update_verdict . feature/top)
 assert_eq "$actual" "$expected"
