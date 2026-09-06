@@ -59,6 +59,8 @@ target=$(git rev-parse --verify --quiet "$MAIN_REF")
 }
 
 plan_worktrees() {
+say_environment
+
 # Fed by here-doc, not by a pipe: a while loop downstream of a pipe runs in a
 # subshell, and the plan it built would be discarded at 'done'.
 WORKTREES=$(git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}')

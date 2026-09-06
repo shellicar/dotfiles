@@ -46,6 +46,8 @@ resolve_main
 main=$MAIN
 target=$(git rev-parse --verify --quiet "$MAIN_REF")
 
+say_environment
+
 local_head=$(git rev-parse HEAD)
 
 # On the default branch there is nothing to bring in but itself: a fast-forward,

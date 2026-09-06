@@ -14,6 +14,7 @@ git_says() {
   case "$*" in
     "worktree list --porcelain")
       printf 'worktree /wt/foo\nHEAD foo-tip\nbranch refs/heads/feature/foo\n' ;;
+    "rev-list --count refs/remotes/origin/HEAD..refs/heads/main") echo 0 ;;
     "-C /wt/foo status --porcelain") echo " M some-file" ;;
     "-C /wt/foo symbolic-ref --quiet --short HEAD") echo feature/foo ;;
     "-C /wt/foo rev-list --count HEAD..main-tip") echo 2 ;;

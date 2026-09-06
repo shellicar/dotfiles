@@ -645,6 +645,18 @@ EOF
 # The two shapes read differently. Commits no branch has are work that exists
 # nowhere else. Commits a branch also has are the accidental commit to main,
 # where the branch already holds the work and the trunk is what is wrong.
+# What every command must report before it says anything of its own. Each
+# command decides how to lay out its own targets, but the state of the
+# repository is not the command's to choose: leaving it out is how git refresh
+# came to say "nothing to do" while main carried an unpushed commit, and how
+# catchup and spread each missed a wording the others had. Add an
+# environment-level warning here and every command gains it at once.
+say_environment() {
+  note=$(local_trunk_ahead)
+  [ -n "$note" ] || return 0
+  say "\n${RED}${WARN}${RESET}$note"
+}
+
 local_trunk_ahead() (
   n=$(git rev-list --count "$MAIN_REF..refs/heads/$MAIN" 2>/dev/null) || return 0
   [ "${n:-0}" -gt 0 ] || return 0
