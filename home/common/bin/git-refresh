@@ -463,6 +463,15 @@ setup
 analyse
 derive
 
+# Nothing on offer means there is nothing to pick from, and a selector with no
+# rows is a blank screen you cannot act on or learn anything from. Say what was
+# looked at and stop.
+if [ "$COUNT" -eq 0 ]; then
+  say_noted
+  printf '\n%bnothing to do%b\n' "$DIM" "$RESET"
+  exit 0
+fi
+
 if [ "$plan_only" = true ]; then
   say_selected 'Would run'
   say_noted
