@@ -41,6 +41,9 @@ usage() {
   echo "                 As above, but for card-only use: no cache expiry,"
   echo "                 removes the daily kill from cron, and imports the"
   echo "                 public key from the card. Needs exactly one inserted"
+  echo "  --configure --hardware --touch"
+  echo "                 As above, plus scdaemon's keep-chv-on-timeout, for a"
+  echo "                 card whose sig slot has a touch policy"
   echo "  --schedule     Set up daily cron to kill gpg-agent (default 6am)"
   echo "  --reset        Kill gpg-agent now (next sign prompts)"
   exit 1
@@ -101,7 +104,6 @@ test_sign() {
   fi
 
   echo "Testing sign with key $key_id ($label)..."
-  echo "A card key needs a touch; the contact blinks and times out unanswered."
   if echo "banana" | gpg --no-options --local-user "$key_id" --clearsign > /dev/null 2>&1; then
     echo "Signing works."
   else
@@ -222,20 +224,25 @@ reset_agent() {
   echo "Done. Next sign will prompt for passphrase."
 }
 
-# --hardware writes the card-only policy. A cached passphrase is not what stands
-# between malware and a signature once the key is on a card: the touch is, and
-# the chip enforces it regardless of cache state. So the TTL becomes purely how
-# often the passphrase is typed, and the daily kill is bounding a window that no
-# longer exists. Both only make sense while on-disk keys are still in use.
+# --hardware writes the card-only policy. The TTL decides one thing: how often the
+# passphrase is typed. 400 days means once. The daily kill bounds a cache window
+# and only makes sense while on-disk keys are still in use.
 configure_agent() {
-  if [ "${1:-}" = "--hardware" ]; then
+  hardware=0
+  touch_policy=0
+  for arg in "$@"; do
+    case "$arg" in
+      --hardware) hardware=1 ;;
+      --touch)    touch_policy=1 ;;
+      *)          echo "ERROR: unknown option: $arg" >&2; exit 64 ;;
+    esac
+  done
+
+  if [ "$hardware" -eq 1 ]; then
     # Checked before anything is written, so a run without a card leaves the
     # machine as it was rather than half configured.
     require_one_card
     CACHE_TTL="$CACHE_TTL_HARDWARE"
-    hardware=1
-  else
-    hardware=0
   fi
 
   echo "GPG Agent + Keychain Configuration"
@@ -298,19 +305,22 @@ EOF
   echo "  config: $GPG_AGENT_CONF"
 
   if [ "$hardware" -eq 1 ]; then
-    # Written before the card is touched: reading the card starts scdaemon, and
-    # reloading the agent afterwards does not restart it, so a scdaemon spawned
-    # first would run without this until it next exits.
+    # Only with --touch, and only meaningful on a sig slot that has one. Written
+    # before the card is read: reading it starts scdaemon, and reloading the
+    # agent afterwards does not restart it, so a scdaemon spawned first would run
+    # without this until it next exits.
     #
     # Without it, a touch that times out makes scdaemon de-verify the card and
     # discard the cached passphrase, so the next signature prompts again. The
-    # card keeps PW1 verified on its own; only scdaemon throws it away. Needs the
-    # patched build from setup/macos/build-gnupg.sh.
-    if [ -f "$SCDAEMON_CONF" ] && grep -q 'keep-chv-on-timeout' "$SCDAEMON_CONF"; then
-      echo "  scdaemon: keep-chv-on-timeout already set"
-    else
-      echo "keep-chv-on-timeout" >> "$SCDAEMON_CONF"
-      echo "  scdaemon: keep-chv-on-timeout added"
+    # card keeps PW1 verified on its own; only scdaemon throws it away. Needs a
+    # patched scdaemon.
+    if [ "$touch_policy" -eq 1 ]; then
+      if [ -f "$SCDAEMON_CONF" ] && grep -q 'keep-chv-on-timeout' "$SCDAEMON_CONF"; then
+        echo "  scdaemon: keep-chv-on-timeout already set"
+      else
+        echo "keep-chv-on-timeout" >> "$SCDAEMON_CONF"
+        echo "  scdaemon: keep-chv-on-timeout added"
+      fi
     fi
 
     import_pubkey_from_card
@@ -334,7 +344,7 @@ EOF
 case "${1:-}" in
   --generate)   generate_key ;;
   --test-sign)  test_sign "${2:-}" ;;
-  --configure)  configure_agent "${2:-}" ;;
+  --configure)  shift; configure_agent "$@" ;;
   --schedule)   schedule_reset ;;
   --reset)      reset_agent ;;
   *)            usage ;;

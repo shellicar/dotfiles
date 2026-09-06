@@ -25,7 +25,6 @@ is_whole_dir() {
   case "$1" in
     .hammerspoon) return 0 ;;
     .config/git/hooks) return 0 ;;
-    .local/gnupg/libexec) return 0 ;;
     *) return 1 ;;
   esac
 }

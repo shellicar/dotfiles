@@ -42,8 +42,8 @@ stops being a backup.
 B is the sealed one rather than C because the core credentials are the expensive ones to
 re-create, and C's everyday work is re-enrollable a service at a time.
 
-Apple enforces exactly two security keys per account, so the core layer could not be on
-all three even if that were wanted.
+Apple requires at least two security keys and allows up to six, so A and B for the core
+layer is a choice rather than a limit.
 
 **A third registration adds nothing, and closes nothing.** Access needs one key, so a
 credential needs exactly two: the one in use and the one that replaces it. Anything
@@ -60,26 +60,12 @@ it means re-enrolling, not losing access.
 
 ## The signals, and what a passphrase costs
 
-Signing happens on behalf of an agent doing development work, so the question is not
-whether an operation is authorised but *which* operation is being authorised, at a moment
-not chosen by the person authorising it.
+With `sig` at `off`, GPG signing produces no blink. FIDO2 requires a touch of its own and
+has no setting to change that, so a blinking contact means one thing: a credential is
+being used to get into an account.
 
-Two physical signals carry that, and they discriminate because the caching differs:
-
-| Signal | Means |
-|---|---|
-| Blink, no dialog | GPG signing. `gpg-agent` has the passphrase cached |
-| Dialog, then blink | FIDO2 or OATH. Neither caches anywhere, ever |
-
-The touch itself proves presence, not consent: the chip receives a hash and cannot
-display what it represents. So the dialog is the only channel carrying content, and the
-discrimination above is the only way to tell one kind of operation from another.
-
-This has a consequence for `forcesig`, the card setting deciding whether GPG asks for the
-passphrase once per session or per signature. Set to per signature, every commit would
-surface a dialog naming the operation, restoring the informative channel for signing at
-the cost of typing the passphrase constantly. Left at once per session, signing is a bare
-blink.
+That is the whole of what leaving the OpenPGP touch off buys. A blink meaning two
+different things means nothing.
 
 **The passphrase is typed far more than expected.** FIDO2 has no cache: not on the key,
 not in the browser, not in any agent. Every credential requesting user verification
@@ -146,16 +132,6 @@ identity and verification is self-contained. Five SSH keys would be five anonymo
 keypairs plus an external table, which removes the identity concept rather than
 separating it.
 
-**Why filter the UIDs.** Not secrecy. Nothing in a UID is a secret, and the name and
-address are already plaintext in every commit object. It is that publishing the key once
-should not settle for good what every platform sees. Filtering keeps that a per-platform
-decision rather than a consequence of having published at all. It is a
-keyring-and-upload concern only: **UIDs are not on the card at all**, so it never touches
-the hardware.
-
-Only GitHub holds a published key. Its export carries two UIDs; the three client
-addresses are published nowhere.
-
 **Generated off-card, then written to all three.** One shared key gives one fingerprint,
 one `signingkey` across all five `.gitconfig.d/` files, one public key to publish, and
 any card in the port signs.
@@ -176,8 +152,7 @@ serial when it asks for the passphrase.
 
 **The named serial is not a requirement.** Any of the three signs, whichever card the stub
 happens to be bound to, so the serial in the dialog is a label rather than a demand.
-Nothing has to be rebound after a swap, and `gpg-wrapper` accordingly does not: it rings
-the terminal and retries once, for the touch, and nothing more.
+Nothing has to be rebound after a swap.
 
 Should a stub ever need rebinding, `gpg-connect-agent "scd serialno" "learn --force" /bye`
 does it. It replaces an on-disk secret with a shadow stub when the card reports the same
@@ -187,32 +162,37 @@ repo configures.
 Superseded on-card public keys stay in the keyring and stay published. They are what
 verifies every commit signed before they were replaced.
 
-## Touch policy: `cached`
+## Touch policy: `off`
 
-Without a touch policy, anything on the machine can sign silently for as long as the key
-is plugged in and the passphrase is cached. The touch is enforced by the chip, so nothing
-on the host can cache, replay or skip it.
+A touch is a presence check and nothing else. The chip receives a hash and cannot display
+what it represents, so it confirms a person was at the desk, never what they agreed to.
 
 | Policy | Behaviour | Reversible |
 |---|---|---|
 | `off` | No touch required | Yes, with the admin passphrase |
 | `on` | Every signature | Yes, with the admin passphrase |
 | `cached` | One touch covers 15 seconds | Yes, with the admin passphrase |
-| `fixed` | Every signature, permanently | No. Only by wiping the application and the key with it |
+| `fixed` | As `on`, permanently | No. Only by wiping the application and the key with it |
+| `cached-fixed` | As `cached`, permanently | No. Same as `fixed` |
 
-**Why `cached` rather than `on`.** A touch proves presence, not consent. The chip
-receives a hash and cannot display what it represents, so there is nothing to inspect and
-nothing to approve; you feel a blink and press a finger. Malware timed to a rebase gets
-its signature under either policy, because you are touching anyway and cannot tell the
-difference. So `on` buys a shorter window in which you equally cannot see what is being
-signed, and costs a touch per commit. Interactive rebases, `git-catchup` and `git-spread`
-make that a weekly tax for no gain.
+The policy is set per key slot, so `sig` governs commits and `dec`, `aut` and `att` are
+independent of it.
 
-**What the touch actually defends** is the key left in the port while nobody is there.
-`cached` and `on` are identical for that, and unplugging the key handles it better than
-either.
+**Why `off`.** FIDO2 requires a touch of its own and has no setting to change that. With
+the OpenPGP touch on as well, every blink looks identical and nothing on the key says
+whether it is a commit or a login. Commits are frequent, so most blinks would be commits,
+and touching without looking becomes the habit. That habit carries to the FIDO2 blinks,
+which are the ones guarding access to accounts.
 
-**Never `fixed`.** It behaves as `on` and removes the ability to change your mind.
+**What separates `on` from `cached`** is how often you have to be there, not what being
+there proves. `on` is a touch per signature. `cached` covers fifteen seconds after one, so
+a twelve-commit rebase is one touch rather than twelve, and `git-catchup` and `git-spread`
+are one rather than several. Both attest the same thing about the same signature.
+
+**Presence is controlled by unplugging the key.** Nothing signs while it is out of the
+port, which is the property the touch offered, without a blink per commit.
+
+**Never `fixed` or `cached-fixed`.** Both remove the ability to change your mind.
 
 ## Firmware is permanent
 
@@ -223,10 +203,10 @@ EUCLEAK (2024) was fixed in 5.7, and Yubico ran a replacement programme for ROCA
 YubiKey 4.
 
 So the firmware version is a permanent property of the physical key, and the newest
-available is the right default for a device held for years. A, B and C are 5.8; 5.7
-is the floor, being where EUCLEAK was fixed. Nothing in 5.8 is a security fix. Ordering
-direct from Yubico is what makes the version knowable, since it is stated at the point of
-sale and appears nowhere on the packaging or the SKU.
+available is the right default for a device held for years. A, B and C are 5.8; 5.7 is the
+floor, being where EUCLEAK was fixed. Ordering direct from Yubico is what makes the
+version knowable, since it is stated at the point of sale and appears nowhere on the
+packaging or the SKU.
 
 ## Passphrases
 
@@ -323,16 +303,17 @@ copying afterwards, which is why OATH has no archive copy.
 
 ## Bitwarden
 
-Five accounts, one per context, for separate logins rather than secrecy. **Families**
-(6 seats) rather than five Premium accounts, on cost.
+Five accounts, one per context, for separate logins rather than secrecy. All free:
+nothing used here needs a paid tier.
 
-Hardware-key 2FA is a paid feature at Bitwarden, Dashlane, Keeper and LastPass, and
-included at every tier at 1Password. The gate is commercial, not technical.
+FIDO2 WebAuthn two-step login is free on Bitwarden. YubiKey OTP and Duo are the two
+methods that need Premium, and OTP is the one ruled out below for validating against
+Yubico's servers. See `https://bitwarden.com/help/setup-two-step-login/`.
 
-**The accounts stay cryptographically independent.** Account recovery, where a member's
-encryption key is escrowed against the organization's public key so an admin can reset
-it, is Enterprise-only. Families has no admin path into a member vault.
-See `https://bitwarden.com/help/account-recovery/`.
+**Families would not cost the accounts their independence.** Account recovery, where a
+member's encryption key is escrowed against the organization's public key so an admin can
+reset it, is Enterprise-only, so a Families organisation has no admin path into a member
+vault. See `https://bitwarden.com/help/account-recovery/`.
 
 Use **FIDO2 WebAuthn**, not the YubiKey OTP option: OTP validates against Yubico's
 servers, WebAuthn stays between the browser and the key.
@@ -358,11 +339,8 @@ any daily machine and written to all three cards in one go.
 Everything needing the primary key happens then, because reaching it again is expensive:
 the five UIDs, the revocation certificate, and the subkeys on every card.
 
-Nothing else has to. Touch policy, passphrases and the certificate slot below all work on
-any machine with the card in hand.
-
-A slot's algorithm is set before a key goes into it, and setting it wipes whatever the
-slot held, including the touch policy. So the touch policy is set afterwards, per card.
+Nothing else has to. Passphrases and the certificate slot below work on any machine with
+the card in hand.
 
 **4. Write the public key onto each card.** A card holds the private key, and the
 public key only if it is put there:
@@ -390,10 +368,15 @@ transfers immediately before it have already authenticated the card.
 One keyblock goes in, carrying the primary key, all three subkeys and every UID, so the
 slot holds the whole key rather than one key's public half.
 
-**5. Publish the public key.** One GitHub account covers both `github.com/shellicar`
-and the `Hellicar-Solutions` organisation, so it takes a single export carrying those
-two UIDs. The three client UIDs are exported nowhere, which achieves the separation
-more completely than filtering per platform would.
+**5. Publish the public key.** The UIDs are filtered at export, so what a platform
+receives carries only the addresses relevant to it. Not for secrecy: nothing in a UID is
+secret, and the name and address are already plaintext in every commit object. It keeps
+per-platform disclosure a live decision rather than a consequence of having published
+once. UIDs are not on the card at all, so none of this touches the hardware.
+
+One GitHub account covers both `github.com/shellicar` and the `Hellicar-Solutions`
+organisation, so it takes a single export carrying those two UIDs. The three client UIDs
+are exported nowhere.
 
 Publishing is not what makes a signature worth having. The signature lives in the
 commit object and is verified by tooling, so a platform that displays no badge changes
@@ -427,27 +410,6 @@ enabled. Walking a hundred services twice is the outcome to avoid.
 The order matters: C has to be carrying the everyday credentials before B is sealed, or
 there is a window with only one key holding them.
 
-## GnuPG is built from source
-
-Not from Homebrew. `setup/macos/build-gnupg.sh` builds the tag in `patches/gnupg.version`
-and stages the binaries into the repo, so `install.sh` links them into `~/bin` and
-`~/.local/gnupg`. Dry run by default; `--apply` builds.
-
-**Because one file is patched.** Stock `scdaemon` clears the card's verified state when a
-touch times out, so the passphrase is wanted again on the next attempt. The touch was
-missed rather than refused, and nothing about the passphrase was disproved by missing it.
-Under the `cached` policy above a missed blink is routine, so that cost lands often.
-
-`patches/gnupg-keep-chv-on-timeout.patch` puts that behaviour behind a new `scdaemon`
-option, `keep-chv-on-timeout`, guarding the three paths that would otherwise clear the
-state: signing, authentication and decryption. `gpg-setup.sh --configure --hardware`
-writes the option into `scdaemon.conf`, before the card is read, because reading the card
-starts `scdaemon` and reloading the agent afterwards does not restart it.
-
-**Which is why GnuPG is not in the Brewfile.** A package manager that always installs the
-latest cannot hold a patched component at a fixed version, so the whole install is owned
-by the build script and every component stays on one version.
-
 ## Operating notes
 
 **One key plugged in at a time.** `scdaemon` binds to a single card, so two present at
@@ -467,10 +429,6 @@ passphrase per signature and the agent cache stops mattering entirely.
 **There is no infinite cache value.** Both TTLs are plain seconds and `0` means no
 caching at all, which is the opposite of what it reads as. 400 days stands in for
 forever, since the agent dies at logout long before it elapses.
-
-**The touch is easy to miss.** After the passphrase prompt closes, the contact blinks and
-waits about fifteen seconds. No touch reads as `gpg: signing failed: Timeout`, which does
-not mention touching at all.
 
 **`gpg.conf` carries `no-tty`**, which is right for signing through pinentry and blocks
 `--card-edit` outright. `--no-options` skips the config for one invocation.
