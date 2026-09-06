@@ -156,6 +156,15 @@ back to the `koalaman/shellcheck` container when the binary is absent.
 The scripts are POSIX `sh`, and the environments span BSD and GNU coreutils, so a
 GNU-only flag to `sed` or `date` passes on Linux and fails on the Mac.
 
+`tests/integration/run.sh` is the other half, and is not part of `./test.sh`: it
+needs docker and takes about ten seconds. It builds real repositories in a
+container and runs the commands with `--apply`, because deciding and doing are
+different code and the pure suite can only reach the first. It covers `run_plan`,
+`run_update`, `remove_branch` against a real worktree, a real rescue rebase, and
+the force-push. The container is what makes running it safe: it deletes branches
+and worktrees for real, and none of them are yours. It skips with a message when
+docker is absent.
+
 A case in `tests/cases/` builds no repository. It sources the library, replaces
 `git` with a shell function backed by a fake commit graph, and asserts on what
 came back. Two rules earn their keep: assert on state rather than on which
