@@ -160,7 +160,7 @@ addresses are published nowhere.
 one `signingkey` across all five `.gitconfig.d/` files, one public key to publish, and
 any card in the port signs.
 
-The cost is that private key material exists off a card at all, so there is now something
+The cost is that private key material exists off a card at all, so there is something
 to back up and something to lose. It is never on a daily machine, and the backup is
 encrypted and offline.
 
@@ -171,17 +171,18 @@ and a workflow checking fingerprints. Revocation reaches all of them the same af
 so a standing appointment to renew buys nothing.
 
 **One keygrip, one stub, one serial.** All three cards hold the same key, so gpg keeps a
-single stub for it and that stub records whichever card it last saw. Rebinding it to the
-card actually inserted is `gpg-connect-agent "scd serialno" "learn --force" /bye`.
+single stub for it and that stub records whichever card it last saw. Pinentry names that
+serial when it asks for the passphrase.
 
-What is not yet known is when that is needed. Signing after a card swap has been observed
-to work with the stub still bound to the previous serial, so gpg is more tolerant here
-than expected. `gpg-wrapper` does not run the relearn: it rings the terminal and retries
-once, for the touch, and nothing more.
+**The named serial is not a requirement.** Any of the three signs, whichever card the stub
+happens to be bound to, so the serial in the dialog is a label rather than a demand.
+Nothing has to be rebound after a swap, and `gpg-wrapper` accordingly does not: it rings
+the terminal and retries once, for the touch, and nothing more.
 
-`learn --force` replaces an on-disk secret with a shadow stub when the card reports the
-same keygrip. That is why it belongs only where the secret is never on disk, which is
-every machine this repo configures.
+Should a stub ever need rebinding, `gpg-connect-agent "scd serialno" "learn --force" /bye`
+does it. It replaces an on-disk secret with a shadow stub when the card reports the same
+keygrip, so it belongs only where the secret is never on disk, which is every machine this
+repo configures.
 
 Superseded on-card public keys stay in the keyring and stay published. They are what
 verifies every commit signed before they were replaced.
@@ -222,7 +223,7 @@ EUCLEAK (2024) was fixed in 5.7, and Yubico ran a replacement programme for ROCA
 YubiKey 4.
 
 So the firmware version is a permanent property of the physical key, and the newest
-available is the right default for a device held for years. 5.8 at time of purchase; 5.7
+available is the right default for a device held for years. A, B and C are 5.8; 5.7
 is the floor, being where EUCLEAK was fixed. Nothing in 5.8 is a security fix. Ordering
 direct from Yubico is what makes the version knowable, since it is stated at the point of
 sale and appears nowhere on the packaging or the SKU.
@@ -406,9 +407,8 @@ they were replaced.
 
 **6. `signingkey` moves into `.gitconfig.d/common`.** One identity means one value, and
 repeating it across five files is five places to get wrong. The per-org files keep
-`user.email` and their `[cleanup]` block, so `includeIf` still selects the identity per
-remote, which is the thing it is for. Signing is no longer per-org, because it is no
-longer per-key.
+`user.email` and their `[cleanup]` block, so `includeIf` selects the identity per remote,
+which is the thing it is for. Signing is not per-org, because it is not per-key.
 
 **7. Bitwarden.** Create the Families organization, bring the five accounts in, enable
 WebAuthn on each with A and B, and print every recovery code.
@@ -426,6 +426,27 @@ enabled. Walking a hundred services twice is the outcome to avoid.
 
 The order matters: C has to be carrying the everyday credentials before B is sealed, or
 there is a window with only one key holding them.
+
+## GnuPG is built from source
+
+Not from Homebrew. `setup/macos/build-gnupg.sh` builds the tag in `patches/gnupg.version`
+and stages the binaries into the repo, so `install.sh` links them into `~/bin` and
+`~/.local/gnupg`. Dry run by default; `--apply` builds.
+
+**Because one file is patched.** Stock `scdaemon` clears the card's verified state when a
+touch times out, so the passphrase is wanted again on the next attempt. The touch was
+missed rather than refused, and nothing about the passphrase was disproved by missing it.
+Under the `cached` policy above a missed blink is routine, so that cost lands often.
+
+`patches/gnupg-keep-chv-on-timeout.patch` puts that behaviour behind a new `scdaemon`
+option, `keep-chv-on-timeout`, guarding the three paths that would otherwise clear the
+state: signing, authentication and decryption. `gpg-setup.sh --configure --hardware`
+writes the option into `scdaemon.conf`, before the card is read, because reading the card
+starts `scdaemon` and reloading the agent afterwards does not restart it.
+
+**Which is why GnuPG is not in the Brewfile.** A package manager that always installs the
+latest cannot hold a patched component at a fixed version, so the whole install is owned
+by the build script and every component stays on one version.
 
 ## Operating notes
 
