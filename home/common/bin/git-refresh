@@ -145,6 +145,8 @@ step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 # The only thing derive may not know yet is which branches you have picked to
 # remove, so anything that depends on that is left as raw material: the refs
 # holding a detached commit are listed here and filtered there.
+TRUNK_NOTE=$(local_trunk_ahead)
+
 step 'reading branches and worktrees ...'
 
 # name, worktree, class, ahead, why, behind, block, update action, its detail
@@ -460,6 +462,15 @@ $ROWS
 EOF
 }
 
+# The trunk being out of sync is not an operation, so it has no row and no note:
+# with nothing built on those commits there is nothing to hang it on. Both
+# commands this replaces report it, and a command that says "nothing to do"
+# while main carries an unpushed commit is worse than either.
+say_trunk_note() {
+  [ -n "$TRUNK_NOTE" ] || return 0
+  say "\n${RED}${WARN}${RESET}$TRUNK_NOTE"
+}
+
 say_noted() {
   [ -z "$NOTED" ] && return 0
   printf '\n%bLooked at, nothing on offer%b\n' "$BOLD" "$RESET"
@@ -483,12 +494,14 @@ derive
 # rows is a blank screen you cannot act on or learn anything from. Say what was
 # looked at and stop.
 if [ "$COUNT" -eq 0 ]; then
+  say_trunk_note
   say_noted
   printf '\n%bnothing to do%b\n' "$DIM" "$RESET"
   exit 0
 fi
 
 if [ "$plan_only" = true ]; then
+  say_trunk_note
   say_selected 'Would run'
   say_noted
   printf '\n%bplan only, nothing was touched%b\n' "$DIM" "$RESET"
@@ -524,6 +537,8 @@ done
 
 restore
 trap - EXIT INT TERM
+
+say_trunk_note
 
 # The list of what was looked at and passed over only exists on the alternate
 # screen, which has just gone. Print it here too, or an interactive run never
