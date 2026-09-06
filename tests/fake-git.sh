@@ -4,8 +4,7 @@
 # It models parents, not just refs, because the questions that decide whether
 # work gets destroyed are reachability questions. A fake that answered
 # rev-list and merge-base from canned strings lets a test encode a repository
-# state git cannot produce, and one written that way passed while the behaviour
-# it claimed to cover was broken.
+# state git cannot produce, which passes whatever the behaviour is.
 #
 # Refs are held under their full names, and a short name is resolved the way git
 # resolves one, tags before heads.

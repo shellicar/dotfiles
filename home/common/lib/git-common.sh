@@ -403,9 +403,8 @@ build_shared_main_index() {
 #
 # Anything short of an exact match falls through. A merged PR does NOT mean the
 # branch is in main: commit to it afterwards and the extra work exists nowhere
-# else, while the PR still says merged. An earlier version trusted the PR in
-# that case and deleted a branch, its worktree, and the one commit that had been
-# added after the merge. The content walk below is what covers the difference.
+# else, while the PR still says merged. The content walk below is what covers
+# the difference.
 commits_not_in_main() (
   # Two arguments, because they answer different questions. rev is what git is
   # asked about, and a detached worktree's head comes through here as well as a
@@ -629,10 +628,8 @@ EOF
 
 # What every command must report before it says anything of its own. Each
 # command decides how to lay out its own targets, but the state of the
-# repository is not the command's to choose: leaving it out is how git refresh
-# came to say "nothing to do" while main carried an unpushed commit, and how
-# catchup and spread each missed a wording the others had. Add an
-# environment-level warning here and every command gains it at once.
+# repository is not the command's to choose. Add an environment-level warning
+# here and every command gains it at once, rather than three of four opting in.
 say_environment() {
   note=$(local_trunk_ahead)
   [ -n "$note" ] || return 0
@@ -672,8 +669,7 @@ live_refs() {
   git worktree list --porcelain | sed -n 's/^branch //p'
   # The trunk, always, and not because it might be checked out: it is the branch
   # every other verdict is measured against, so replaying its commits under new
-  # ids is never right. Left to the worktree test it was protected only while you
-  # happened to be standing on it, which is the opposite of when you need it.
+  # ids is never right, whether or not a worktree happens to have it checked out.
   printf 'refs/heads/%s\n' "$MAIN"
 }
 

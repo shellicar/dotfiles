@@ -13,9 +13,9 @@ describe "a branch tangled with a published branch past main is left alone"
 # force-push would publish the copies, so top's pull request would show base's
 # work as its own. That harm needs base to be published, which it is here.
 #
-# Built as a graph, not as canned answers. An earlier version of this case
-# stubbed the reachability questions, and the state it described was one git
-# cannot produce, so it passed while the behaviour was broken.
+# Built as a graph, not as canned answers: stubbing the reachability questions
+# lets the case describe a state git cannot produce, which passes whatever the
+# behaviour is.
 #
 #   main   A - B - C
 #   base        \ X1 - X2

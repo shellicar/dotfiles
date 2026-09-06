@@ -95,10 +95,9 @@ if git merge-base --is-ancestor "$target" HEAD; then
   exit 0
 fi
 
-# One decision, made in one place. This used to call branch_merged_main,
-# fork_point and branch_cut_from itself and write its own sentence for each
-# outcome, which meant every wording change had to be made here as well as in
-# update_verdict, and twice it was not.
+# One decision, made in one place. Calling branch_merged_main, fork_point and
+# branch_cut_from here as well would mean writing a sentence for each outcome
+# that has to stay in step with update_verdict's.
 verdict=$(update_verdict . "$branch")
 IFS="$TAB" read -r action detail <<EOF
 $verdict

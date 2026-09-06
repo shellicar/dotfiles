@@ -130,7 +130,7 @@ EOF
   if [ "$action" = none ]; then
     # No advice: the detail says what the state is, and the resolutions differ.
     # Rebasing it yourself is right for a tangle and wrong for the trunk's
-    # unpushed commits, which is the one this used to recommend it for.
+    # unpushed commits.
     printf '⛔ %s [%s]: %s, skipping\n' "$wt" "$branch" "$detail"
     continue
   fi
