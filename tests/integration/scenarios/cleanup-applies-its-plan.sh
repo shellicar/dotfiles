@@ -6,6 +6,8 @@
 # decide; only this proves that carrying it out does what the decision said.
 set -eu
 
+# The path exists only inside the container, where run.sh mounts it.
+# shellcheck source=../lib.sh
 . /scenario/lib.sh
 
 new_repo

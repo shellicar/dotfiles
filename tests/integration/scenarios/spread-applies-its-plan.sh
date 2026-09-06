@@ -4,6 +4,8 @@
 # thing any of these commands do.
 set -eu
 
+# The path exists only inside the container, where run.sh mounts it.
+# shellcheck source=../lib.sh
 . /scenario/lib.sh
 
 new_repo
