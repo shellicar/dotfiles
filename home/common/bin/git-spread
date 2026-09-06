@@ -96,12 +96,20 @@ while IFS= read -r wt; do
 
   if [ "$behind" -eq 0 ]; then
     # Nothing to bring in, but not necessarily nothing to say: a branch ahead of
-    # its remote has work that is only here, and for the trunk that is the
-    # accidental commit to main, where every other verdict is beside the point.
-    if [ "$ahead" -eq 0 ]; then
+    # ITS OWN remote has work that exists only here, and for the trunk that is
+    # the accidental commit to main. Counted against the upstream, not against
+    # the trunk: measured against the trunk, a fully pushed feature branch reads
+    # as unpushed. With no upstream at all, none of it is published, and that is
+    # what ahead already counts.
+    if [ -n "$upstream" ]; then
+      unpushed=$(git -C "$wt" rev-list --count "$upstream..HEAD")
+    else
+      unpushed=$ahead
+    fi
+    if [ "$unpushed" -eq 0 ]; then
       printf '✅ %s [%s]: up to date with origin/%s\n' "$wt" "$branch" "$MAIN"
     else
-      printf '✅ %s [%s]: up to date with origin/%s, ahead %s not pushed\n' "$wt" "$branch" "$MAIN" "$ahead"
+      printf '✅ %s [%s]: up to date with origin/%s, %s not pushed\n' "$wt" "$branch" "$MAIN" "$unpushed"
     fi
     continue
   fi

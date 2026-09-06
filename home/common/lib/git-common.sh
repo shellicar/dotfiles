@@ -760,6 +760,11 @@ update_verdict() (
     { printf 'ff\t-\n'; return 0; }
   base=$(fork_point "$b") || base=''
   parent=$(branch_cut_from "$b" "$base")
+  # The trunk itself is live because it is checked out here. Its unpushed commits
+  # are the accidental commit to main, and naming them is more use than the
+  # general wording, which reads as "shares history with main past main".
+  [ "$parent" = "$MAIN" ] &&
+    { printf 'none\ton unpushed commits of local %s\n' "$MAIN"; return 0; }
   [ -n "$parent" ] && { printf 'none\tshares history with %s past %s\n' "$parent" "$MAIN"; return 0; }
   # Only reachable when the branch and the trunk share no history at all.
   [ -z "$base" ] && { printf 'none\tshares no history with %s\n' "$MAIN"; return 0; }
