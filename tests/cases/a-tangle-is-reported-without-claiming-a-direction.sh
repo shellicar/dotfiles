@@ -28,7 +28,9 @@ commit P1 L1
 ref_set refs/heads/main C
 ref_set refs/remotes/origin/HEAD C
 ref_set refs/heads/lower L2
+ref_set refs/remotes/origin/lower L2
 ref_set refs/heads/upper P1
+ref_set refs/remotes/origin/upper P1
 
 guard_path
 # shellcheck source=../../home/common/lib/git-common.sh

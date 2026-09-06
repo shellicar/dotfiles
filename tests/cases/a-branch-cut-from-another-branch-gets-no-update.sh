@@ -7,11 +7,11 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../fake-git.sh
 . "$TESTS/fake-git.sh"
 
-describe "a branch tangled with another past main is left alone and names it"
+describe "a branch tangled with a published branch past main is left alone"
 
-# Neither rebase is right here: a plain one copies the parent's commits onto
-# this branch and force-pushes them, a fork-point one drops them and leaves it
-# built on nothing.
+# Rebasing feature/top would replay feature/base's commits under new ids and the
+# force-push would publish the copies, so top's pull request would show base's
+# work as its own. That harm needs base to be published, which it is here.
 #
 # Built as a graph, not as canned answers. An earlier version of this case
 # stubbed the reachability questions, and the state it described was one git
@@ -30,6 +30,7 @@ commit Y1 X2
 ref_set refs/heads/main C
 ref_set refs/remotes/origin/HEAD C
 ref_set refs/heads/feature/base X2
+ref_set refs/remotes/origin/feature/base X2
 ref_set refs/heads/feature/top Y1
 
 guard_path

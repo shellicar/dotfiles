@@ -153,18 +153,29 @@ git_says() (
       return 0 ;;
     "for-each-ref --format=%(refname) refs/heads refs/remotes")
       cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' ;;
-    "for-each-ref --format=all %(refname) refs/heads refs/remotes")
-      cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' | sed 's/^/all /' ;;
-    "for-each-ref --contains "*" --format=built %(refname) "*)
+    "for-each-ref --format=all %(refname) refs/remotes")
+      cut -f1 "$REFS" | grep -E '^refs/remotes/' | sed 's/^/all /' ;;
+    "for-each-ref --contains "*" --format=built %(refname) refs/remotes")
       sha=$(commit_of "$(nth_word 3 "$@")") || return 1
-      cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' | while read -r r; do
+      cut -f1 "$REFS" | grep -E '^refs/remotes/' | while read -r r; do
         reaches "$(ref_of "$r")" "$sha" && printf 'built %s\n' "$r"
       done ;;
     "for-each-ref --contains "*)
       sha=$(commit_of "$(nth_word 3 "$@")") || return 1
       short=no
       case "$*" in *'refname:short'*) short=yes ;; esac
+      # Honour the namespaces asked for. Returning every ref regardless let a
+      # test pass over a change that narrowed them.
+      ns=''
+      case "$*" in *' refs/heads'*) ns="$ns refs/heads/" ;; esac
+      case "$*" in *' refs/remotes'*) ns="$ns refs/remotes/" ;; esac
+      [ -n "$ns" ] || ns='refs/'
       cut -f1 "$REFS" | while read -r r; do
+        in_ns=no
+        for p in $ns; do
+          case "$r" in "$p"*) in_ns=yes ;; esac
+        done
+        [ "$in_ns" = yes ] || continue
         reaches "$(ref_of "$r")" "$sha" || continue
         if [ "$short" = yes ]; then
           n=${r#refs/heads/}; n=${n#refs/remotes/}; printf '%s\n' "$n"

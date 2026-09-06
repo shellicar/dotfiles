@@ -628,7 +628,7 @@ EOF
 )
 
 # Where the branch was cut: the parent of the oldest commit on it that no other
-# ref can reach. Empty when the branch has nothing of its own.
+# PUBLISHED branch can reach. Empty when the branch has nothing of its own.
 #
 # This is what a rebase has to be given. Plain 'git rebase origin/$MAIN' replays
 # everything back to the merge-base, which for a branch cut from another branch
@@ -637,23 +637,27 @@ EOF
 fork_point() (
   b=$1
   tip=$(git rev-parse --verify --quiet "refs/heads/$b") || return 1
+  # Published branches only. A local-only branch is almost always the leftover of
+  # a rebranch, and excluding it hides commits that are this branch's own work:
+  # commit on old, switch to new, commit again, and new's first commit would be
+  # dropped from its own rebase because old still points at it.
+  #
   # A ref that already contains this branch's tip was built ON it, so it says
-  # nothing about where this branch was cut and must not hide the branch's own
-  # commits. Excluding it anyway is what made the bottom of a stack look like it
-  # had no commits, and excluding everything made the middle of one look like it
-  # was cut from main and replay the branch below it.
+  # nothing about where this branch was cut and must not hide its commits either.
+  # Excluding those made the bottom of a stack look like it had no commits, and
+  # excluding everything made the middle of one replay the branch below it.
   #
   # Two git calls and one pass, not one call per ref: --contains answers the same
   # question for every ref at once, and asking per ref cost a second and a half
-  # on a repository with four hundred of them.
-  # Both lists come down one stream, tagged by the format string, because a -v
-  # value containing newlines is a GNU extension and BSD awk rejects it.
+  # on a repository with four hundred of them. Both lists come down one stream,
+  # tagged by the format string, because a -v value containing newlines is a GNU
+  # extension and BSD awk rejects it.
   others=$(
-    { git for-each-ref --contains "$tip" --format='built %(refname)' refs/heads refs/remotes
-      git for-each-ref --format='all %(refname)' refs/heads refs/remotes
-    } | awk -v self="refs/heads/$b" -v remote="refs/remotes/origin/$b" '
+    { git for-each-ref --contains "$tip" --format='built %(refname)' refs/remotes
+      git for-each-ref --format='all %(refname)' refs/remotes
+    } | awk -v remote="refs/remotes/origin/$b" '
         $1 == "built" { on[$2] = 1; next }
-        $2 != self && $2 != remote && !($2 in on) { print $2 }
+        $2 != remote && !($2 in on) { print $2 }
       '
   )
   # shellcheck disable=SC2086  # deliberate split: --not takes many refs
@@ -662,29 +666,35 @@ fork_point() (
   git rev-parse --verify --quiet "$oldest^"
 )
 
-# A branch this one shares history with past main, or empty for the normal case
-# of one cut from main.
+# A PUBLISHED branch this one shares history with past main, or empty.
+#
+# Rebasing this branch never touches the other one. What it does is replay the
+# other's commits under new ids, and the force-push then publishes the copies, so
+# the pull request for this branch shows the other branch's work as its own. That
+# is the whole of the harm, and it only exists if the other branch is published.
+#
+# A local-only branch is almost always the leftover of a rebranch: commit on a,
+# switch to b, commit again, and a sits there checked out nowhere. Refusing on
+# that is refusing on the ordinary way of working, and nothing is at risk because
+# replaying commits nobody else has published costs nothing.
 #
 # It does NOT say which was cut from which, and cannot: when a branch is cut from
 # an earlier commit of another, the fork point sits on both and each names the
-# other. Only one of those readings is true and nothing here can tell which. The
-# caller refuses either way, which is right either way, so it reports the tangle
-# and not a direction. One cheap test does the discriminating: if the fork parent is on main
+# other. Only one reading is true and nothing here can tell which, so it reports
+# the tangle and not a direction.
+#
+# One cheap test does the discriminating first: if the fork parent is on main
 # there is nothing to look at, and a ref lookup on it would otherwise match every
 # branch cut from main at or after that commit, which is all of them.
-#
-# Neither rebase is right for a branch cut from another branch. Plain rebase
-# duplicates the parent's commits onto it; a fork-point rebase drops them and
-# leaves it built on nothing. So the caller offers no update at all and names the
-# branch it is tangled with, for you to look at.
 branch_cut_from() (
   b=$1 base=$2
   [ -n "$base" ] || return 0
   git merge-base --is-ancestor "$base" "$MAIN_REF" 2>/dev/null && return 0
-  git for-each-ref --contains "$base" --format='%(refname:short)' refs/heads refs/remotes 2>/dev/null |
+  git for-each-ref --contains "$base" --format='%(refname:short)' refs/remotes 2>/dev/null |
     while read -r r; do
       n=${r#origin/}
       [ "$n" = "$b" ] && continue
+      [ "$n" = HEAD ] && continue
       printf '%s\n' "$n"
       break
     done
