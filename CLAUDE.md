@@ -42,10 +42,11 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 - `get-os.sh` — OS detection oracle
 - `home/common/bin/` — executables linked per-file into `~/bin`, which `path.sh`
   prepends to `PATH` (see Commands)
-- `home/common/lib/` — sourced by the git commands, linked into `~/lib`. Holds
-  every decision they make: which branches are merged, what a detached worktree
-  is, how to bring the trunk in. A command in `bin/` is argument parsing and a
-  call to `main`.
+- `home/common/lib/` — sourced by the commands in `bin/`, linked into `~/lib`.
+  `git-common.sh` holds every decision the git commands make: which branches are
+  merged, what a detached worktree is, how to bring the trunk in, so a command
+  in `bin/` is argument parsing and a call to `main`. `yubikeys.sh` holds the
+  three serials.
 - `tests/` — behavioural tests for the above. No repository is built: `git` is a
   shell function backed by a fake commit graph, so a case states a situation
   directly instead of committing its way to one.
@@ -148,7 +149,7 @@ FAILED`, and that line is what to read. The bar for a change is no new finding
 *class*, not a clean exit.
 
 It exits 64 when it cannot lint at all —
-never 0 for "did not actually run", which is the bug it used to have. Targets are
+never 0 for "did not actually run". Targets are
 found with `file`, not by extension, because most scripts here are commands on
 `PATH` with no extension. Nothing in `setup/` installs shellcheck, so it falls
 back to the `koalaman/shellcheck` container when the binary is absent.

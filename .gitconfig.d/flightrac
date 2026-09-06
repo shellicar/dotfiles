@@ -1,5 +1,6 @@
 [user]
   email = stephen.hellicar@flightrac.com
-  signingkey = 50267828F195ACBA6375FA271E41B2BA5D1C3CA2
+  ; moved to common: one key now serves every identity
+  ; signingkey = 50267828F195ACBA6375FA271E41B2BA5D1C3CA2
 [cleanup]
 	subscription = df6bdcee-4c42-4ff0-8ab6-265b0aa2efc8

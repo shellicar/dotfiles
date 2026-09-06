@@ -1,5 +1,6 @@
 [user]
   email = hellicars@eagersa.com.au
-	signingkey = 50267828F195ACBA6375FA271E41B2BA5D1C3CA2
+	; moved to common: one key now serves every identity
+	; signingkey = 50267828F195ACBA6375FA271E41B2BA5D1C3CA2
 [cleanup]
 	subscription = 355daa83-8aa8-474b-88e4-124d741a706b

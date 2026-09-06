@@ -57,6 +57,9 @@
 	defaultBranch = main
 [user]
 	name = Stephen Hellicar
+	; one key across every identity, so it belongs here rather than repeated in each
+	; includeIf file. The email is what differs per org, not the key.
+	signingkey = B92C14F32704628ADC98CA92A9B6327CEDF47732
 	; refuse to fall back to a guessed or default identity — the email must come from one
 	; of the includeIf files below, so an unrecognised remote fails loudly instead of
 	; committing under the wrong name

@@ -1,14 +1,19 @@
 #!/bin/sh
 # Name the YubiKey currently plugged in.
 #
-# The two keys are physically identical and hold different GPG keys, so acting
-# on the wrong one wastes attempts against a counter that erases credentials.
-# scdaemon also binds to a single card, so more than one present is its own
-# failure and is reported as such.
+# All three are physically identical and now hold the same GPG key, so nothing on the
+# outside or in a signature tells them apart. The serial does, and it is why the wrong
+# one in the port is otherwise invisible.
+#
+# scdaemon binds to a single card, so more than one present is its own failure and is
+# reported as such.
 set -e
 
-serial_a=38532913
-serial_b=38532914
+LIB=$HOME/lib/yubikeys.sh
+[ -f "$LIB" ] || LIB=$(cd "$(dirname "$0")/../lib" && pwd)/yubikeys.sh
+[ -f "$LIB" ] || { echo "yubikeys.sh not found" >&2; exit 1; }
+# shellcheck source=/dev/null
+. "$LIB"
 
 serials=$(ykman list --serials 2>/dev/null || true)
 
@@ -22,9 +27,10 @@ status=0
 printf '%s\n' "$serials" | while read -r serial; do
   [ -n "$serial" ] || continue
   case "$serial" in
-    "$serial_a") echo "Key A ($serial)" ;;
-    "$serial_b") echo "Key B ($serial)" ;;
-    *)           echo "Unknown key ($serial)" ;;
+    "$YUBIKEY_A_SERIAL") echo "Key A ($serial)" ;;
+    "$YUBIKEY_B_SERIAL") echo "Key B ($serial)" ;;
+    "$YUBIKEY_C_SERIAL") echo "Key C ($serial)" ;;
+    *)                   echo "Unknown key ($serial)" ;;
   esac
 done
 
@@ -36,7 +42,7 @@ if [ "$count" -gt 1 ]; then
 fi
 
 case "$serials" in
-  *"$serial_a"*|*"$serial_b"*) ;;
+  *"$YUBIKEY_A_SERIAL"*|*"$YUBIKEY_B_SERIAL"*|*"$YUBIKEY_C_SERIAL"*) ;;
   *) status=1 ;;
 esac
 
