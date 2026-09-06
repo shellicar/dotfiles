@@ -20,6 +20,7 @@ DIR=$(cd "$(dirname "$0")" && pwd)
 TOOL='git catchup'
 VERBOSE=false
 BASE_OVERRIDE=''
+TAB=$(printf '\t')
 # SCRIPTDIR makes shellcheck resolve the path below against this file rather
 # than against whatever directory it happens to be run from. A directive applies
 # to the command after it, so both must sit against the source line itself.
@@ -92,41 +93,46 @@ if git merge-base --is-ancestor "$target" HEAD; then
   exit 0
 fi
 
-merged_at=$(branch_merged_main .) || merged_at=''
+# One decision, made in one place. This used to call branch_merged_main,
+# fork_point and branch_cut_from itself and write its own sentence for each
+# outcome, which meant every wording change had to be made here as well as in
+# update_verdict, and twice it was not.
+verdict=$(update_verdict . "$branch")
+IFS="$TAB" read -r action detail <<EOF
+$verdict
+EOF
 
-if [ -n "$merged_at" ]; then
-  echo "plan: merge origin/$main into $branch and push"
-  echo "  branch      $branch at $local_head"
-  echo "  merging     origin/$main at $target"
-  echo "  prior merge $merged_at"
-  echo "  commits     $(git rev-list --count "HEAD..$target") to merge in"
+case "$action" in
+  none)
+    echo "$branch: $detail" >&2
+    exit 1 ;;
+  ff)
+    echo "$branch has nothing of its own; use git main, or git switch $main" >&2
+    exit 1 ;;
+  merge)
+    merged_at=$(branch_merged_main .)
+    echo "plan: merge origin/$main into $branch and push"
+    echo "  branch      $branch at $local_head"
+    echo "  merging     origin/$main at $target"
+    echo "  prior merge $merged_at"
+    echo "  commits     $(git rev-list --count "HEAD..$target") to merge in"
 
-  if [ "$apply" -eq 0 ]; then
-    echo "run: git-catchup --apply"
-    exit 0
-  fi
+    [ "$apply" -eq 0 ] && { echo "run: git-catchup --apply"; exit 0; }
 
-  # The branch name, not "$target": git builds the default merge message from
-  # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
-  # local and only moves on fetch, and this run fetched once above, so naming it
-  # cannot pick up a commit the plan did not print.
-  git merge --no-edit "$MAIN_REF" || exit 1
+    # The branch name, not "$target": git builds the default merge message from
+    # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
+    # local and only moves on fetch, and this run fetched once above, so naming
+    # it cannot pick up a commit the plan did not print.
+    git merge --no-edit "$MAIN_REF" || exit 1
 
-  # Nothing was rewritten, so the remote is still an ancestor: an ordinary push.
-  git push --quiet
-  echo "$branch merged origin/$main and pushed"
-  exit 0
-fi
+    # Nothing was rewritten, so the remote is still an ancestor: an ordinary push.
+    git push --quiet
+    echo "$branch merged origin/$main and pushed"
+    exit 0 ;;
+esac
 
-base=$(fork_point "$branch") || { echo "$branch has no commits of its own to replay" >&2; exit 1; }
-[ -n "$base" ] || { echo "cannot resolve the fork point of $branch" >&2; exit 1; }
+base=$detail
 git merge-base --is-ancestor "$base" HEAD || { echo "fork point $base is not an ancestor of $branch" >&2; exit 1; }
-
-# Cut from another branch rather than from main. A fork-point rebase would drop
-# the parent branch's commits and a plain one would duplicate them, so neither is
-# offered and you are told what it is tangled with.
-parent=$(branch_cut_from "$branch" "$base")
-[ -z "$parent" ] || { echo "$branch shares history with $parent past $main, so neither rebase is right here — sort them out by hand" >&2; exit 1; }
 
 echo "plan: rebase $branch onto origin/$main and force-push it"
 echo "  branch      $branch at $local_head"
