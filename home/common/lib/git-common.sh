@@ -634,13 +634,22 @@ EOF
 # everything back to the merge-base, which for a branch cut from another branch
 # is where THAT branch left main, so it replays the other branch's commits too
 # and force-pushes them back rewritten under new ids.
+# Refs whose commits must not be replayed under new ids: anything published, and
+# anything checked out in a worktree. Duplicates are harmless to every caller.
+live_refs() {
+  git for-each-ref --format='%(refname)' refs/remotes
+  git worktree list --porcelain | sed -n 's/^branch //p'
+}
+
 fork_point() (
   b=$1
   tip=$(git rev-parse --verify --quiet "refs/heads/$b") || return 1
-  # Published branches only. A local-only branch is almost always the leftover of
-  # a rebranch, and excluding it hides commits that are this branch's own work:
-  # commit on old, switch to new, commit again, and new's first commit would be
-  # dropped from its own rebase because old still points at it.
+  # Live branches only: published, or checked out in a worktree. A branch that is
+  # neither is the leftover of a rebranch, and excluding it hides commits that are
+  # this branch's own work: commit on old, switch to new, commit again, and new's
+  # first commit would be dropped from its own rebase because old still points at
+  # it. A local branch someone is working in is not a leftover, whether or not it
+  # has ever been pushed.
   #
   # A ref that already contains this branch's tip was built ON it, so it says
   # nothing about where this branch was cut and must not hide its commits either.
@@ -653,11 +662,11 @@ fork_point() (
   # tagged by the format string, because a -v value containing newlines is a GNU
   # extension and BSD awk rejects it.
   others=$(
-    { git for-each-ref --contains "$tip" --format='built %(refname)' refs/remotes
-      git for-each-ref --format='all %(refname)' refs/remotes
-    } | awk -v remote="refs/remotes/origin/$b" '
+    { git for-each-ref --contains "$tip" --format='built %(refname)' refs/heads refs/remotes
+      live_refs | sed 's/^/live /'
+    } | awk -v remote="refs/remotes/origin/$b" -v self="refs/heads/$b" '
         $1 == "built" { on[$2] = 1; next }
-        $2 != remote && !($2 in on) { print $2 }
+        $2 != remote && $2 != self && !($2 in on) { print $2 }
       '
   )
   # shellcheck disable=SC2086  # deliberate split: --not takes many refs
@@ -666,17 +675,17 @@ fork_point() (
   git rev-parse --verify --quiet "$oldest^"
 )
 
-# A PUBLISHED branch this one shares history with past main, or empty.
+# A LIVE branch this one shares history with past main, or empty.
 #
 # Rebasing this branch never touches the other one. What it does is replay the
-# other's commits under new ids, and the force-push then publishes the copies, so
-# the pull request for this branch shows the other branch's work as its own. That
-# is the whole of the harm, and it only exists if the other branch is published.
+# other's commits under new ids, and the force-push publishes the copies, so the
+# pull request for this branch shows the other branch's work as its own. That is
+# the whole of the harm, and it needs the other branch to be something someone is
+# still using: published, or checked out in a worktree.
 #
-# A local-only branch is almost always the leftover of a rebranch: commit on a,
-# switch to b, commit again, and a sits there checked out nowhere. Refusing on
-# that is refusing on the ordinary way of working, and nothing is at risk because
-# replaying commits nobody else has published costs nothing.
+# A branch that is neither is the leftover of a rebranch: commit on a, switch to
+# b, commit again, and a sits there checked out nowhere and never pushed.
+# Refusing on that is refusing on the ordinary way of working.
 #
 # It does NOT say which was cut from which, and cannot: when a branch is cut from
 # an earlier commit of another, the fork point sits on both and each names the
@@ -690,9 +699,14 @@ branch_cut_from() (
   b=$1 base=$2
   [ -n "$base" ] || return 0
   git merge-base --is-ancestor "$base" "$MAIN_REF" 2>/dev/null && return 0
-  git for-each-ref --contains "$base" --format='%(refname:short)' refs/remotes 2>/dev/null |
-    while read -r r; do
-      n=${r#origin/}
+  { git for-each-ref --contains "$base" --format='holds %(refname)' refs/heads refs/remotes
+    live_refs | sed 's/^/live /'
+  } | awk '
+      $1 == "live" { live[$2] = 1; next }
+      { holds[++n] = $2 }
+      END { for (i = 1; i <= n; i++) if (holds[i] in live) print holds[i] }
+    ' | while read -r r; do
+      n=${r#refs/heads/}; n=${n#refs/remotes/}; n=${n#origin/}
       [ "$n" = "$b" ] && continue
       [ "$n" = HEAD ] && continue
       printf '%s\n' "$n"

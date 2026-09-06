@@ -13,9 +13,17 @@
 REFS=$WORK/refs
 PARENTS=$WORK/parents
 HEAD_REF=$WORK/head
+WORKTREES=$WORK/worktrees
 : > "$REFS"
 : > "$PARENTS"
 : > "$HEAD_REF"
+: > "$WORKTREES"
+
+# worktree_for <ref> <path>: a branch someone is working in, which counts as
+# live whether or not it was ever pushed.
+worktree_for() {
+  printf '%s\t%s\n' "$1" "$2" >> "$WORKTREES"
+}
 
 # commit <id> [parent]
 commit() {
@@ -128,6 +136,11 @@ git_says() (
       esac ;;
     "worktree add -q --detach "*|"worktree remove "*|"worktree prune")
       return 0 ;;
+    "worktree list --porcelain")
+      while IFS="$TAB" read -r ref path; do
+        [ -n "$ref" ] || continue
+        printf 'worktree %s\nbranch %s\n\n' "$path" "$ref"
+      done < "$WORKTREES" ;;
     "switch -q -c "*)
       new=$(head_ref "$(nth_word 4 "$@")")
       start=$(resolve_ref "$(nth_word 5 "$@")") || return 1
@@ -153,12 +166,19 @@ git_says() (
       return 0 ;;
     "for-each-ref --format=%(refname) refs/heads refs/remotes")
       cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' ;;
+    "for-each-ref --format=%(refname) refs/remotes")
+      cut -f1 "$REFS" | grep -E '^refs/remotes/' ;;
     "for-each-ref --format=all %(refname) refs/remotes")
       cut -f1 "$REFS" | grep -E '^refs/remotes/' | sed 's/^/all /' ;;
-    "for-each-ref --contains "*" --format=built %(refname) refs/remotes")
+    "for-each-ref --contains "*" --format=built %(refname) refs/heads refs/remotes")
       sha=$(commit_of "$(nth_word 3 "$@")") || return 1
-      cut -f1 "$REFS" | grep -E '^refs/remotes/' | while read -r r; do
+      cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' | while read -r r; do
         reaches "$(ref_of "$r")" "$sha" && printf 'built %s\n' "$r"
+      done ;;
+    "for-each-ref --contains "*" --format=holds %(refname) refs/heads refs/remotes")
+      sha=$(commit_of "$(nth_word 3 "$@")") || return 1
+      cut -f1 "$REFS" | grep -E '^refs/(heads|remotes)/' | while read -r r; do
+        reaches "$(ref_of "$r")" "$sha" && printf 'holds %s\n' "$r"
       done ;;
     "for-each-ref --contains "*)
       sha=$(commit_of "$(nth_word 3 "$@")") || return 1
