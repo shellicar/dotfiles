@@ -6,6 +6,8 @@
 #   git refresh          look at everything, then pick what runs
 #   git refresh --plan   print the plan and stop, for when there is no terminal
 #
+#   -a, --all            list every branch and worktree looked at, not only
+#                        the ones with something on offer
 #   --no-fetch           skip the initial 'git fetch --prune origin'
 #   --old                evaluate branches too far behind to be worth walking
 #   -v, --verbose        log progress to stderr
@@ -43,6 +45,7 @@ TOOL='git refresh'
 command -v resolve_main >/dev/null 2>&1 || . "$DIR/../lib/git-common.sh"
 
 plan_only=false
+SHOW_ALL=false
 NO_FETCH=false
 VERBOSE=false
 BASE_OVERRIDE=''
@@ -66,10 +69,11 @@ parse_args() {
     case "$arg" in
       --plan) plan_only=true ;;
       --no-fetch) NO_FETCH=true ;;
+      -a|--all) SHOW_ALL=true ;;
       --old) EVALUATE_OLD=true ;;
       -v|--verbose) VERBOSE=true ;;
       -h|--help)
-        sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '3,34p' "$0" | sed 's/^# \{0,1\}//'
         exit 0 ;;
       *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
@@ -287,10 +291,23 @@ derive() {
     # dirty or that the branch could not be evaluated. Reported outside the
     # removal branch above, or a target with no removal to attach it to is
     # silently absent, which is what happened to the trunk itself.
+    #
+    # With -a, everything is worth saying: a branch that is simply unmerged and
+    # level with the trunk stops nothing and would otherwise never appear, which
+    # made this command tell you less about the repository than git cleanup does.
     if [ "$block" != - ]; then
       NOTED="$NOTED$name$TAB$block$NL"
     elif [ "$class" = inconclusive ]; then
       NOTED="$NOTED$name$TAB$why, run --old$NL"
+    elif [ "$SHOW_ALL" = true ] && [ -z "$removal" ] && [ "$uact" = - ]; then
+      # The class name is how the code talks about it, not how it reads. Only
+      # these two reach here: anything else had an operation to show instead.
+      case "$class" in
+        empty) note="level with $MAIN" ;;
+        *)     note=$class ;;
+      esac
+      [ "$name" = "$MAIN" ] && note='the trunk'
+      NOTED="$NOTED$name$TAB$note$NL"
     fi
 
     [ "$uact" = - ] && continue
