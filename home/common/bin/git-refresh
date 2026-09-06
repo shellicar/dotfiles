@@ -300,12 +300,11 @@ derive() {
     elif [ "$class" = inconclusive ]; then
       NOTED="$NOTED$name$TAB$why, run --old$NL"
     elif [ "$SHOW_ALL" = true ] && [ -z "$removal" ] && [ "$uact" = - ]; then
-      # The class name is how the code talks about it, not how it reads. Only
-      # these two reach here: anything else had an operation to show instead.
-      case "$class" in
-        empty) note="level with $MAIN" ;;
-        *)     note=$class ;;
-      esac
+      # Only two things reach here. The trunk, which is excluded from removal
+      # above and reads as its class otherwise, which means nothing to a reader.
+      # And an unmerged branch, which is the whole point of asking for -a.
+      # Every other class has an operation and is shown as one.
+      note=$class
       [ "$name" = "$MAIN" ] && note='the trunk'
       NOTED="$NOTED$name$TAB$note$NL"
     fi
