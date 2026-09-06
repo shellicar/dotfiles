@@ -1,14 +1,20 @@
 #!/bin/sh
 set -e
 
+# GPG_FINGERPRINT, so a key imported off a card is checked rather than taken on trust.
+LIB="$(dirname "$0")/home/common/lib/yubikeys.sh"
+[ -f "$LIB" ] || { echo "ERROR: $LIB not found" >&2; exit 1; }
+# shellcheck source=/dev/null
+. "$LIB"
+
 # --- Configuration ---
 GPG_AGENT_CONF="$HOME/.gnupg/gpg-agent.conf"
 GPG_CONF="$HOME/.gnupg/gpg.conf"
 SCDAEMON_CONF="$HOME/.gnupg/scdaemon.conf"
-# The card has three certificate slots, one per key. 1 and 2 belong to the
-# signature and encryption keys and are free for certificates on those; 3
-# belongs to the authentication key, which is unused here, so it is the slot
-# least likely to be wanted for anything else.
+# The certificate references are storage separate from the key slots, despite
+# sharing their numbering. Only reference 3 accepts an OpenPGP keyblock: 1 and 2
+# are rejected with `Invalid argument`, and 4 with `CERTREF must be OPENPGP.N or
+# just N with N being 1..3`. So the choice is not open.
 CERT_SLOT=3
 KEYCHAIN_NAME="gpg.keychain"
 KEYCHAIN_PATH="$HOME/Library/Keychains/${KEYCHAIN_NAME}-db"
@@ -59,9 +65,9 @@ generate_key() {
   exit 1
 }
 
-# The signature key on the inserted card, which is unambiguous in a way an email
-# lookup no longer is: every identity now resolves to the same key, and several
-# card stubs carry the same addresses.
+# The signature key on the inserted card. Unambiguous in a way an email lookup is
+# not: every identity resolves to the same key, and several card stubs carry the
+# same addresses.
 find_card_key() {
   gpg --no-options --card-status --with-colons 2>/dev/null \
     | awk -F: '/^fpr:/ { print $2; exit }'
@@ -112,9 +118,9 @@ schedule_reset() {
   cron_line="$CRON_MINUTE $CRON_HOUR * * * gpgconf --kill gpg-agent"
 
   # Check if already scheduled
-  if crontab -l 2>/dev/null | grep -q "/opt/homebrew/bin/gpgconf --kill gpg-agent"; then
+  if crontab -l 2>/dev/null | grep -q "gpgconf --kill gpg-agent"; then
     echo "  Existing cron entry found. Replacing..."
-    crontab -l 2>/dev/null | grep -v "/opt/homebrew/bin/gpgconf --kill gpg-agent" | { cat; echo "$cron_line"; } | crontab -
+    crontab -l 2>/dev/null | grep -v "gpgconf --kill gpg-agent" | { cat; echo "$cron_line"; } | crontab -
   else
     { crontab -l 2>/dev/null; echo "$cron_line"; } | crontab -
   fi
@@ -180,6 +186,13 @@ import_pubkey_from_card() {
     | awk -F: '/^fpr:/ { print $10; exit }')
   if [ -z "$fpr" ]; then
     echo "ERROR: the card's certificate object is not an OpenPGP key" >&2
+    exit 1
+  fi
+
+  # Checked before the import below, which marks whatever arrives as ultimately trusted.
+  if [ "$fpr" != "$GPG_FINGERPRINT" ]; then
+    echo "ERROR: this card holds $fpr" >&2
+    echo "       expected $GPG_FINGERPRINT" >&2
     exit 1
   fi
 

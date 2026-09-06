@@ -126,7 +126,7 @@ one; it holds the why that the code cannot.
 
 `./test.sh` shellchecks every shell script here. Run it after changing one. It is
 quiet on success, exits 1 on a finding, and exits 64 when it cannot lint at all —
-never 0 for "did not actually run", which is the bug it used to have. Targets are
+never 0 for "did not actually run". Targets are
 found with `file`, not by extension, because most scripts here are commands on
 `PATH` with no extension. Nothing in `setup/` installs shellcheck, so it falls
 back to the `koalaman/shellcheck` container when the binary is absent.
