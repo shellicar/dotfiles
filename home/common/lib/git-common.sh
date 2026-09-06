@@ -634,6 +634,32 @@ EOF
 # everything back to the merge-base, which for a branch cut from another branch
 # is where THAT branch left main, so it replays the other branch's commits too
 # and force-pushes them back rewritten under new ids.
+# The trunk carrying commits its remote does not have, described, or empty.
+#
+# Worth its own line because it is the one state where none of the other verdicts
+# are the point. Every one of them is measured against the remote trunk, so they
+# stay correct, but you do not have branches or worktrees to tidy: you have
+# commits sitting on the trunk that need a decision first, and only you know
+# whether that is to push them or to move them off.
+#
+# The two shapes read differently. Commits no branch has are work that exists
+# nowhere else. Commits a branch also has are the accidental commit to main,
+# where the branch already holds the work and the trunk is what is wrong.
+local_trunk_ahead() (
+  n=$(git rev-list --count "$MAIN_REF..refs/heads/$MAIN" 2>/dev/null) || return 0
+  [ "${n:-0}" -gt 0 ] || return 0
+
+  oldest=$(git rev-list "$MAIN_REF..refs/heads/$MAIN" | tail -1)
+  holder=$(git for-each-ref --contains "$oldest" --format='%(refname:short)' refs/heads 2>/dev/null |
+    grep -vxF "$MAIN" | head -1)
+
+  if [ -n "$holder" ]; then
+    printf '%s is %s ahead of its remote, and %s is built on those commits\n' "$MAIN" "$n" "$holder"
+  else
+    printf '%s is %s ahead of its remote, on no other branch\n' "$MAIN" "$n"
+  fi
+)
+
 # Refs whose commits must not be replayed under new ids: anything published, and
 # anything checked out in a worktree. Duplicates are harmless to every caller.
 live_refs() {

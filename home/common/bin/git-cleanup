@@ -455,6 +455,11 @@ fi
 
 MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; DETACHED_COUNT=0; UNSURE_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0; INCONCLUSIVE_COUNT=0; PLAN=''
 
+# Before the branch list, because if it fires none of the branch list is the
+# point: the trunk needs a decision first and only you can make it.
+trunk_note=$(local_trunk_ahead)
+[ -n "$trunk_note" ] && say "\n${RED}${WARN}${RESET}$trunk_note"
+
 printf '\n%b\n' "${BOLD}Branches${RESET}"
 if [ -n "$ONLY_BRANCHES" ]; then
   for branch in $ONLY_BRANCHES; do

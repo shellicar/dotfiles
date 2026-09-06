@@ -95,7 +95,14 @@ while IFS= read -r wt; do
   fi
 
   if [ "$behind" -eq 0 ]; then
-    printf '✅ %s [%s]: up to date with origin/main\n' "$wt" "$branch"
+    # Nothing to bring in, but not necessarily nothing to say: a branch ahead of
+    # its remote has work that is only here, and for the trunk that is the
+    # accidental commit to main, where every other verdict is beside the point.
+    if [ "$ahead" -eq 0 ]; then
+      printf '✅ %s [%s]: up to date with origin/%s\n' "$wt" "$branch" "$MAIN"
+    else
+      printf '✅ %s [%s]: up to date with origin/%s, ahead %s not pushed\n' "$wt" "$branch" "$MAIN" "$ahead"
+    fi
     continue
   fi
 
