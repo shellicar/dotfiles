@@ -1,9 +1,9 @@
 #!/bin/sh
 # Move this machine off the vendored GnuPG and onto the packaged one.
 #
-# Per machine. The counterpart to uninstall-gnupg.sh, which does the repo side
-# once. Run this after pulling that deletion, because the symlinks it clears are
-# the ones that deletion leaves dangling.
+# Per machine. The repo side happened once, in the commit that deleted the
+# vendored binaries. Run this after pulling that commit, because the symlinks it
+# clears are the ones that deletion leaves dangling.
 #
 # It removes any symlink pointing at a gone file under home/macos/. A name list
 # would miss the ones left by earlier builds that staged binaries this repo no
@@ -17,9 +17,11 @@
 # Dry run by default. --apply does it.
 set -e
 
+# The same override install.sh takes, since these links are whatever it made.
+DOTFILES="${DOTFILES:-$HOME/dotfiles}"
 SCDAEMON_CONF="$HOME/.gnupg/scdaemon.conf"
 
-STAGE="$HOME/dotfiles/home/macos/"
+STAGE="$DOTFILES/home/macos/"
 
 apply=0
 [ "${1:-}" = "--apply" ] && apply=1

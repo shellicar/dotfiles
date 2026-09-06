@@ -29,7 +29,11 @@ apply=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply)  apply=1 ;;
-    --policy) shift; POLICY="${1:-}" ;;
+    --policy)
+      shift
+      [ $# -gt 0 ] || { echo "ERROR: --policy needs a value" >&2; exit 64; }
+      POLICY="$1"
+      ;;
     *)        echo "ERROR: unknown option: $1" >&2; exit 64 ;;
   esac
   shift
