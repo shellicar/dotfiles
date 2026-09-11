@@ -91,11 +91,11 @@ resolve_main() {
     # "main", and the name that gets printed everywhere is wrong. Strip the
     # known prefix instead, which cannot vary.
     ref=$(git symbolic-ref --quiet "$MAIN_REF") || {
-      echo "Error: cannot determine the default branch from origin/HEAD (try -b <branch>)" >&2; exit 1; }
+      echo "Error: cannot determine the default branch from origin/HEAD (try --base <branch>)" >&2; exit 1; }
     MAIN=${ref#refs/remotes/origin/}
   fi
   git rev-parse --verify --quiet "$MAIN_REF" >/dev/null || {
-    echo "Error: $MAIN_REF does not exist (fetch origin, or pass -b <branch>)" >&2; exit 1; }
+    echo "Error: $MAIN_REF does not exist (fetch origin, or pass --base <branch>)" >&2; exit 1; }
 }
 
 # The line a command opens with: which trunk, how many branches, and what cap is
