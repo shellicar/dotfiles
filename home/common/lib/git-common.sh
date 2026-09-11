@@ -937,11 +937,21 @@ update_needs_stash() (
     merge) from=$(git -C "$wt" merge-base HEAD "$MAIN_REF" 2>/dev/null) || return 1 ;;
     *)     from=HEAD ;;
   esac
-  git -C "$wt" diff --name-only "$from" "$MAIN_REF" 2>/dev/null | sort -u > "$CACHE_DIR/incoming"
+  # -z on both sides, because the two commands quote differently otherwise:
+  # `status --porcelain` quotes a path containing a space and `diff --name-only`
+  # does not, so every such path failed to match and the answer came back no.
+  # -z turns quoting off in both, which is the only way to compare them.
+  git -C "$wt" diff --name-only -z "$from" "$MAIN_REF" 2>/dev/null |
+    tr '\0' '\n' | sort -u > "$CACHE_DIR/incoming"
   [ -s "$CACHE_DIR/incoming" ] || return 1
-  # Untracked lines included, not just modified ones: a file the incoming
+  # Untracked entries included, not just modified ones: a file the incoming
   # commits create is refused just as hard as one you have edited.
-  printf '%s\n' "$st" | sed -e 's/^...//' -e 's/.* -> //' | sort -u > "$CACHE_DIR/in-the-way"
+  #
+  # The status prefix is stripped only from lines that carry one. A rename adds
+  # the old path as a record of its own with no prefix, and both halves of it
+  # are in the way.
+  git -C "$wt" status --porcelain -z 2>/dev/null | tr '\0' '\n' |
+    sed 's/^[ MADRCU?!][ MADRCU?!] //' | sort -u > "$CACHE_DIR/in-the-way"
   [ -n "$(comm -12 "$CACHE_DIR/incoming" "$CACHE_DIR/in-the-way")" ]
 )
 

@@ -13,6 +13,11 @@
 #   everything refuses an untracked file the incoming commits DO create
 #   fast-forward allows an unrelated modification, even a staged one
 #
+# A path with a space in its name is here because the two commands the predicate
+# compares quote differently: `status --porcelain` quotes such a path and
+# `diff --name-only` does not, so before -z was used on both, every one of them
+# came back as no collision and the update was offered without its stash.
+#
 # Each case gets its own worktree, so nothing has to be undone between them.
 set -eu
 
@@ -30,7 +35,8 @@ base=$(git rev-parse HEAD)
 
 commit B a.txt
 printf 'new\n' > n.txt
-git add n.txt
+printf 'spaced\n' > 'two words.txt'
+git add n.txt 'two words.txt'
 git commit -qm N
 git push -q origin main
 git fetch -q origin
@@ -101,5 +107,13 @@ close_case ff-unrelated-modified ff
 open_case ff-incoming-modified ff no
 printf 'dirty\n' > a.txt
 close_case ff-incoming-modified ff
+
+open_case ff-spaced-name-collides ff no
+printf 'mine\n' > 'two words.txt'
+close_case ff-spaced-name-collides ff
+
+open_case rebase-spaced-name-collides rebase yes
+printf 'mine\n' > 'two words.txt'
+close_case rebase-spaced-name-collides rebase
 
 echo 'PASS stash-is-predicted-the-way-git-decides'
