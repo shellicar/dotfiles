@@ -547,16 +547,37 @@ readkey() {
 # What is selected, in the order it will happen. Printed before the countdown as
 # well as by --plan: leaving the alternate screen takes the list with it, and
 # being asked to confirm something you can no longer see is not being asked.
+#
+# With 'all' every row is printed and marked instead. That is what --plan needs:
+# most operations now start unticked, so a list of the ticked ones alone says
+# one thing is on offer when eight are, which is a lie the selector never tells
+# because you can see the rest of the list.
 say_selected() {
-  printf '\n%b%s%b\n' "$BOLD" "$1" "$RESET"
+  if [ "${2:-}" = all ]; then
+    printf '\n%b%s%b  %b[x] runs, [ ] does not, [-] unavailable%b\n' \
+      "$BOLD" "$1" "$RESET" "$DIM" "$RESET"
+  else
+    printf '\n%b%s%b\n' "$BOLD" "$1" "$RESET"
+  fi
   while IFS="$TAB" read -r op state kind action target why ign n class meta stash; do
     [ -z "$op" ] && continue
-    [ "$state" = on ] || continue
+    if [ "${2:-}" = all ]; then
+      case "$state" in
+        on)  mark="${GREEN}[x]${RESET} " ;;
+        off) mark="${DIM}[ ]${RESET} " ;;
+        *)   mark="${DIM}[-]${RESET} " ;;
+      esac
+    else
+      [ "$state" = on ] || continue
+      mark=''
+    fi
     [ "$why" = - ] && why=''
     icon_of "$kind"
     class_icon "$class"
-    printf '  %b %s %s %b  %b%s%b\n' "$CICON" "$IC" "$action" "$meta" "$DIM" "$why" "$RESET"
-    [ "$ign" = - ] || say_ignored "$ign"
+    printf '  %b%b %s %s %b  %b%s%b\n' "$mark" "$CICON" "$IC" "$action" "$meta" "$DIM" "$why" "$RESET"
+    # Only for something that is actually going to happen. On an unticked row it
+    # warns about a deletion nobody has asked for yet.
+    [ "$state" = on ] && [ "$ign" != - ] && say_ignored "$ign"
   done <<EOF
 $ROWS
 EOF
@@ -594,7 +615,7 @@ fi
 
 if [ "$plan_only" = true ]; then
   say_environment
-  say_selected 'Would run'
+  say_selected 'Plan' all
   say_noted
   printf '\n%bplan only, nothing was touched%b\n' "$DIM" "$RESET"
   exit 0
