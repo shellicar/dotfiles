@@ -64,9 +64,13 @@ logic: extract it here instead.
 
 - `git-refresh` — cleanup and spread in one pass over one snapshot: remove what
   has landed, then bring the trunk into what survives. The operations come from
-  an interactive list rather than flags, and the update half depends on which
-  removals you keep, so declining one can reveal another. `--plan` prints and
-  stops, which is also what happens with no terminal.
+  an interactive list rather than flags, and a target's two halves are tied: an
+  update starts wherever its own removal starts, and taking the removal masks
+  it, so the command never proposes maintaining a branch it is proposing to
+  delete. Every operation is on the list whether or not it can run, because a
+  row you cannot act on is usually the reason a row above or below it reads the
+  way it does. `--plan` prints the same list and stops, which is also what
+  happens with no terminal.
 - `git-cleanup` — delete local branches, and their worktrees, whose work is
   already in main. The verdict is the merge check alone; a `gone` upstream is only
   a cross-check. Reads `[cleanup]` config (see Git).
@@ -140,13 +144,14 @@ one; it holds the why that the code cannot.
 `./test.sh` parses every shell script here, then shellchecks it, then runs the
 behavioural suite in `tests/`. Run it after changing one.
 
-It exits 1 on this tree today and always has: 53 deliberate shellcheck findings,
-mostly `local` (not POSIX, used throughout on purpose) and unquoted expansions
-that are meant to split. Every one of those classes has a counterpart on main, so
-none of them is new. The exit status therefore cannot tell you a test failed. The
-suite prints its own verdict instead, `tests: N passed` or `tests: N of M
-FAILED`, and that line is what to read. The bar for a change is no new finding
-*class*, not a clean exit.
+It exits 1 on this tree today and always has, on a standing set of deliberate
+shellcheck findings: mostly `local` (not POSIX, used throughout on purpose) and
+unquoted expansions that are meant to split. Every one of those classes has a
+counterpart on main, so none of them is new. The exit status therefore cannot
+tell you a test failed. The suite prints its own verdict instead, `tests: N
+passed` or `tests: N of M FAILED`, and that line is what to read. The bar for a
+change is no new finding *class*, not a clean exit, which is why the count is
+not written down here: it moves with every line added and the classes do not.
 
 It exits 64 when it cannot lint at all —
 never 0 for "did not actually run". Targets are
@@ -158,13 +163,14 @@ The scripts are POSIX `sh`, and the environments span BSD and GNU coreutils, so 
 GNU-only flag to `sed` or `date` passes on Linux and fails on the Mac.
 
 `tests/integration/run.sh` is the other half, and is not part of `./test.sh`: it
-needs docker and takes about ten seconds. It builds real repositories in a
-container and runs the commands with `--apply`, because deciding and doing are
-different code and the pure suite can only reach the first. It covers `run_plan`,
-`run_update`, `remove_branch` against a real worktree, a real rescue rebase, and
-the force-push. The container is what makes running it safe: it deletes branches
-and worktrees for real, and none of them are yours. It skips with a message when
-docker is absent.
+needs docker. It builds real repositories in a container and runs the commands
+against them for real. Two kinds of thing belong here rather than in `tests/`,
+and both for the same reason, that the answer has to come from git and not from
+us: carrying a plan out, because deciding and doing are different code and the
+pure suite can only reach the first; and any claim about what git itself does,
+which is checked by predicting it and then attempting the operation. The
+container is what makes running it safe: it deletes branches and worktrees for
+real, and none of them are yours. It skips with a message when docker is absent.
 
 A case in `tests/cases/` builds no repository. It sources the library, replaces
 `git` with a shell function backed by a fake commit graph, and asserts on what
