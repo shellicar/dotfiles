@@ -406,12 +406,7 @@ resolve_main
 
 report() {
 
-if [ "$EVALUATE_OLD" = true ]; then
-  CAP_NOTE='cap off (--old)'
-else
-  CAP_NOTE="cap ${MAX_DISTANCE} behind + ${MAX_AGE_DAYS}d"
-fi
-printf '%b\n' "${BOLD}git cleanup${RESET} ${DIM}$MAIN · $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -c .) branches · $CAP_NOTE${RESET}"
+say_header
 
 step 'fetch origin ...'
 fetch_origin

@@ -98,6 +98,25 @@ resolve_main() {
     echo "Error: $MAIN_REF does not exist (fetch origin, or pass -b <branch>)" >&2; exit 1; }
 }
 
+# The line a command opens with: which trunk, how many branches, and what cap is
+# in force. Shared because it describes the run rather than the command, and
+# because a row reading "140 behind, not evaluated" means nothing unless the cap
+# it was measured against is on screen. TOOL names the command.
+#
+# --branch says the count instead, since the run is about what you named and the
+# number of branches in the repository is no longer what was looked at.
+say_header() {
+  local cap scope
+  if [ "$EVALUATE_OLD" = true ]; then cap='cap off (--old)'
+  else cap="cap ${MAX_DISTANCE} behind + ${MAX_AGE_DAYS}d"; fi
+  if [ -n "$ONLY_BRANCHES" ]; then
+    scope="$(printf '%s' "$ONLY_BRANCHES" | wc -w | tr -d ' ') named"
+  else
+    scope="$(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -c .) branches"
+  fi
+  printf '%b\n' "${BOLD}${TOOL}${RESET} ${DIM}$MAIN · $scope · $cap${RESET}"
+}
+
 fetch_origin() {
   [ "$NO_FETCH" = true ] && { log "skipping fetch (--no-fetch)"; return 0; }
   log "fetching origin --prune ..."

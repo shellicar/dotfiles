@@ -125,6 +125,8 @@ setup() {
 # ── the analysis, once ──────────────────────────────────────────────────────
 
 analyse() {
+say_header
+
 step 'fetch origin ...'
 fetch_origin
 if [ "$NO_FETCH" = true ]; then step_done 'skipped (--no-fetch)'; else step_done 'done'; fi
