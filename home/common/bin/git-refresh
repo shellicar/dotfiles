@@ -168,7 +168,7 @@ step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 step 'reading branches and worktrees ...'
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta, unpushed
+# its detail, ignored, meta, unpushed, stash
 BFACTS=''
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs,
 # ignored, meta
@@ -192,7 +192,7 @@ EOF
   unpushed=0
   [ "$b" = "$MAIN" ] || unpushed=$(git rev-list --count "$b@{u}..refs/heads/$b" 2>/dev/null || echo 0)
 
-  block='-'; behind=0; uact='-'; udetail='-'; ign='-'
+  block='-'; behind=0; uact='-'; udetail='-'; ign='-'; stash=no
   if [ -n "$wt" ]; then
     ign=$(worktree_ignored "$wt"); ign=${ign:--}
     b_reason=$(worktree_block_reason "$wt")
@@ -208,7 +208,11 @@ EOF
     # too, and a squash has a different patch id so git cannot tell they have
     # landed. The rescue is what carries that branch forward; the rebase is what
     # undoes it.
-    if [ "$block" = - ] && [ "$behind" != 0 ] &&
+    #
+    # A dirty worktree is NOT excluded here. It blocks a removal absolutely,
+    # because that destroys work, but an update only has to get past git, and
+    # git says no far less often than this used to assume.
+    if [ "$behind" != 0 ] &&
        [ "$class" != merged ] && [ "$class" != review ]; then
       # Asked before the strategy, because the strategy is a rebase and a rebase
       # here force-pushes. git spread stops for this and so does git catchup.
@@ -217,10 +221,11 @@ EOF
       else
         uv=$(update_verdict "$wt" "$b")
         uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
+        if [ "$uact" != none ] && update_needs_stash "$wt" "$uact"; then stash=yes; fi
       fi
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$NL"
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$NL"
 done
 
 # With --branch the run is about the branches you named, so a worktree with no
@@ -297,7 +302,7 @@ icon_of() {
 # being read back, it disappears and drags every later field one place left.
 # plan_add has carried this rule since it was written; this is the same rule.
 emit() {
-  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$TAB${8:--}$TAB${9:--}$TAB${10:--}$NL"
+  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$TAB${8:--}$TAB${9:--}$TAB${10:--}$TAB${11:-no}$NL"
   COUNT=$((COUNT + 1))
   [ "$2" = on ] && PICKED=$((PICKED + 1))
   return 0
@@ -315,7 +320,7 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed; do
+  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
 
@@ -336,6 +341,7 @@ derive() {
       suspect) removal="remove $name"; def=off ;;
       review)  removal="rescue $n off $name, then remove it"; def=off ;;
     esac
+    stopped=no
     if [ -n "$removal" ] && [ "$block" = - ]; then
       [ -n "$wt" ] && removal="$removal and its worktree"
       note_default "${name}R" "$def"
@@ -344,6 +350,7 @@ derive() {
       [ "$class" = review ] && k=rescue || k=remove
       emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign" "$n" "$class" "$meta"
     else
+      [ -n "$removal" ] && stopped=yes
       removal=''
     fi
 
@@ -356,7 +363,14 @@ derive() {
     # With -a, everything is worth saying: a branch that is simply unmerged and
     # level with the trunk stops nothing and would otherwise never appear, which
     # made this command tell you less about the repository than git cleanup does.
-    if [ "$block" != - ]; then
+    # The block is said when it stopped a removal, and when nothing else is on
+    # offer for the branch. Not otherwise: an update row that names its own
+    # stash has already told you the tree is dirty, and saying "blocked" beside
+    # it claims something was refused when nothing was.
+    saying_block=no
+    [ "$block" != - ] && [ "$stopped" = yes ] && saying_block=yes
+    [ "$block" != - ] && [ "$uact" = - ] && saying_block=yes
+    if [ "$saying_block" = yes ]; then
       NOTED="$NOTED$name${TAB}blocked$TAB$meta$TAB$block$NL"
     elif [ "$class" = inconclusive ]; then
       NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$why, run --old$NL"
@@ -381,19 +395,26 @@ derive() {
       merge)  act="merge $MAIN into $name" ;;
       *)      act="rebase $name onto $MAIN" ;;
     esac
+    # Named in the action, because setting your working tree aside and putting
+    # it back is part of what the row does, not a detail of how.
+    [ "$stash" = yes ] && act="stash, $act, restore"
     if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
       block_op "${name}U"
-      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - - "$meta"
+      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - - "$meta" "$stash"
     else
       # The update starts where the removal starts. A branch the command is
       # offering to delete is not one it also proposes to maintain, and without
       # this, unticking a removal arms a different operation on the same branch
       # rather than leaving it alone.
+      #
+      # And an update that has to move your uncommitted work out of the way
+      # starts off whatever else is true, which is git spread's default.
       udef=on
       [ -n "$removal" ] && udef=$def
+      [ "$stash" = yes ] && udef=off
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - - "$meta"
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - - "$meta" "$stash"
     fi
   done <<EOF
 $BFACTS
@@ -462,7 +483,7 @@ draw() {
     "$BOLD" "$MAIN" "$RESET" "$DIM" "$RESET"
 
   i=0
-  while IFS="$TAB" read -r op state kind action target why ign n class meta; do
+  while IFS="$TAB" read -r op state kind action target why ign n class meta stash; do
     [ -z "$op" ] && continue
     i=$((i + 1))
     [ "$i" -lt "$TOP" ] && continue
@@ -525,7 +546,7 @@ readkey() {
 # being asked to confirm something you can no longer see is not being asked.
 say_selected() {
   printf '\n%b%s%b\n' "$BOLD" "$1" "$RESET"
-  while IFS="$TAB" read -r op state kind action target why ign n class meta; do
+  while IFS="$TAB" read -r op state kind action target why ign n class meta stash; do
     [ -z "$op" ] && continue
     [ "$state" = on ] || continue
     [ "$why" = - ] && why=''
@@ -617,7 +638,7 @@ say_noted
 
 # The plan is built from what is selected, in the order the rows were derived,
 # which puts every removal before the update of anything that survives it.
-while IFS="$TAB" read -r op state kind action target why ign n class meta; do
+while IFS="$TAB" read -r op state kind action target why ign n class meta stash; do
   [ -z "$op" ] && continue
   [ "$state" = on ] || continue
   case "$kind" in
@@ -635,7 +656,7 @@ while IFS="$TAB" read -r op state kind action target why ign n class meta; do
       ;;
     ff|merge|rebase)
       b=${op%U}
-      plan_add "$kind" "$b" - - "$target"
+      plan_add "$kind" "$b" "$stash" - "$target"
       ;;
   esac
 done <<EOF

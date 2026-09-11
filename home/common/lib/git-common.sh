@@ -911,6 +911,36 @@ update_verdict() (
   printf 'rebase\t%s\n' "$base"
 )
 
+# Will git refuse to start this update while the worktree is as it is? That is
+# the whole of what decides a stash, and it is knowable before anything is
+# attempted. Whether the update will CONFLICT is a different question, and that
+# one does need the attempt.
+#
+# A rebase refuses on any tracked change whatever it is, and then its checkout
+# of the new base refuses on an untracked file the incoming commits create. A
+# fast-forward and a merge refuse only on that second collision, so an unrelated
+# modification, even a staged one, does not stop them. Tested on git 2.54.
+#
+# The incoming set is what the operation writes: HEAD..target for a rebase or a
+# fast-forward, which both move HEAD onto the target, and merge-base..target for
+# a merge, which takes only the other side's changes.
+update_needs_stash() (
+  wt=$1 act=$2
+  st=$(git -C "$wt" status --porcelain 2>/dev/null)
+  [ -n "$st" ] || return 1
+  [ "$act" = rebase ] && printf '%s\n' "$st" | grep -qv '^??' && return 0
+  case "$act" in
+    merge) from=$(git -C "$wt" merge-base HEAD "$MAIN_REF" 2>/dev/null) || return 1 ;;
+    *)     from=HEAD ;;
+  esac
+  git -C "$wt" diff --name-only "$from" "$MAIN_REF" 2>/dev/null | sort -u > "$CACHE_DIR/incoming"
+  [ -s "$CACHE_DIR/incoming" ] || return 1
+  # Untracked lines included, not just modified ones: a file the incoming
+  # commits create is refused just as hard as one you have edited.
+  printf '%s\n' "$st" | sed -e 's/^...//' -e 's/.* -> //' | sort -u > "$CACHE_DIR/in-the-way"
+  [ -n "$(comm -12 "$CACHE_DIR/incoming" "$CACHE_DIR/in-the-way")" ]
+)
+
 # What git said, first real line only. Reporting every failure as "conflict" is
 # a guess, and a wrong one: an unset committer identity, a missing signing key
 # and a genuine conflict all exit non-zero and only one of them is about the
@@ -920,14 +950,40 @@ why_it_failed() {
     sed -e 's/^fatal: //' -e 's/^error: //' | cut -c1-90
 }
 
-# Carry out one update. A failure is aborted and reported, never left half
-# done. A merge rewrites nothing, so its push is an ordinary one; a rebase
-# rewrote history, so its push needs the lease, which is only sound because the
-# caller fetched once at the start of this run and nothing has moved since.
+# Set aside what is in the way, do the update, put it back. Whether a stash is
+# needed was decided when the plan was built, by update_needs_stash; this only
+# carries it out. A pop that conflicts leaves the entry in the stash list and
+# says so, because resolving it is yours.
+run_update() {
+  local act=$1 b=$2 wt=$3 stash=${4:-no} stashed=no
+  if [ "$stash" = yes ]; then
+    if git -C "$wt" stash push --quiet --include-untracked; then
+      stashed=yes
+    else
+      say "  ${YELLOW}${WARN}${RESET}$b: could not set the working tree aside, skipped"
+      return 0
+    fi
+  fi
+
+  carry_out_update "$act" "$b" "$wt"
+
+  [ "$stashed" = yes ] || return 0
+  if git -C "$wt" stash pop --quiet; then
+    say "     ${DIM}↳ working tree restored${RESET}"
+  else
+    say "  ${YELLOW}${WARN}${RESET}$b: could not put the working tree back, it is in the stash list"
+  fi
+  return 0
+}
+
+# A failure is aborted and reported, never left half done. A merge rewrites
+# nothing, so its push is an ordinary one; a rebase rewrote history, so its push
+# needs the lease, which is only sound because the caller fetched once at the
+# start of this run and nothing has moved since.
 #
 # The branch name is named to git, not the sha behind it: git builds a merge
 # message from what it is given, and a raw sha writes "Merge commit '<sha>'".
-run_update() {
+carry_out_update() {
   local act=$1 b=$2 wt=$3 base push=no
   git -C "$wt" rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 && push=yes
 
@@ -1079,7 +1135,9 @@ run_plan() {
         run_rescue "$branch" "$join" "$n" "$wt"
         ;;
       ff|merge|rebase)
-        run_update "$action" "$branch" "$wt"
+        # join carries the stash flag for an update, the way git spread's plan
+        # has always used that field.
+        run_update "$action" "$branch" "$wt" "$join"
         ;;
     esac
   done <<EOF

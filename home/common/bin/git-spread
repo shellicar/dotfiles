@@ -143,11 +143,11 @@ EOF
     *)      verb="rebase onto";     icon='🔁' ;;
   esac
 
-  stash_first=0
-  [ -n "$dirty" ] && stash_first=1
+  stash_first=no
+  [ -n "$dirty" ] && stash_first=yes
 
   extra=""
-  [ "$stash_first" -eq 1 ] && extra=" (stash first)"
+  [ "$stash_first" = yes ] && extra=" (stash first)"
   # A fast-forward is not pushed: it moves the branch to the trunk and leaves
   # nothing of its own to publish, so the line must not promise one.
   if [ "$push_after" -eq 1 ] && [ "$action" != ff ]; then
@@ -190,28 +190,10 @@ echo
 # Decides nothing. Every choice was made in the pass above and is on screen.
 while IFS="$TAB" read -r action branch stash_first push_after wt; do
   [ -z "$action" ] && continue
-
-  stashed=0
-  if [ "$stash_first" -eq 1 ]; then
-    if git -C "$wt" stash push --quiet --include-untracked; then
-      stashed=1
-    else
-      printf '❌ %s [%s]: stash failed — skipping\n' "$wt" "$branch"
-      continue
-    fi
-  fi
-
   # One implementation, in the library, shared with git refresh. It works out
-  # whether to push from the branch's own upstream rather than being told.
-  run_update "$action" "$branch" "$wt"
-
-  if [ "$stashed" -eq 1 ]; then
-    if git -C "$wt" stash pop --quiet; then
-      printf '   stash restored\n'
-    else
-      printf '❌ %s [%s]: stash pop failed — resolve manually (stash kept)\n' "$wt" "$branch"
-    fi
-  fi
+  # whether to push from the branch's own upstream rather than being told, and
+  # it owns the stash and the pop around the update.
+  run_update "$action" "$branch" "$wt" "$stash_first"
 done <<EOF
 $PLAN
 EOF
