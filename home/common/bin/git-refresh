@@ -193,7 +193,14 @@ EOF
     # nothing to bring in, and replaying its commits onto a trunk that already
     # has their content duplicates them and pushes them to a branch the merge
     # deleted. An unclean worktree cannot be updated either, and says so once.
-    if [ "$block" = - ] && [ "$behind" != 0 ] && [ "$class" != merged ]; then
+    #
+    # review is the same case wearing a different number. Its older commits are
+    # in main, usually squashed, so a rebase from the fork point replays those
+    # too, and a squash has a different patch id so git cannot tell they have
+    # landed. The rescue is what carries that branch forward; the rebase is what
+    # undoes it.
+    if [ "$block" = - ] && [ "$behind" != 0 ] &&
+       [ "$class" != merged ] && [ "$class" != review ]; then
       uv=$(update_verdict "$wt" "$b")
       uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
     fi
