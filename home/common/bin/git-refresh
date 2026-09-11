@@ -6,8 +6,6 @@
 #   git refresh          look at everything, then pick what runs
 #   git refresh --plan   print the plan and stop, for when there is no terminal
 #
-#   -a, --all            list every branch and worktree looked at, not only
-#                        the ones with something on offer
 #   --base REF           compare against REF instead of the detected trunk
 #   --branch BRANCH      look at only this branch, not every local branch;
 #                        repeat to name several
@@ -50,7 +48,6 @@ TOOL='git refresh'
 command -v resolve_main >/dev/null 2>&1 || . "$DIR/../lib/git-common.sh"
 
 plan_only=false
-SHOW_ALL=false
 NO_FETCH=false
 VERBOSE=false
 BASE_OVERRIDE=''
@@ -77,14 +74,13 @@ parse_args() {
     case "$1" in
       --plan) plan_only=true ;;
       --no-fetch) NO_FETCH=true ;;
-      -a|--all) SHOW_ALL=true ;;
       --old) EVALUATE_OLD=true ;;
       --base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 2; }; BASE_OVERRIDE=$1 ;;
       --branch) shift; [ $# -gt 0 ] || { echo "Error: --branch requires a branch name" >&2; exit 2; }; ONLY_BRANCHES="$ONLY_BRANCHES $1" ;;
       --depth) shift; [ $# -gt 0 ] || { echo "Error: --depth requires a number" >&2; exit 2; }; WALK_DEPTH=$1 ;;
       -v|--verbose) VERBOSE=true ;;
       -h|--help)
-        sed -n '3,39p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '3,37p' "$0" | sed 's/^# \{0,1\}//'
         exit 0 ;;
       *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -363,15 +359,12 @@ derive() {
       fi
     fi
 
-    # A target with no operation is still worth saying when the reason is that
-    # the tree is dirty or that the branch could not be evaluated: each of those
-    # is waiting on something you can do. Reported outside the removal branch
-    # above, or a target with no removal to attach it to is silently absent,
-    # which is what happened to the trunk itself.
+    # Everything with no operation on it is said, and said every time. git
+    # cleanup holds the same branches behind -a because there they sit in the
+    # middle of its one list, mixed in with the branches it is offering to act
+    # on. Here they are a section of their own below the plan, so they crowd
+    # nothing out and there is nothing to gain by withholding them.
     #
-    # With -a, everything is worth saying: a branch that is simply unmerged and
-    # level with the trunk stops nothing and would otherwise never appear, which
-    # made this command tell you less about the repository than git cleanup does.
     # The block is said here only when the branch has no row at all. When it
     # stopped a removal there is now a [-] row saying so, and when an update is
     # on offer that row names its own stash, so either way repeating it beside
@@ -383,14 +376,14 @@ derive() {
     elif [ "$class" = inconclusive ]; then
       NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$why, run --old$NL"
     elif [ -z "$removal" ] && [ "$uact" = - ] && [ "$unpushed" != 0 ]; then
-      # Nothing to do with the branch, but something on it that is on no remote.
-      # Said without -a, because it is the one thing here you can lose.
+      # Work on no remote is the one thing in this list you can actually lose,
+      # so it displaces the plainer reason below.
       NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$unpushed not pushed$NL"
-    elif [ "$SHOW_ALL" = true ] && [ -z "$removal" ] && [ "$uact" = - ]; then
-      # Only two things reach here. The trunk, which is excluded from removal
-      # above, and whose reason is written about a branch and says nothing
-      # about it. And an unmerged branch, which is the whole point of asking
-      # for -a. Every other class has an operation and is shown as one.
+    elif [ -z "$removal" ] && [ "$uact" = - ]; then
+      # Two things reach here. The trunk, which is excluded from removal above,
+      # and whose reason is written about a branch and says nothing about it.
+      # And a branch with no operation of any kind, which is most of what this
+      # section is for. Every other class has an operation and is shown as one.
       note=$why; ncls=$class
       [ "$name" = "$MAIN" ] && { note='the trunk'; ncls=-; }
       NOTED="$NOTED$name$TAB$ncls$TAB$meta$TAB$note$NL"
