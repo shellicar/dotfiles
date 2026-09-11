@@ -658,9 +658,17 @@ fi
 
 SAVED=$(stty -g)
 restore() { stty "$SAVED" 2>/dev/null; printf '%b[?2026l%b[?25h%b[?1049l' "$E" "$E" "$E"; }
-# INT and TERM exit as well as restore. Restoring alone lets the loop carry on
+# Every signal that would otherwise kill this, because a process killed by one
+# never reaches the shell's exit path and so never runs the EXIT trap. What is
+# left behind is a terminal still in raw mode with the alternate screen up: no
+# echo and no line editing. QUIT is the reachable one, since stty -icanon -echo
+# leaves ISIG on and ctrl-\ still fires from inside the selector.
+#
+# Each exits as well as restoring. Restoring alone lets the loop carry on
 # against a terminal that is no longer in raw mode.
+trap 'restore; exit 129' HUP
 trap 'restore; exit 130' INT
+trap 'restore; exit 131' QUIT
 trap 'restore; exit 143' TERM
 trap 'restore' EXIT
 
@@ -684,7 +692,7 @@ while :; do
 done
 
 restore
-trap - EXIT INT TERM
+trap - EXIT HUP INT QUIT TERM
 
 say_environment
 
