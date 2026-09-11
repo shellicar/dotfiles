@@ -659,6 +659,17 @@ if [ "$plan_only" = true ]; then
   exit 0
 fi
 
+# Before the selector opens, not after it closes. Printing into the primary
+# buffer leaves it there while the alternate screen is up, so it is waiting when
+# you come back however you left: quit, run, or ctrl-c, which exits on its
+# signal and never reaches the code below the loop.
+#
+# It is also the state you are picking from, which is the point of it. The list
+# can shift as you tick, since a detached worktree stops being held by a branch
+# you are deleting, and the selector shows that as it happens.
+say_environment
+say_noted
+
 SAVED=$(stty -g)
 restore() { stty "$SAVED" 2>/dev/null; printf '%b[?2026l%b[?25h%b[?1049l' "$E" "$E" "$E"; }
 # Every signal that would otherwise kill this, because a process killed by one
@@ -696,13 +707,6 @@ done
 
 restore
 trap - EXIT HUP INT QUIT TERM
-
-say_environment
-
-# The list of what was looked at and passed over only exists on the alternate
-# screen, which has just gone. Print it here too, or an interactive run never
-# tells you a worktree was skipped for being dirty.
-say_noted
 
 [ "$VERDICT" = quit ] && { printf 'nothing done\n'; exit 0; }
 
