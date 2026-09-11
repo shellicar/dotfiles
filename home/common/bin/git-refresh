@@ -168,9 +168,10 @@ step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 step 'reading branches and worktrees ...'
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored
+# its detail, ignored, meta
 BFACTS=''
-# name, worktree, head, in main, merged PR, open PR, closed PR, block, refs
+# name, worktree, head, in main, merged PR, open PR, closed PR, block, refs,
+# ignored, meta
 DFACTS=''
 
 for b in ${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}; do
@@ -183,6 +184,7 @@ EOF
   branch_reason "$b" "$class" "$n" "$gone"
   why=$REASON
 
+  meta=$(target_meta "$ahead" "$(git log -1 --format=%cr "refs/heads/$b" 2>/dev/null)")
   block='-'; behind=0; uact='-'; udetail='-'; ign='-'
   if [ -n "$wt" ]; then
     ign=$(worktree_ignored "$wt"); ign=${ign:--}
@@ -205,7 +207,7 @@ EOF
       uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$NL"
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$NL"
 done
 
 # With --branch the run is about the branches you named, so a worktree with no
@@ -223,7 +225,9 @@ while IFS="$TAB" read -r head p; do
   b_reason=$(worktree_block_reason "$p")
   refs=$(refs_containing "$head")
   ign=$(worktree_ignored "$p")
-  DFACTS="$DFACTS$(basename "$p")$TAB$p$TAB$head$TAB$inmain$TAB${mpr:--}$TAB${opr:--}$TAB${cpr:--}$TAB${b_reason:--}$TAB${refs:--}$TAB${ign:--}$NL"
+  meta=$(target_meta "$(git rev-list --count "$MAIN_REF..$head" 2>/dev/null || echo '?')" \
+    "$(git log -1 --format=%cr "$head" 2>/dev/null)" "$(git rev-parse --short "$head" 2>/dev/null)")
+  DFACTS="$DFACTS$(basename "$p")$TAB$p$TAB$head$TAB$inmain$TAB${mpr:--}$TAB${opr:--}$TAB${cpr:--}$TAB${b_reason:--}$TAB${refs:--}$TAB${ign:--}$TAB$meta$NL"
 done <<EOF
 $DETACHED_TARGETS
 EOF
@@ -280,7 +284,7 @@ icon_of() {
 # being read back, it disappears and drags every later field one place left.
 # plan_add has carried this rule since it was written; this is the same rule.
 emit() {
-  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$TAB${8:--}$TAB${9:--}$NL"
+  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$TAB${8:--}$TAB${9:--}$TAB${10:--}$NL"
   COUNT=$((COUNT + 1))
   [ "$2" = on ] && PICKED=$((PICKED + 1))
   return 0
@@ -298,7 +302,7 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign; do
+  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
 
@@ -325,7 +329,7 @@ derive() {
       st=off; has "${name}R" "$SELECTED" && st=on
       [ "$st" = on ] && doom_branch "$name"
       [ "$class" = review ] && k=rescue || k=remove
-      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign" "$n" "$class"
+      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign" "$n" "$class" "$meta"
     else
       removal=''
     fi
@@ -340,9 +344,9 @@ derive() {
     # level with the trunk stops nothing and would otherwise never appear, which
     # made this command tell you less about the repository than git cleanup does.
     if [ "$block" != - ]; then
-      NOTED="$NOTED$name${TAB}blocked$TAB$block$NL"
+      NOTED="$NOTED$name${TAB}blocked$TAB$meta$TAB$block$NL"
     elif [ "$class" = inconclusive ]; then
-      NOTED="$NOTED$name$TAB$class$TAB$why, run --old$NL"
+      NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$why, run --old$NL"
     elif [ "$SHOW_ALL" = true ] && [ -z "$removal" ] && [ "$uact" = - ]; then
       # Only two things reach here. The trunk, which is excluded from removal
       # above, and whose reason is written about a branch and says nothing
@@ -350,11 +354,11 @@ derive() {
       # for -a. Every other class has an operation and is shown as one.
       note=$why; ncls=$class
       [ "$name" = "$MAIN" ] && { note='the trunk'; ncls=-; }
-      NOTED="$NOTED$name$TAB$ncls$TAB$note$NL"
+      NOTED="$NOTED$name$TAB$ncls$TAB$meta$TAB$note$NL"
     fi
 
     [ "$uact" = - ] && continue
-    if [ "$uact" = none ]; then NOTED="$NOTED$name$TAB$class$TAB$udetail$NL"; continue; fi
+    if [ "$uact" = none ]; then NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$udetail$NL"; continue; fi
     case "$uact" in
       ff)     act="fast-forward $name" ;;
       merge)  act="merge $MAIN into $name" ;;
@@ -362,7 +366,7 @@ derive() {
     esac
     if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
       block_op "${name}U"
-      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - -
+      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - - "$meta"
     else
       # The update starts where the removal starts. A branch the command is
       # offering to delete is not one it also proposes to maintain, and without
@@ -372,15 +376,15 @@ derive() {
       [ -n "$removal" ] && udef=$def
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - -
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - - "$meta"
     fi
   done <<EOF
 $BFACTS
 EOF
 
-  while IFS="$TAB" read -r name wt head inmain mpr opr cpr block refs ign; do
+  while IFS="$TAB" read -r name wt head inmain mpr opr cpr block refs ign meta; do
     [ -z "$name" ] && continue
-    if [ "$block" != - ]; then NOTED="$NOTED$name${TAB}blocked$TAB$block$NL"; continue; fi
+    if [ "$block" != - ]; then NOTED="$NOTED$name${TAB}blocked$TAB$meta$TAB$block$NL"; continue; fi
 
     if [ "$inmain" = yes ]; then
       dcls=landed; detached_reason inmain
@@ -399,8 +403,8 @@ EOF
         done
         IFS=$oifs
       fi
-      if [ -n "$held" ]; then detached_reason onref "$held"; NOTED="$NOTED$name${TAB}live$TAB$REASON$NL"; continue; fi
-      if [ "$opr" != - ]; then detached_reason open "$opr"; NOTED="$NOTED$name${TAB}live$TAB$REASON$NL"; continue; fi
+      if [ -n "$held" ]; then detached_reason onref "$held"; NOTED="$NOTED$name${TAB}live$TAB$meta$TAB$REASON$NL"; continue; fi
+      if [ "$opr" != - ]; then detached_reason open "$opr"; NOTED="$NOTED$name${TAB}live$TAB$meta$TAB$REASON$NL"; continue; fi
       dcls=unsure
       if [ "$cpr" != - ]; then detached_reason closed "$cpr"; else detached_reason orphan; fi
     fi
@@ -413,7 +417,7 @@ EOF
     # removal behind --detached and the two defaults have to agree.
     note_default "${name}D" off
     st=off; has "${name}D" "$SELECTED" && st=on
-    emit "${name}D" "$st" detach "remove worktree $name" "$wt" "$REASON" "$ign" - "$dcls"
+    emit "${name}D" "$st" detach "remove worktree $name" "$wt" "$REASON" "$ign" - "$dcls" "$meta"
   done <<EOF
 $DFACTS
 EOF
@@ -441,7 +445,7 @@ draw() {
     "$BOLD" "$MAIN" "$RESET" "$DIM" "$RESET"
 
   i=0
-  while IFS="$TAB" read -r op state kind action target why ign n class; do
+  while IFS="$TAB" read -r op state kind action target why ign n class meta; do
     [ -z "$op" ] && continue
     i=$((i + 1))
     [ "$i" -lt "$TOP" ] && continue
@@ -454,9 +458,9 @@ draw() {
     # reopened after it.
     class_icon "$class"
     case "$state" in
-      on)   printf ' %b %b[x]%b %b %s %.*s\n' "$point" "$GREEN" "$RESET" "$CICON" "$IC" "$text" "$body" ;;
-      off)  printf ' %b %b[ ] %b%b %s %.*s%b\n' "$point" "$DIM" "$CICON" "$DIM" "$IC" "$text" "$body" "$RESET" ;;
-      skip) printf ' %b %b[-] %b%b %s %b%.*s%b\n' "$point" "$DIM" "$CICON" "$DIM" "$IC" "$STRIKE" "$text" "$body" "$UNSTRIKE$RESET" ;;
+      on)   printf ' %b %b[x]%b %b %s %.*s %b\n' "$point" "$GREEN" "$RESET" "$CICON" "$IC" "$text" "$body" "$meta" ;;
+      off)  printf ' %b %b[ ] %b%b %s %.*s %b%b\n' "$point" "$DIM" "$CICON" "$DIM" "$IC" "$text" "$body" "$meta" "$RESET" ;;
+      skip) printf ' %b %b[-] %b%b %s %b%.*s%b %b\n' "$point" "$DIM" "$CICON" "$DIM" "$IC" "$STRIKE" "$text" "$body" "$UNSTRIKE$RESET" "$meta" ;;
     esac
   done <<EOF
 $ROWS
@@ -504,13 +508,13 @@ readkey() {
 # being asked to confirm something you can no longer see is not being asked.
 say_selected() {
   printf '\n%b%s%b\n' "$BOLD" "$1" "$RESET"
-  while IFS="$TAB" read -r op state kind action target why ign n class; do
+  while IFS="$TAB" read -r op state kind action target why ign n class meta; do
     [ -z "$op" ] && continue
     [ "$state" = on ] || continue
     [ "$why" = - ] && why=''
     icon_of "$kind"
     class_icon "$class"
-    printf '  %b %s %s  %b%s%b\n' "$CICON" "$IC" "$action" "$DIM" "$why" "$RESET"
+    printf '  %b %s %s %b  %b%s%b\n' "$CICON" "$IC" "$action" "$meta" "$DIM" "$why" "$RESET"
     [ "$ign" = - ] || say_ignored "$ign"
   done <<EOF
 $ROWS
@@ -520,10 +524,10 @@ EOF
 say_noted() {
   [ -z "$NOTED" ] && return 0
   printf '\n%bLooked at, no valid action%b\n' "$BOLD" "$RESET"
-  while IFS="$TAB" read -r nm cls w; do
+  while IFS="$TAB" read -r nm cls mt w; do
     [ -z "$nm" ] && continue
     class_icon "$cls"
-    printf '  %b %b%s  %s%b\n' "$CICON" "$DIM" "$nm" "$w" "$RESET"
+    printf '  %b %b%s%b %b  %b%s%b\n' "$CICON" "$DIM" "$nm" "$RESET" "$mt" "$DIM" "$w" "$RESET"
   done <<EOF
 $NOTED
 EOF
@@ -596,7 +600,7 @@ say_noted
 
 # The plan is built from what is selected, in the order the rows were derived,
 # which puts every removal before the update of anything that survives it.
-while IFS="$TAB" read -r op state kind action target why ign n class; do
+while IFS="$TAB" read -r op state kind action target why ign n class meta; do
   [ -z "$op" ] && continue
   [ "$state" = on ] || continue
   case "$kind" in

@@ -22,8 +22,8 @@ guard_path
 . "$REPO/home/common/bin/git-refresh"
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored
-BFACTS="foo${TAB}/wt/foo${TAB}merged${TAB}3${TAB}0${TAB}merged${TAB}0${TAB}-${TAB}-${TAB}-${TAB}2 ignored entries: node_modules/, .env$NL"
+# its detail, ignored, meta
+BFACTS="foo${TAB}/wt/foo${TAB}merged${TAB}3${TAB}0${TAB}merged${TAB}0${TAB}-${TAB}-${TAB}-${TAB}2 ignored entries: node_modules/, .env${TAB}[3 ahead, 5 days ago]$NL"
 DFACTS=''
 
 derive

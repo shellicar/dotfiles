@@ -22,9 +22,9 @@ guard_path
 . "$REPO/home/common/bin/git-refresh"
 
 ROWS=''
-emit fooR on remove 'remove foo' '' merged - 0 merged
+emit fooR on remove 'remove foo' '' merged - 0 merged '[3 ahead, 5 days ago]'
 
-IFS="$TAB" read -r op state kind action target why ign n class <<EOF
+IFS="$TAB" read -r op state kind action target why ign n class meta <<EOF
 $ROWS
 EOF
 

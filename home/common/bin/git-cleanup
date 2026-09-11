@@ -95,9 +95,7 @@ EOF
   icon=$CICON
 
   last=$(git log -1 --format=%cr "refs/heads/$branch" 2>/dev/null)
-  # The commit count stays full-brightness (not dimmed) — it's the number
-  # that actually matters when deciding whether a branch is worth a look.
-  meta="${DIM}[${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
+  meta=$(target_meta "$ahead" "$last")
 
   if [ "$class" = empty ]; then
     # Never diverged from main — NOT a squash-merge detection, just a
@@ -169,7 +167,7 @@ process_detached() {
   short=$(git rev-parse --short "$head" 2>/dev/null)
   ahead=$(git rev-list --count "$MAIN_REF..$head" 2>/dev/null || echo '?')
   last=$(git log -1 --format=%cr "$head" 2>/dev/null)
-  meta="${DIM}[${RESET}$short${DIM}, ${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
+  meta=$(target_meta "$ahead" "$last" "$short")
 
   # Before the read, for the reason in process_branch.
   verdict=$(detached_verdict "$wt" "$head")

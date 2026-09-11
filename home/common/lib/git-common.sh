@@ -63,6 +63,19 @@ age_colour() (
   printf '%s' "$DIM"
 )
 
+# The bracketed facts a target is judged on: how much sits on it, how long since
+# it was touched, and for a worktree with no branch the commit it is parked on.
+# Shared so both commands measure the same thing and say it the same way.
+# Contains its own colour, so a caller prints it with %b.
+#
+# Echoed rather than set, unlike the other shared strings here: this one is only
+# ever built once per target, never inside a loop that runs on a keystroke.
+target_meta() (
+  at=''
+  [ -n "${3:-}" ] && at="$3${DIM}, ${RESET}"
+  printf '%s' "${DIM}[${RESET}${at}$1 ahead${DIM}, ${RESET}$(age_colour "$2")$2${RESET}${DIM}]${RESET}"
+)
+
 # ── repository context ──────────────────────────────────────────────────────
 
 ref_exists() { git rev-parse --verify --quiet "$1" >/dev/null 2>&1; }
