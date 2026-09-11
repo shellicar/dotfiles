@@ -168,7 +168,7 @@ step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 step 'reading branches and worktrees ...'
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta
+# its detail, ignored, meta, unpushed
 BFACTS=''
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs,
 # ignored, meta
@@ -185,6 +185,13 @@ EOF
   why=$REASON
 
   meta=$(target_meta "$ahead" "$(git log -1 --format=%cr "refs/heads/$b" 2>/dev/null)")
+
+  # Commits the branch's own remote does not have, which is work that exists
+  # nowhere else. Not asked of the trunk: say_environment reports that case in
+  # its own words, and says more about it than a count would.
+  unpushed=0
+  [ "$b" = "$MAIN" ] || unpushed=$(git rev-list --count "$b@{u}..refs/heads/$b" 2>/dev/null || echo 0)
+
   block='-'; behind=0; uact='-'; udetail='-'; ign='-'
   if [ -n "$wt" ]; then
     ign=$(worktree_ignored "$wt"); ign=${ign:--}
@@ -207,7 +214,7 @@ EOF
       uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$NL"
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$NL"
 done
 
 # With --branch the run is about the branches you named, so a worktree with no
@@ -302,7 +309,7 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta; do
+  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
 
@@ -347,6 +354,10 @@ derive() {
       NOTED="$NOTED$name${TAB}blocked$TAB$meta$TAB$block$NL"
     elif [ "$class" = inconclusive ]; then
       NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$why, run --old$NL"
+    elif [ -z "$removal" ] && [ "$uact" = - ] && [ "$unpushed" != 0 ]; then
+      # Nothing to do with the branch, but something on it that is on no remote.
+      # Said without -a, because it is the one thing here you can lose.
+      NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$unpushed not pushed$NL"
     elif [ "$SHOW_ALL" = true ] && [ -z "$removal" ] && [ "$uact" = - ]; then
       # Only two things reach here. The trunk, which is excluded from removal
       # above, and whose reason is written about a branch and says nothing

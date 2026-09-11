@@ -22,8 +22,8 @@ guard_path
 . "$REPO/home/common/bin/git-refresh"
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta
-BFACTS="foo${TAB}/wt/foo${TAB}merged${TAB}3${TAB}0${TAB}merged${TAB}0${TAB}-${TAB}-${TAB}-${TAB}-${TAB}[3 ahead, 5 days ago]$NL"
+# its detail, ignored, meta, unpushed
+BFACTS="foo${TAB}/wt/foo${TAB}merged${TAB}3${TAB}0${TAB}merged${TAB}0${TAB}-${TAB}-${TAB}-${TAB}-${TAB}[3 ahead, 5 days ago]${TAB}0$NL"
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs,
 # ignored, meta
 DFACTS="foo${TAB}/elsewhere/foo${TAB}abc123${TAB}no${TAB}-${TAB}-${TAB}-${TAB}-${TAB}-${TAB}-${TAB}[abc123, 1 ahead, 5 days ago]$NL"
