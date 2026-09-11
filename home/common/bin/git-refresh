@@ -210,8 +210,14 @@ EOF
     # undoes it.
     if [ "$block" = - ] && [ "$behind" != 0 ] &&
        [ "$class" != merged ] && [ "$class" != review ]; then
-      uv=$(update_verdict "$wt" "$b")
-      uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
+      # Asked before the strategy, because the strategy is a rebase and a rebase
+      # here force-pushes. git spread stops for this and so does git catchup.
+      if branch_diverged_from_remote "$wt" "$b"; then
+        uact=none; udetail='diverged from its own remote, resolve that first'
+      else
+        uv=$(update_verdict "$wt" "$b")
+        uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
+      fi
     fi
   fi
   BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$NL"

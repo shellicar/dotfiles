@@ -86,15 +86,14 @@ while IFS= read -r wt; do
     printf '🧹 %s [%s]: upstream gone (merged and deleted?) — skipping, cleanup candidate\n' "$wt" "$branch"
     continue
   fi
-  push_after=0
-  if [ -n "$upstream" ] && [ "$branch" != "$MAIN" ]; then
-    if git -C "$wt" merge-base --is-ancestor "$upstream" HEAD; then
-      push_after=1
-    else
-      printf '⛔ %s [%s]: diverged from its own remote — resolve that first, skipping\n' "$wt" "$branch"
-      continue
-    fi
+  # The test itself is in the library, because git refresh needs the same answer
+  # and the cost of the two disagreeing is a colleague's commit.
+  if branch_diverged_from_remote "$wt" "$branch"; then
+    printf '⛔ %s [%s]: diverged from its own remote — resolve that first, skipping\n' "$wt" "$branch"
+    continue
   fi
+  push_after=0
+  [ -n "$upstream" ] && [ "$branch" != "$MAIN" ] && push_after=1
 
   if [ "$behind" -eq 0 ]; then
     # Nothing to bring in, but not necessarily nothing to say: a branch ahead of

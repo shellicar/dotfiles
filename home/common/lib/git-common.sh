@@ -860,6 +860,26 @@ branch_cut_from() (
     done
 )
 
+# Its own remote holds commits the branch does not, so it has diverged from the
+# remote rather than merely sitting ahead of it. A rebase replays the branch and
+# force-pushes the result, which destroys them.
+#
+# --force-with-lease does not save it. The lease compares against the
+# remote-tracking ref, and this run's own fetch has just moved that ref onto the
+# commit in question, so the lease agrees and the push goes through. git
+# catchup's header carries the long version; the preflight is the only guard.
+#
+# The trunk is exempt: being behind origin/$MAIN is its ordinary state and
+# nothing here force-pushes it.
+branch_diverged_from_remote() (
+  wt=$1 b=$2
+  [ "$b" = "$MAIN" ] && return 1
+  up=$(git -C "$wt" rev-parse --verify --quiet '@{u}') || return 1
+  [ -n "$up" ] || return 1
+  git -C "$wt" merge-base --is-ancestor "$up" HEAD && return 1
+  return 0
+)
+
 # How to bring main into this worktree, as: action, then what it needs.
 #   ff              the default branch itself, fast-forward only
 #   merge           it has merged main before, so it merges again
