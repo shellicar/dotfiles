@@ -597,6 +597,41 @@ EOF
 
 # ── picking, then doing ─────────────────────────────────────────────────────
 
+# What was picked, as a plan, in the order the rows were derived, which puts
+# every removal before the update of anything that survives it.
+#
+# A function rather than a loop inside main, so that a test can call it. The
+# rescue reads its commit count out of the row and counts back from the tip with
+# it: get that wrong and it replays from the wrong commit, then deletes the
+# original, which is the only place in these commands where work goes without
+# anything saying so.
+build_plan() {
+  while IFS="$TAB" read -r op state kind action target why ign n class meta stash; do
+    [ -z "$op" ] && continue
+    [ "$state" = on ] || continue
+    case "$kind" in
+      remove)
+        plan_add delete "${op%R}" - - "${target:--}"
+        ;;
+      detach)
+        plan_add detached "${op%D}" - - "$target"
+        ;;
+      rescue)
+        b=${op%R}
+        base=$(git merge-base "refs/heads/$b" "$MAIN_REF")
+        join=$(git rev-list "$base..refs/heads/$b" | sed -n "$((n + 1))p")
+        plan_add rescue "$b" "$join" "$n" "${target:--}"
+        ;;
+      ff|merge|rebase)
+        b=${op%U}
+        plan_add "$kind" "$b" "$stash" - "$target"
+        ;;
+    esac
+  done <<EOF
+$ROWS
+EOF
+}
+
 main() {
 parse_args "$@"
 setup
@@ -660,32 +695,7 @@ say_noted
 
 [ "$VERDICT" = quit ] && { printf 'nothing done\n'; exit 0; }
 
-# The plan is built from what is selected, in the order the rows were derived,
-# which puts every removal before the update of anything that survives it.
-while IFS="$TAB" read -r op state kind action target why ign n class meta stash; do
-  [ -z "$op" ] && continue
-  [ "$state" = on ] || continue
-  case "$kind" in
-    remove)
-      plan_add delete "${op%R}" - - "${target:--}"
-      ;;
-    detach)
-      plan_add detached "${op%D}" - - "$target"
-      ;;
-    rescue)
-      b=${op%R}
-      base=$(git merge-base "refs/heads/$b" "$MAIN_REF")
-      join=$(git rev-list "$base..refs/heads/$b" | sed -n "$((n + 1))p")
-      plan_add rescue "$b" "$join" "$n" "${target:--}"
-      ;;
-    ff|merge|rebase)
-      b=${op%U}
-      plan_add "$kind" "$b" "$stash" - "$target"
-      ;;
-  esac
-done <<EOF
-$ROWS
-EOF
+build_plan
 
 [ -z "$PLAN" ] && { printf 'nothing selected\n'; exit 0; }
 
