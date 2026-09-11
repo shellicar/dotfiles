@@ -147,7 +147,8 @@ step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 # holding a detached commit are listed here and filtered there.
 step 'reading branches and worktrees ...'
 
-# name, worktree, class, ahead, why, behind, block, update action, its detail
+# name, worktree, class, ahead, not in main, why, behind, block, update action,
+# its detail, ignored
 BFACTS=''
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs
 DFACTS=''
@@ -157,9 +158,10 @@ for b in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
   IFS="$TAB" read -r class n ahead gone wt <<EOF
 $verdict
 EOF
-  [ "$gone" = true ] && why='remote gone' || why='-'
-  [ "$class" = review ] && why="$n on top"
-  [ "$class" = inconclusive ] && why="$(distance_from_main "refs/heads/$b") behind, not evaluated"
+  # The library's sentence, so this says what git cleanup says. It is never
+  # empty, which the tab-delimited record below depends on.
+  branch_reason "$b" "$class" "$n" "$gone"
+  why=$REASON
 
   block='-'; behind=0; uact='-'; udetail='-'; ign='-'
   if [ -n "$wt" ]; then
@@ -176,7 +178,7 @@ EOF
       uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$NL"
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$NL"
 done
 
 while IFS="$TAB" read -r head p; do
@@ -246,15 +248,16 @@ icon_of() {
 # being read back, it disappears and drags every later field one place left.
 # plan_add has carried this rule since it was written; this is the same rule.
 emit() {
-  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$NL"
+  ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$TAB${8:--}$TAB${9:--}$NL"
   COUNT=$((COUNT + 1))
   [ "$2" = on ] && PICKED=$((PICKED + 1))
   return 0
 }
 
-# Rows: id, state, kind, action, target, why. Forks nothing, because this runs
-# again on every keystroke. Branches first, so that by the time a detached
-# worktree is judged, every removal that could orphan its commit is counted.
+# Rows: id, state, kind, action, target, why, ignored, count, class. Forks
+# nothing, because this runs again on every keystroke. Branches first, so that
+# by the time a detached worktree is judged, every removal that could orphan
+# its commit is counted.
 derive() {
   ROWS=''
   COUNT=0
@@ -263,7 +266,7 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead why behind block uact udetail ign; do
+  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
 
@@ -271,10 +274,15 @@ derive() {
     # reads as "empty", being an ancestor of itself with nothing ahead, and would
     # be offered for deletion.
     removal=''
+    # empty is unticked here, the way git cleanup holds it behind --empty. The
+    # default is what decides, because pressing r on arrival is the ordinary way
+    # to run this: a class the other command makes you ask for cannot be ticked
+    # already in this one.
     [ "$name" = "$MAIN" ] || case "$class" in
-      merged|empty) removal="remove $name"; def=on ;;
-      suspect)      removal="remove $name"; def=off ;;
-      review)       removal="rescue $why off $name, then remove it"; def=off ;;
+      merged)  removal="remove $name"; def=on ;;
+      empty)   removal="remove $name"; def=off ;;
+      suspect) removal="remove $name"; def=off ;;
+      review)  removal="rescue $n off $name, then remove it"; def=off ;;
     esac
     if [ -n "$removal" ] && [ "$block" = - ]; then
       [ -n "$wt" ] && removal="$removal and its worktree"
@@ -282,35 +290,36 @@ derive() {
       st=off; has "${name}R" "$SELECTED" && st=on
       [ "$st" = on ] && doom_branch "$name"
       [ "$class" = review ] && k=rescue || k=remove
-      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign"
+      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign" "$n" "$class"
     else
       removal=''
     fi
 
-    # Nothing on offer is still worth saying when the reason is that the tree is
-    # dirty or that the branch could not be evaluated. Reported outside the
-    # removal branch above, or a target with no removal to attach it to is
-    # silently absent, which is what happened to the trunk itself.
+    # A target with no operation is still worth saying when the reason is that
+    # the tree is dirty or that the branch could not be evaluated: each of those
+    # is waiting on something you can do. Reported outside the removal branch
+    # above, or a target with no removal to attach it to is silently absent,
+    # which is what happened to the trunk itself.
     #
     # With -a, everything is worth saying: a branch that is simply unmerged and
     # level with the trunk stops nothing and would otherwise never appear, which
     # made this command tell you less about the repository than git cleanup does.
     if [ "$block" != - ]; then
-      NOTED="$NOTED$name$TAB$block$NL"
+      NOTED="$NOTED$name${TAB}blocked$TAB$block$NL"
     elif [ "$class" = inconclusive ]; then
-      NOTED="$NOTED$name$TAB$why, run --old$NL"
+      NOTED="$NOTED$name$TAB$class$TAB$why, run --old$NL"
     elif [ "$SHOW_ALL" = true ] && [ -z "$removal" ] && [ "$uact" = - ]; then
       # Only two things reach here. The trunk, which is excluded from removal
-      # above and reads as its class otherwise, which means nothing to a reader.
-      # And an unmerged branch, which is the whole point of asking for -a.
-      # Every other class has an operation and is shown as one.
-      note=$class
-      [ "$name" = "$MAIN" ] && note='the trunk'
-      NOTED="$NOTED$name$TAB$note$NL"
+      # above, and whose reason is written about a branch and says nothing
+      # about it. And an unmerged branch, which is the whole point of asking
+      # for -a. Every other class has an operation and is shown as one.
+      note=$why; ncls=$class
+      [ "$name" = "$MAIN" ] && { note='the trunk'; ncls=-; }
+      NOTED="$NOTED$name$TAB$ncls$TAB$note$NL"
     fi
 
     [ "$uact" = - ] && continue
-    if [ "$uact" = none ]; then NOTED="$NOTED$name$TAB$udetail$NL"; continue; fi
+    if [ "$uact" = none ]; then NOTED="$NOTED$name$TAB$class$TAB$udetail$NL"; continue; fi
     case "$uact" in
       ff)     act="fast-forward $name" ;;
       merge)  act="merge $MAIN into $name" ;;
@@ -318,11 +327,11 @@ derive() {
     esac
     if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
       block_op "${name}U"
-      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" -
+      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - -
     else
       note_default "${name}U" on
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" -
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - -
     fi
   done <<EOF
 $BFACTS
@@ -330,12 +339,12 @@ EOF
 
   while IFS="$TAB" read -r name wt head inmain mpr opr cpr block refs ign; do
     [ -z "$name" ] && continue
-    if [ "$block" != - ]; then NOTED="$NOTED$name$TAB$block$NL"; continue; fi
+    if [ "$block" != - ]; then NOTED="$NOTED$name${TAB}blocked$TAB$block$NL"; continue; fi
 
     if [ "$inmain" = yes ]; then
-      det=on; reason='work already in main'
+      dcls=landed; detached_reason inmain
     elif [ "$mpr" != - ]; then
-      det=on; reason="merged in $mpr"
+      dcls=landed; detached_reason merged "$mpr"
     else
       # The one selection-dependent question: a branch you are removing is not a
       # home for anything, so it does not count as holding this commit.
@@ -349,18 +358,21 @@ EOF
         done
         IFS=$oifs
       fi
-      if [ -n "$held" ]; then NOTED="$NOTED$name${TAB}on $held$NL"; continue; fi
-      if [ "$opr" != - ]; then NOTED="$NOTED$name$TAB$opr is open$NL"; continue; fi
-      det=off
-      [ "$cpr" != - ] && reason="$cpr closed without merging" || reason='on no branch, in no pull request'
+      if [ -n "$held" ]; then detached_reason onref "$held"; NOTED="$NOTED$name${TAB}live$TAB$REASON$NL"; continue; fi
+      if [ "$opr" != - ]; then detached_reason open "$opr"; NOTED="$NOTED$name${TAB}live$TAB$REASON$NL"; continue; fi
+      dcls=unsure
+      if [ "$cpr" != - ]; then detached_reason closed "$cpr"; else detached_reason orphan; fi
     fi
 
     # Kind 'detach', not 'remove': the plan routes on it, and a worktree with no
     # branch loses only the directory. Inferring that later from whether the name
     # matched the directory's basename removed the worktree and left the branch.
-    note_default "${name}D" "$det"
+    #
+    # Unticked whichever class it is, because git cleanup holds a detached
+    # removal behind --detached and the two defaults have to agree.
+    note_default "${name}D" off
     st=off; has "${name}D" "$SELECTED" && st=on
-    emit "${name}D" "$st" detach "remove worktree $name" "$wt" "$reason" "$ign"
+    emit "${name}D" "$st" detach "remove worktree $name" "$wt" "$REASON" "$ign" - "$dcls"
   done <<EOF
 $DFACTS
 EOF
@@ -388,7 +400,7 @@ draw() {
     "$BOLD" "$MAIN" "$RESET" "$DIM" "$RESET"
 
   i=0
-  while IFS="$TAB" read -r op state kind action target why ign; do
+  while IFS="$TAB" read -r op state kind action target why ign n class; do
     [ -z "$op" ] && continue
     i=$((i + 1))
     [ "$i" -lt "$TOP" ] && continue
@@ -397,10 +409,13 @@ draw() {
     [ "$why" = - ] && why=''
     body="$action  $why"
     if [ "$state" = on ]; then icon_of "$kind"; else IC='• '; fi
+    # The class icon carries its own reset, so the dim of an unselected row is
+    # reopened after it.
+    class_icon "$class"
     case "$state" in
-      on)   printf ' %b %b[x]%b %s %.*s\n' "$point" "$GREEN" "$RESET" "$IC" "$text" "$body" ;;
-      off)  printf ' %b %b[ ] %s %.*s%b\n' "$point" "$DIM" "$IC" "$text" "$body" "$RESET" ;;
-      skip) printf ' %b %b[-] %s %b%.*s%b\n' "$point" "$DIM" "$IC" "$STRIKE" "$text" "$body" "$UNSTRIKE$RESET" ;;
+      on)   printf ' %b %b[x]%b %b %s %.*s\n' "$point" "$GREEN" "$RESET" "$CICON" "$IC" "$text" "$body" ;;
+      off)  printf ' %b %b[ ] %b%b %s %.*s%b\n' "$point" "$DIM" "$CICON" "$DIM" "$IC" "$text" "$body" "$RESET" ;;
+      skip) printf ' %b %b[-] %b%b %s %b%.*s%b\n' "$point" "$DIM" "$CICON" "$DIM" "$IC" "$STRIKE" "$text" "$body" "$UNSTRIKE$RESET" ;;
     esac
   done <<EOF
 $ROWS
@@ -448,12 +463,13 @@ readkey() {
 # being asked to confirm something you can no longer see is not being asked.
 say_selected() {
   printf '\n%b%s%b\n' "$BOLD" "$1" "$RESET"
-  while IFS="$TAB" read -r op state kind action target why ign; do
+  while IFS="$TAB" read -r op state kind action target why ign n class; do
     [ -z "$op" ] && continue
     [ "$state" = on ] || continue
     [ "$why" = - ] && why=''
     icon_of "$kind"
-    printf '  %s %s  %b%s%b\n' "$IC" "$action" "$DIM" "$why" "$RESET"
+    class_icon "$class"
+    printf '  %b %s %s  %b%s%b\n' "$CICON" "$IC" "$action" "$DIM" "$why" "$RESET"
     [ "$ign" = - ] || say_ignored "$ign"
   done <<EOF
 $ROWS
@@ -462,10 +478,11 @@ EOF
 
 say_noted() {
   [ -z "$NOTED" ] && return 0
-  printf '\n%bLooked at, nothing on offer%b\n' "$BOLD" "$RESET"
-  while IFS="$TAB" read -r n w; do
-    [ -z "$n" ] && continue
-    printf '  %b%s  %s%b\n' "$DIM" "$n" "$w" "$RESET"
+  printf '\n%bLooked at, no valid action%b\n' "$BOLD" "$RESET"
+  while IFS="$TAB" read -r nm cls w; do
+    [ -z "$nm" ] && continue
+    class_icon "$cls"
+    printf '  %b %b%s  %s%b\n' "$CICON" "$DIM" "$nm" "$w" "$RESET"
   done <<EOF
 $NOTED
 EOF
@@ -538,7 +555,7 @@ say_noted
 
 # The plan is built from what is selected, in the order the rows were derived,
 # which puts every removal before the update of anything that survives it.
-while IFS="$TAB" read -r op state kind action target why ign; do
+while IFS="$TAB" read -r op state kind action target why ign n class; do
   [ -z "$op" ] && continue
   [ "$state" = on ] || continue
   case "$kind" in
@@ -551,7 +568,6 @@ while IFS="$TAB" read -r op state kind action target why ign; do
     rescue)
       b=${op%R}
       base=$(git merge-base "refs/heads/$b" "$MAIN_REF")
-      n=${why% on top}
       join=$(git rev-list "$base..refs/heads/$b" | sed -n "$((n + 1))p")
       plan_add rescue "$b" "$join" "$n" "${target:--}"
       ;;

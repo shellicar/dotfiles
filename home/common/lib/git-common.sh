@@ -37,7 +37,7 @@ else
   GREEN=''; YELLOW=''; RED=''; BLUE=''; DIM=''; BOLD=''; RESET=''
 fi
 
-OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; EMPTYICON='≡'; UNKNOWN='?'; WOULDREMOVE='\342\235\227'
+OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; EMPTYICON='≡'; UNKNOWN='?'; REVIEW='🟡'; WOULDREMOVE='\342\235\227'
 
 say() { printf '%b\n' "$*"; }
 log() { [ "$VERBOSE" = true ] && printf '%b\n' "${DIM}[$TOOL] $*${RESET}" >&2; return 0; }
@@ -573,6 +573,81 @@ branch_verdict() (
   printf '%s\t%s\t%s\t%s\t%s\n' "$class" "$n" "$ahead" "$gone" "$wt"
 )
 
+# What the class looks like, as CICON. Beside branch_reason for the same
+# reason: what a class is called and what it looks like are both facts about
+# the class. The classes a worktree with no branch can be are here too, and
+# anything with no class at all gets a space, so the column stays.
+#
+# Contains its own colour, so a caller prints it with %b. A caller that has
+# opened a colour of its own reopens it afterwards, because the reset in here
+# closes it.
+class_icon() {
+  case "$1" in
+    empty)               CICON="${BLUE}${EMPTYICON}${RESET}" ;;
+    merged|landed)       CICON="${GREEN}${OK}${RESET}" ;;
+    review)              CICON="$REVIEW" ;;
+    suspect)             CICON="${RED}${WARN}${RESET}" ;;
+    inconclusive|unsure) CICON="${YELLOW}${UNKNOWN}${RESET}" ;;
+    unmerged|live)       CICON="${DIM}${KEEP}${RESET}" ;;
+    blocked)             CICON="$NOACCESS" ;;
+    *)                   CICON=' ' ;;
+  esac
+  return 0
+}
+
+# What the class means, in words, as REASON.
+#
+# One sentence, in one place, because what a class means is a fact about the
+# branch and not about the command reporting it. What differs between the
+# commands is how you act on it: git cleanup names the flag that would, git
+# refresh shows a box already ticked. That part stays with each of them.
+#
+# Set rather than echoed, because git refresh builds these in a loop that must
+# not fork.
+branch_reason() {
+  local b=$1 class=$2 n=$3 gone=$4 noun
+  case "$class" in
+    empty) REASON='never diverged from main' ;;
+    merged)
+      # The remote still existing is the one disagreement worth raising. The
+      # content is in main, so something merged it, yet the branch was not
+      # deleted the way a merged pull request deletes it.
+      [ "$gone" = true ] && REASON='merged' || REASON='merged, but remote not gone — check the PR'
+      ;;
+    review)
+      [ "$n" -gt 1 ] && noun=commits || noun=commit
+      REASON="merged, $n $noun on top not in main"
+      [ "$gone" = true ] && REASON="$REASON [gone]"
+      ;;
+    suspect) REASON='gone, but content not found in main' ;;
+    inconclusive)
+      REASON="$(distance_from_main "refs/heads/$b") behind, not evaluated"
+      [ "$gone" = true ] && REASON="$REASON [gone]"
+      ;;
+    *)
+      REASON=unmerged
+      branch_has_upstream "$b" || REASON='unmerged, local-only'
+      ;;
+  esac
+  return 0
+}
+
+# The same for a worktree with no branch: the fact that decided it, as REASON.
+# Which fact that is comes from the caller, because git refresh works it out
+# again itself. One step of that decision depends on what you have selected, so
+# only the wording is shared.
+detached_reason() {
+  case "$1" in
+    inmain) REASON='work already in main' ;;
+    merged) REASON="merged in $2" ;;
+    onref)  REASON="on $2" ;;
+    open)   REASON="$2 is open" ;;
+    closed) REASON="$2 closed without merging" ;;
+    *)      REASON='on no branch, in no pull request' ;;
+  esac
+  return 0
+}
+
 # A worktree with no branch on it, as: class, then the reason in words.
 #   blocked  uncommitted changes, so nothing is on offer whatever else is true
 #   landed   its work is in main, or a merged pull request carries it
@@ -587,18 +662,18 @@ detached_verdict() (
   r=$(worktree_block_reason "$wt")
   [ -n "$r" ] && { printf 'blocked\t%s\n' "$r"; return 0; }
 
-  [ "$(commits_not_in_main "$head")" = 0 ] && { printf 'landed\twork already in main\n'; return 0; }
+  [ "$(commits_not_in_main "$head")" = 0 ] && { detached_reason inmain; printf 'landed\t%s\n' "$REASON"; return 0; }
   pr=$(detached_pr "$head" merged)
-  [ -n "$pr" ] && { printf 'landed\tmerged in %s\n' "$pr"; return 0; }
+  [ -n "$pr" ] && { detached_reason merged "$pr"; printf 'landed\t%s\n' "$REASON"; return 0; }
 
   r=$(commit_on_ref "$head")
-  [ -n "$r" ] && { printf 'live\ton %s\n' "$r"; return 0; }
+  [ -n "$r" ] && { detached_reason onref "$r"; printf 'live\t%s\n' "$REASON"; return 0; }
   pr=$(detached_pr "$head" open)
-  [ -n "$pr" ] && { printf 'live\t%s is open\n' "$pr"; return 0; }
+  [ -n "$pr" ] && { detached_reason open "$pr"; printf 'live\t%s\n' "$REASON"; return 0; }
 
   pr=$(detached_pr "$head" closed)
-  [ -n "$pr" ] && { printf 'unsure\t%s closed without merging\n' "$pr"; return 0; }
-  printf 'unsure\ton no branch, in no pull request\n'
+  [ -n "$pr" ] && { detached_reason closed "$pr"; printf 'unsure\t%s\n' "$REASON"; return 0; }
+  detached_reason orphan; printf 'unsure\t%s\n' "$REASON"
 )
 
 # ── bringing main in ────────────────────────────────────────────────────────

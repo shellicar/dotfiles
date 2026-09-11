@@ -10,7 +10,7 @@ describe "a row for a branch with no worktree keeps its fields in place"
 # Tab is IFS whitespace, so a run of tabs is one delimiter and an empty field
 # vanishes, shifting every field after it. The worktree field is empty for every
 # branch that has none, and the reason column then lands in it: the plan tries
-# to remove a worktree called "remote gone", and a rescue reads an empty count
+# to remove a worktree called "merged", and a rescue reads an empty count
 # and replays nothing before deleting the branch.
 
 git_says() { fail "no git call belongs in building or reading a row: git $*"; }
@@ -22,12 +22,12 @@ guard_path
 . "$REPO/home/common/bin/git-refresh"
 
 ROWS=''
-emit fooR on remove 'remove foo' '' 'remote gone' -
+emit fooR on remove 'remove foo' '' merged - 0 merged
 
-IFS="$TAB" read -r op state kind action target why ign <<EOF
+IFS="$TAB" read -r op state kind action target why ign n class <<EOF
 $ROWS
 EOF
 
-expected='remote gone'
+expected=merged
 actual=$why
 assert_eq "$actual" "$expected"
