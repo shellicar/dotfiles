@@ -341,7 +341,11 @@ derive() {
       suspect) removal="remove $name"; def=off ;;
       review)  removal="rescue $n off $name, then remove it"; def=off ;;
     esac
-    stopped=no
+    # What the class offers, kept before the block check clears it below. The
+    # update's default follows the removal's whether or not the removal row was
+    # emitted: a dirty worktree stops the removal being offered, and that must
+    # not be what arms the update instead.
+    offered=$removal
     if [ -n "$removal" ] && [ "$block" = - ]; then
       [ -n "$wt" ] && removal="$removal and its worktree"
       note_default "${name}R" "$def"
@@ -350,7 +354,6 @@ derive() {
       [ "$class" = review ] && k=rescue || k=remove
       emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign" "$n" "$class" "$meta"
     else
-      [ -n "$removal" ] && stopped=yes
       removal=''
     fi
 
@@ -368,7 +371,7 @@ derive() {
     # stash has already told you the tree is dirty, and saying "blocked" beside
     # it claims something was refused when nothing was.
     saying_block=no
-    [ "$block" != - ] && [ "$stopped" = yes ] && saying_block=yes
+    [ "$block" != - ] && [ -n "$offered" ] && saying_block=yes
     [ "$block" != - ] && [ "$uact" = - ] && saying_block=yes
     if [ "$saying_block" = yes ]; then
       NOTED="$NOTED$name${TAB}blocked$TAB$meta$TAB$block$NL"
@@ -410,7 +413,7 @@ derive() {
       # And an update that has to move your uncommitted work out of the way
       # starts off whatever else is true, which is git spread's default.
       udef=on
-      [ -n "$removal" ] && udef=$def
+      [ -n "$offered" ] && udef=$def
       [ "$stash" = yes ] && udef=off
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
