@@ -274,6 +274,9 @@ derive() {
     # reads as "empty", being an ancestor of itself with nothing ahead, and would
     # be offered for deletion.
     removal=''
+    # Reset every iteration: below, a branch with no removal reads it, and a
+    # value left over from the previous branch would answer for it.
+    def=off
     # empty is unticked here, the way git cleanup holds it behind --empty. The
     # default is what decides, because pressing r on arrival is the ordinary way
     # to run this: a class the other command makes you ask for cannot be ticked
@@ -329,7 +332,13 @@ derive() {
       block_op "${name}U"
       emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - -
     else
-      note_default "${name}U" on
+      # The update starts where the removal starts. A branch the command is
+      # offering to delete is not one it also proposes to maintain, and without
+      # this, unticking a removal arms a different operation on the same branch
+      # rather than leaving it alone.
+      udef=on
+      [ -n "$removal" ] && udef=$def
+      note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
       emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - -
     fi
