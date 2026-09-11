@@ -335,7 +335,7 @@ Options:
   --old            also evaluate branches left inconclusive by the cap: more
                    than $MAX_DISTANCE commits behind main AND untouched for
                    $MAX_AGE_DAYS days
-  -b, --base REF   compare against REF instead of the detected main branch
+  --base REF       compare against REF instead of the detected main branch
   --no-fetch       skip the initial 'git fetch --prune origin'
   -v, --verbose    log progress to stderr
   -h, --help       show this help
@@ -375,7 +375,7 @@ while [ $# -gt 0 ]; do
     -a|--all) SHOW_ALL=true ;;
     --depth) shift; [ $# -gt 0 ] || { echo "Error: --depth requires a number" >&2; exit 1; }; WALK_DEPTH=$1 ;;
     --old) EVALUATE_OLD=true ;;
-    -b|--base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 1; }; BASE_OVERRIDE=$1 ;;
+    --base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 1; }; BASE_OVERRIDE=$1 ;;
     --no-fetch) NO_FETCH=true ;;
     -v|--verbose) VERBOSE=true ;;
     -h|--help) usage; exit 0 ;;

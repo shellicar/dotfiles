@@ -8,6 +8,11 @@
 #
 #   -a, --all            list every branch and worktree looked at, not only
 #                        the ones with something on offer
+#   --base REF           compare against REF instead of the detected trunk
+#   --branch BRANCH      look at only this branch, not every local branch;
+#                        repeat to name several
+#   --depth N            commits to walk back from each tip for the join point
+#                        (default 5)
 #   --no-fetch           skip the initial 'git fetch --prune origin'
 #   --old                evaluate branches too far behind to be worth walking
 #   -v, --verbose        log progress to stderr
@@ -65,18 +70,25 @@ E=$(printf '\033')
 STRIKE="${E}[9m"; UNSTRIKE="${E}[29m"; INV="${E}[7m"
 
 parse_args() {
-  for arg in "$@"; do
-    case "$arg" in
+  # while/shift, not for-in: three of these take the argument that follows them,
+  # which a for loop cannot consume. There is no -b: with --base and --branch in
+  # the same command it reads as either.
+  while [ $# -gt 0 ]; do
+    case "$1" in
       --plan) plan_only=true ;;
       --no-fetch) NO_FETCH=true ;;
       -a|--all) SHOW_ALL=true ;;
       --old) EVALUATE_OLD=true ;;
+      --base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 2; }; BASE_OVERRIDE=$1 ;;
+      --branch) shift; [ $# -gt 0 ] || { echo "Error: --branch requires a branch name" >&2; exit 2; }; ONLY_BRANCHES="$ONLY_BRANCHES $1" ;;
+      --depth) shift; [ $# -gt 0 ] || { echo "Error: --depth requires a number" >&2; exit 2; }; WALK_DEPTH=$1 ;;
       -v|--verbose) VERBOSE=true ;;
       -h|--help)
-        sed -n '3,34p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '3,39p' "$0" | sed 's/^# \{0,1\}//'
         exit 0 ;;
-      *) echo "unknown option: $arg" >&2; exit 2 ;;
+      *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
+    shift
   done
 
   # No terminal means no selector, so there is nothing to pick from and the plan
@@ -98,6 +110,12 @@ setup() {
   mkdir -p "$CACHE_DIR"
   NOW=$(date +%s)
   resolve_main
+
+  # Named branches are checked before anything slow runs, so a typo fails at
+  # once rather than after the fetch and the pull request query.
+  for b in $ONLY_BRANCHES; do
+    ref_exists "refs/heads/$b" || { echo "Error: no local branch named '$b'" >&2; exit 1; }
+  done
 
   PLAN=''
   REMOVED_COUNT=0
@@ -127,7 +145,7 @@ DETACHED=$(git worktree list --porcelain | awk '
 ')
 
 DETACHED_PR_TABLE=''
-if [ -n "$DETACHED" ]; then
+if [ -n "$DETACHED" ] && [ -z "$ONLY_BRANCHES" ]; then
   step 'detached worktree PRs ...'
   fetch_detached_prs
   step_done "$(printf '%s' "$DETACHED_PR_TABLE" | grep -c .) found"
@@ -153,7 +171,7 @@ BFACTS=''
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs
 DFACTS=''
 
-for b in $(git for-each-ref --format '%(refname:short)' refs/heads/); do
+for b in ${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}; do
   verdict=$(branch_verdict "$b")
   IFS="$TAB" read -r class n ahead gone wt <<EOF
 $verdict
@@ -181,6 +199,11 @@ EOF
   BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$NL"
 done
 
+# With --branch the run is about the branches you named, so a worktree with no
+# branch on it is not part of it.
+DETACHED_TARGETS=$DETACHED
+[ -n "$ONLY_BRANCHES" ] && DETACHED_TARGETS=''
+
 while IFS="$TAB" read -r head p; do
   [ -z "$head" ] && continue
   inmain=no
@@ -193,7 +216,7 @@ while IFS="$TAB" read -r head p; do
   ign=$(worktree_ignored "$p")
   DFACTS="$DFACTS$(basename "$p")$TAB$p$TAB$head$TAB$inmain$TAB${mpr:--}$TAB${opr:--}$TAB${cpr:--}$TAB${b_reason:--}$TAB${refs:--}$TAB${ign:--}$NL"
 done <<EOF
-$DETACHED
+$DETACHED_TARGETS
 EOF
 step_done "$(printf '%s%s' "$BFACTS" "$DFACTS" | grep -c .) targets"
 }
