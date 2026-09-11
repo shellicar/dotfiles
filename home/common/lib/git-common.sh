@@ -622,6 +622,10 @@ class_icon() {
     inconclusive|unsure) CICON="${YELLOW}${UNKNOWN}${RESET}" ;;
     unmerged|live)       CICON="${DIM}${KEEP}${RESET}" ;;
     blocked)             CICON="$NOACCESS" ;;
+    # Not a class. An update has none of its own, so the column is free, and
+    # this says the row belongs to the one above it: the same branch, offered a
+    # removal as well. Same mark say_ignored uses for the same reason.
+    related)             CICON="${DIM}↳${RESET}" ;;
     *)                   CICON=' ' ;;
   esac
   return 0

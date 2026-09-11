@@ -341,20 +341,26 @@ derive() {
       suspect) removal="remove $name"; def=off ;;
       review)  removal="rescue $n off $name, then remove it"; def=off ;;
     esac
-    # What the class offers, kept before the block check clears it below. The
-    # update's default follows the removal's whether or not the removal row was
-    # emitted: a dirty worktree stops the removal being offered, and that must
-    # not be what arms the update instead.
+    # What the class offers, kept because the update's default follows it even
+    # when the removal cannot run.
     offered=$removal
-    if [ -n "$removal" ] && [ "$block" = - ]; then
+    if [ -n "$removal" ]; then
       [ -n "$wt" ] && removal="$removal and its worktree"
-      note_default "${name}R" "$def"
-      st=off; has "${name}R" "$SELECTED" && st=on
-      [ "$st" = on ] && doom_branch "$name"
       [ "$class" = review ] && k=rescue || k=remove
-      emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign" "$n" "$class" "$meta"
-    else
-      removal=''
+      if [ "$block" != - ]; then
+        # Decided and unavailable, shown rather than dropped. The update row
+        # below is unticked BECAUSE of this decision, so without this there is
+        # a row on screen with nothing to explain it, and an arrow pointing at
+        # a line that is not there. Both halves are said: what the branch is,
+        # and what is stopping it.
+        block_op "${name}R"
+        emit "${name}R" skip "$k" "$removal" "$wt" "$why, $block" "$ign" "$n" "$class" "$meta"
+      else
+        note_default "${name}R" "$def"
+        st=off; has "${name}R" "$SELECTED" && st=on
+        [ "$st" = on ] && doom_branch "$name"
+        emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign" "$n" "$class" "$meta"
+      fi
     fi
 
     # A target with no operation is still worth saying when the reason is that
@@ -366,13 +372,12 @@ derive() {
     # With -a, everything is worth saying: a branch that is simply unmerged and
     # level with the trunk stops nothing and would otherwise never appear, which
     # made this command tell you less about the repository than git cleanup does.
-    # The block is said when it stopped a removal, and when nothing else is on
-    # offer for the branch. Not otherwise: an update row that names its own
-    # stash has already told you the tree is dirty, and saying "blocked" beside
-    # it claims something was refused when nothing was.
+    # The block is said here only when the branch has no row at all. When it
+    # stopped a removal there is now a [-] row saying so, and when an update is
+    # on offer that row names its own stash, so either way repeating it beside
+    # them would claim something was refused when nothing was.
     saying_block=no
-    [ "$block" != - ] && [ -n "$offered" ] && saying_block=yes
-    [ "$block" != - ] && [ "$uact" = - ] && saying_block=yes
+    [ "$block" != - ] && [ -z "$offered" ] && [ "$uact" = - ] && saying_block=yes
     if [ "$saying_block" = yes ]; then
       NOTED="$NOTED$name${TAB}blocked$TAB$meta$TAB$block$NL"
     elif [ "$class" = inconclusive ]; then
@@ -401,9 +406,14 @@ derive() {
     # Named in the action, because setting your working tree aside and putting
     # it back is part of what the row does, not a detail of how.
     [ "$stash" = yes ] && act="stash, $act, restore"
+    # Marked as belonging to the row above only when that row is actually there.
+    # A removal a dirty worktree suppressed never got a row, so an arrow would
+    # point at nothing.
+    ucls=-
+    [ -n "$removal" ] && ucls=related
     if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
       block_op "${name}U"
-      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - - "$meta" "$stash"
+      emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - "$ucls" "$meta" "$stash"
     else
       # The update starts where the removal starts. A branch the command is
       # offering to delete is not one it also proposes to maintain, and without
@@ -417,7 +427,7 @@ derive() {
       [ "$stash" = yes ] && udef=off
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - - "$meta" "$stash"
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - "$ucls" "$meta" "$stash"
     fi
   done <<EOF
 $BFACTS
