@@ -53,6 +53,7 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 - `home/{common,<os>}/`, `os/`, `setup/<os>/`, `.gitconfig.d/`, `.vscode/`
 - `.local/bin/` — not linked into `$HOME`; called by repo path
 - `docs/yubikey.md`: hardware-backed signing and auth decisions, and their reasoning
+- `docs/git-commands.md`: what the git commands decide, how, and what stops them
 
 ## Commands (`home/common/bin/`)
 
@@ -75,10 +76,12 @@ logic: extract it here instead.
 - `tmux-snapshot`, `tmux-snapshot-watch` — capture and rehydrate a tmux server's
   layout
 
-Each script's header comment is its documentation: what it does, why it does it
-that way, and what going the other way cost. Read that before changing one, and
-put what you learn there rather than here. This list says only what a command is
-for, so that changing how one behaves leaves this file alone.
+`docs/git-commands.md` is the documentation: the model they share, what each one
+decides, and what stops it. Each script's header carries the reasoning behind its
+own choices, including what going the other way cost. Read the header before
+changing one, and put what you learn there or in the doc rather than here. This
+list says only what a command is for, so that changing how one behaves leaves
+this file alone.
 
 ## Git
 
