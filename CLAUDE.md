@@ -62,33 +62,23 @@ resolves a file named `git-foo` there as the subcommand `git foo`, no alias need
 `.gitconfig.d/common`. A one-line alias is the wrong home for anything with real
 logic: extract it here instead.
 
-- `git-refresh` — cleanup and spread in one pass over one snapshot: remove what
-  has landed, then bring the trunk into what survives. The operations come from
-  an interactive list rather than flags, and a target's two halves are tied: an
-  update starts wherever its own removal starts, and taking the removal masks
-  it, so the command never proposes maintaining a branch it is proposing to
-  delete. Every operation is on the list whether or not it can run, because a
-  row you cannot act on is usually the reason a row above or below it reads the
-  way it does. `--plan` prints the same list and stops, which is also what
-  happens with no terminal.
+- `git-refresh` — remove what has landed and bring the trunk into what survives,
+  picked from an interactive list
 - `git-cleanup` — delete local branches, and their worktrees, whose work is
-  already in main. The verdict is the merge check alone; a `gone` upstream is only
-  a cross-check. Reads `[cleanup]` config (see Git).
-- `git-spread` — bring `origin/main` into every worktree of the repo: `main`
-  fast-forwards, the rest rebase.
-- `git-catchup` — rebase the current branch onto the default branch and
-  force-push it. Preflights that local and its remote are the same commit first.
+  already in main
+- `git-spread` — bring the trunk into every worktree of the repo
+- `git-catchup` — bring the trunk into the current branch and push it
+- `git-main` — put the default branch at origin's tip and switch to it
 - `git-wt-create` — create the sibling worktree `<repo>--<leaf>` and print its
-  path. Resolves `<branch>` the way `git checkout` does: an existing local or
-  remote branch is checked out and tracked, and only an unused name becomes a new
-  branch off `origin/HEAD`. The `wt` function in `common.sh` wraps it to `cd`,
-  which a subprocess cannot do for its caller.
-- `gitversion` — GitVersion wrapper; finds its config by walking up the tree.
+  path
+- `gitversion` — GitVersion wrapper
 - `tmux-snapshot`, `tmux-snapshot-watch` — capture and rehydrate a tmux server's
-  layout; the watcher is started by tmux itself via `run-shell -b`.
+  layout
 
-Each script's header comment carries its own reasoning. Read that before changing
-one; it holds the why that the code cannot.
+Each script's header comment is its documentation: what it does, why it does it
+that way, and what going the other way cost. Read that before changing one, and
+put what you learn there rather than here. This list says only what a command is
+for, so that changing how one behaves leaves this file alone.
 
 ## Git
 
