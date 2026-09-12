@@ -299,6 +299,9 @@ icon_of() {
 # plan_add has carried this rule since it was written; this is the same rule.
 emit() {
   ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$TAB${8:--}$TAB${9:--}$TAB${10:--}$TAB${11:-no}$NL"
+  # COUNT is every row, because it bounds the cursor and the scroll window. It
+  # is not what the count of selected rows is measured against: rows nobody can
+  # tick are in it, and that number turned out not to be worth printing at all.
   COUNT=$((COUNT + 1))
   [ "$2" = on ] && PICKED=$((PICKED + 1))
   return 0
@@ -512,8 +515,8 @@ EOF
 
   last=$((TOP + avail - 1))
   [ "$last" -gt "$COUNT" ] && last=$COUNT
-  printf '\n%b%s of %s selected   showing %s-%s of %s%b\n' \
-    "$DIM" "$PICKED" "$COUNT" "$TOP" "$last" "$COUNT" "$RESET"
+  printf '\n%b%s selected   showing %s-%s of %s%b\n' \
+    "$DIM" "$PICKED" "$TOP" "$last" "$COUNT" "$RESET"
   printf '%bup/down move, space toggles, r runs, q quits. enter does nothing.%b' "$DIM" "$RESET"
   printf '%b[?2026l' "$E"
 }
