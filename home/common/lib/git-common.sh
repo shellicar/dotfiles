@@ -117,7 +117,7 @@ resolve_main() {
 # it was measured against is on screen. TOOL names the command.
 #
 # --branch says the count instead, since the run is about what you named and the
-# number of branches in the repository is no longer what was looked at.
+# number of branches in the repository is not what was looked at.
 say_header() {
   local cap scope
   if [ "$EVALUATE_OLD" = true ]; then cap='cap off (--old)'
@@ -636,7 +636,7 @@ class_icon() {
 # One sentence, in one place, because what a class means is a fact about the
 # branch and not about the command reporting it. What differs between the
 # commands is how you act on it: git cleanup names the flag that would, git
-# refresh shows a box already ticked. That part stays with each of them.
+# refresh shows a box you tick. That part stays with each of them.
 #
 # Set rather than echoed, because git refresh builds these in a loop that must
 # not fork.
@@ -937,10 +937,10 @@ update_needs_stash() (
     merge) from=$(git -C "$wt" merge-base HEAD "$MAIN_REF" 2>/dev/null) || return 1 ;;
     *)     from=HEAD ;;
   esac
-  # -z on both sides, because the two commands quote differently otherwise:
-  # `status --porcelain` quotes a path containing a space and `diff --name-only`
-  # does not, so every such path failed to match and the answer came back no.
-  # -z turns quoting off in both, which is the only way to compare them.
+  # -z on both sides. Without it the two commands quote differently: `status
+  # --porcelain` quotes a path containing a space and `diff --name-only` does
+  # not, so no such path can ever match. -z turns quoting off in both, which is
+  # the only way to compare them.
   git -C "$wt" diff --name-only -z "$from" "$MAIN_REF" 2>/dev/null |
     tr '\0' '\n' | sort -u > "$CACHE_DIR/incoming"
   [ -s "$CACHE_DIR/incoming" ] || return 1
@@ -1152,8 +1152,8 @@ run_plan() {
         run_rescue "$branch" "$join" "$n" "$wt"
         ;;
       ff|merge|rebase)
-        # join carries the stash flag for an update, the way git spread's plan
-        # has always used that field.
+        # join carries the stash flag for an update, which is what git spread's
+        # plan uses that field for too.
         run_update "$action" "$branch" "$wt" "$join"
         ;;
     esac

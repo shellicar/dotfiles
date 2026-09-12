@@ -205,9 +205,10 @@ EOF
     # landed. The rescue is what carries that branch forward; the rebase is what
     # undoes it.
     #
-    # A dirty worktree is NOT excluded here. It blocks a removal absolutely,
-    # because that destroys work, but an update only has to get past git, and
-    # git says no far less often than this used to assume.
+    # A dirty worktree is not excluded here. It blocks a removal absolutely,
+    # because that destroys work. An update only has to get past git, which
+    # refuses far less than a dirty tree suggests, and update_needs_stash is
+    # what decides which.
     if [ "$behind" != 0 ] &&
        [ "$class" != merged ] && [ "$class" != review ]; then
       # Asked before the strategy, because the strategy is a rebase and a rebase
@@ -300,8 +301,7 @@ icon_of() {
 emit() {
   ROWS="$ROWS$1$TAB$2$TAB$3$TAB$4$TAB${5:--}$TAB$6$TAB${7:--}$TAB${8:--}$TAB${9:--}$TAB${10:--}$TAB${11:-no}$NL"
   # COUNT is every row, because it bounds the cursor and the scroll window. It
-  # is not what the count of selected rows is measured against: rows nobody can
-  # tick are in it, and that number turned out not to be worth printing at all.
+  # counts rows nobody can tick, so it is not a count of what is on offer.
   COUNT=$((COUNT + 1))
   [ "$2" = on ] && PICKED=$((PICKED + 1))
   return 0
@@ -347,11 +347,10 @@ derive() {
       [ -n "$wt" ] && removal="$removal and its worktree"
       [ "$class" = review ] && k=rescue || k=remove
       if [ "$block" != - ]; then
-        # Decided and unavailable, shown rather than dropped. The update row
-        # below is unticked BECAUSE of this decision, so without this there is
-        # a row on screen with nothing to explain it, and an arrow pointing at
-        # a line that is not there. Both halves are said: what the branch is,
-        # and what is stopping it.
+        # Decided and unavailable. The update row below is unticked because of
+        # this decision and its arrow points here, so this row is what explains
+        # it. Both halves are on the line: what the branch is, and what is
+        # stopping it.
         block_op "${name}R"
         emit "${name}R" skip "$k" "$removal" "$wt" "$why, $block" "$ign" "$n" "$class" "$meta"
       else
@@ -362,16 +361,15 @@ derive() {
       fi
     fi
 
-    # Everything with no operation on it is said, and said every time. git
-    # cleanup holds the same branches behind -a because there they sit in the
-    # middle of its one list, mixed in with the branches it is offering to act
-    # on. Here they are a section of their own below the plan, so they crowd
-    # nothing out and there is nothing to gain by withholding them.
+    # Everything with no operation on it is said. git cleanup holds the same
+    # branches behind -a because there they sit in the middle of its one list,
+    # among the branches it is offering to act on. Here they are a section of
+    # their own below the plan, so they crowd nothing out.
     #
-    # The block is said here only when the branch has no row at all. When it
-    # stopped a removal there is now a [-] row saying so, and when an update is
-    # on offer that row names its own stash, so either way repeating it beside
-    # them would claim something was refused when nothing was.
+    # The block is said here only when the branch has no row at all. A blocked
+    # removal is a [-] row that says so itself, and an update on a dirty
+    # worktree names its own stash, so repeating it beside either would claim
+    # something was refused when nothing was.
     saying_block=no
     [ "$block" != - ] && [ -z "$offered" ] && [ "$uact" = - ] && saying_block=yes
     if [ "$saying_block" = yes ]; then
@@ -403,8 +401,8 @@ derive() {
     # it back is part of what the row does, not a detail of how.
     [ "$stash" = yes ] && act="stash, $act, restore"
     # Marked as belonging to the row above only when that row is actually there.
-    # A removal a dirty worktree suppressed never got a row, so an arrow would
-    # point at nothing.
+    # A class with no removal on offer has none, and an arrow there would point
+    # at nothing.
     ucls=-
     [ -n "$removal" ] && ucls=related
     if [ -n "$removal" ] && has "${name}R" "$SELECTED"; then
@@ -412,9 +410,8 @@ derive() {
       emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - "$ucls" "$meta" "$stash"
     else
       # The update starts where the removal starts. A branch the command is
-      # offering to delete is not one it also proposes to maintain, and without
-      # this, unticking a removal arms a different operation on the same branch
-      # rather than leaving it alone.
+      # offering to delete is not one it also proposes to maintain, whether or
+      # not you take the removal.
       #
       # And an update that has to move your uncommitted work out of the way
       # starts off whatever else is true, which is git spread's default.
@@ -554,10 +551,10 @@ readkey() {
 # well as by --plan: leaving the alternate screen takes the list with it, and
 # being asked to confirm something you can no longer see is not being asked.
 #
-# With 'all' every row is printed and marked instead. That is what --plan needs:
-# most operations now start unticked, so a list of the ticked ones alone says
-# one thing is on offer when eight are, which is a lie the selector never tells
-# because you can see the rest of the list.
+# With 'all' every row is printed and marked instead, which is what --plan
+# needs. Most operations start unticked, so printing the ticked ones alone
+# understates what is on offer. The selector cannot mislead that way, because
+# the rest of the list is on screen beside them.
 say_selected() {
   if [ "${2:-}" = all ]; then
     printf '\n%b%s%b  %b[x] runs, [ ] does not, [-] unavailable%b\n' \
@@ -662,10 +659,9 @@ if [ "$plan_only" = true ]; then
   exit 0
 fi
 
-# Before the selector opens, not after it closes. Printing into the primary
-# buffer leaves it there while the alternate screen is up, so it is waiting when
-# you come back however you left: quit, run, or ctrl-c, which exits on its
-# signal and never reaches the code below the loop.
+# Printed into the primary buffer before the alternate screen opens, so it is
+# waiting when you come back however you left. Ctrl-c is the one that decides
+# this: it exits on its signal and never reaches the code below the loop.
 #
 # It is also the state you are picking from, which is the point of it. The list
 # can shift as you tick, since a detached worktree stops being held by a branch
