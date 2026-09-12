@@ -37,7 +37,7 @@ else
   GREEN=''; YELLOW=''; RED=''; BLUE=''; DIM=''; BOLD=''; RESET=''
 fi
 
-OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; EMPTYICON='≡'; UNKNOWN='?'; WOULDREMOVE='\342\235\227'
+OK='✅'; KEEP='•'; WARN='⚠️ '; NOACCESS='🚫'; EMPTYICON='≡'; UNKNOWN='?'; REVIEW='🟡'; WOULDREMOVE='\342\235\227'
 
 say() { printf '%b\n' "$*"; }
 log() { [ "$VERBOSE" = true ] && printf '%b\n' "${DIM}[$TOOL] $*${RESET}" >&2; return 0; }
@@ -61,6 +61,19 @@ age_colour() (
       ;;
   esac
   printf '%s' "$DIM"
+)
+
+# The bracketed facts a target is judged on: how much sits on it, how long since
+# it was touched, and for a worktree with no branch the commit it is parked on.
+# Shared so both commands measure the same thing and say it the same way.
+# Contains its own colour, so a caller prints it with %b.
+#
+# Echoed rather than set, unlike the other shared strings here: this one is only
+# ever built once per target, never inside a loop that runs on a keystroke.
+target_meta() (
+  at=''
+  [ -n "${3:-}" ] && at="$3${DIM}, ${RESET}"
+  printf '%s' "${DIM}[${RESET}${at}$1 ahead${DIM}, ${RESET}$(age_colour "$2")$2${RESET}${DIM}]${RESET}"
 )
 
 # ── repository context ──────────────────────────────────────────────────────
@@ -91,11 +104,30 @@ resolve_main() {
     # "main", and the name that gets printed everywhere is wrong. Strip the
     # known prefix instead, which cannot vary.
     ref=$(git symbolic-ref --quiet "$MAIN_REF") || {
-      echo "Error: cannot determine the default branch from origin/HEAD (try -b <branch>)" >&2; exit 1; }
+      echo "Error: cannot determine the default branch from origin/HEAD (try --base <branch>)" >&2; exit 1; }
     MAIN=${ref#refs/remotes/origin/}
   fi
   git rev-parse --verify --quiet "$MAIN_REF" >/dev/null || {
-    echo "Error: $MAIN_REF does not exist (fetch origin, or pass -b <branch>)" >&2; exit 1; }
+    echo "Error: $MAIN_REF does not exist (fetch origin, or pass --base <branch>)" >&2; exit 1; }
+}
+
+# The line a command opens with: which trunk, how many branches, and what cap is
+# in force. Shared because it describes the run rather than the command, and
+# because a row reading "140 behind, not evaluated" means nothing unless the cap
+# it was measured against is on screen. TOOL names the command.
+#
+# --branch says the count instead, since the run is about what you named and the
+# number of branches in the repository is not what was looked at.
+say_header() {
+  local cap scope
+  if [ "$EVALUATE_OLD" = true ]; then cap='cap off (--old)'
+  else cap="cap ${MAX_DISTANCE} behind + ${MAX_AGE_DAYS}d"; fi
+  if [ -n "$ONLY_BRANCHES" ]; then
+    scope="$(printf '%s' "$ONLY_BRANCHES" | wc -w | tr -d ' ') named"
+  else
+    scope="$(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -c .) branches"
+  fi
+  printf '%b\n' "${BOLD}${TOOL}${RESET} ${DIM}$MAIN · $scope · $cap${RESET}"
 }
 
 fetch_origin() {
@@ -573,6 +605,85 @@ branch_verdict() (
   printf '%s\t%s\t%s\t%s\t%s\n' "$class" "$n" "$ahead" "$gone" "$wt"
 )
 
+# What the class looks like, as CICON. Beside branch_reason for the same
+# reason: what a class is called and what it looks like are both facts about
+# the class. The classes a worktree with no branch can be are here too, and
+# anything with no class at all gets a space, so the column stays.
+#
+# Contains its own colour, so a caller prints it with %b. A caller that has
+# opened a colour of its own reopens it afterwards, because the reset in here
+# closes it.
+class_icon() {
+  case "$1" in
+    empty)               CICON="${BLUE}${EMPTYICON}${RESET}" ;;
+    merged|landed)       CICON="${GREEN}${OK}${RESET}" ;;
+    review)              CICON="$REVIEW" ;;
+    suspect)             CICON="${RED}${WARN}${RESET}" ;;
+    inconclusive|unsure) CICON="${YELLOW}${UNKNOWN}${RESET}" ;;
+    unmerged|live)       CICON="${DIM}${KEEP}${RESET}" ;;
+    blocked)             CICON="$NOACCESS" ;;
+    # Not a class. An update has none of its own, so the column is free, and
+    # this says the row belongs to the one above it: the same branch, offered a
+    # removal as well. Same mark say_ignored uses for the same reason.
+    related)             CICON="${DIM}↳${RESET}" ;;
+    *)                   CICON=' ' ;;
+  esac
+  return 0
+}
+
+# What the class means, in words, as REASON.
+#
+# One sentence, in one place, because what a class means is a fact about the
+# branch and not about the command reporting it. What differs between the
+# commands is how you act on it: git cleanup names the flag that would, git
+# refresh shows a box you tick. That part stays with each of them.
+#
+# Set rather than echoed, because git refresh builds these in a loop that must
+# not fork.
+branch_reason() {
+  local b=$1 class=$2 n=$3 gone=$4 noun
+  case "$class" in
+    empty) REASON='never diverged from main' ;;
+    merged)
+      # The remote still existing is the one disagreement worth raising. The
+      # content is in main, so something merged it, yet the branch was not
+      # deleted the way a merged pull request deletes it.
+      [ "$gone" = true ] && REASON='merged' || REASON='merged, but remote not gone — check the PR'
+      ;;
+    review)
+      [ "$n" -gt 1 ] && noun=commits || noun=commit
+      REASON="merged, $n $noun on top not in main"
+      [ "$gone" = true ] && REASON="$REASON [gone]"
+      ;;
+    suspect) REASON='gone, but content not found in main' ;;
+    inconclusive)
+      REASON="$(distance_from_main "refs/heads/$b") behind, not evaluated"
+      [ "$gone" = true ] && REASON="$REASON [gone]"
+      ;;
+    *)
+      REASON=unmerged
+      branch_has_upstream "$b" || REASON='unmerged, local-only'
+      ;;
+  esac
+  return 0
+}
+
+# The same for a worktree with no branch: the fact that decided it, as REASON.
+# Which fact that is comes from the caller, because git refresh works it out
+# again itself. One step of that decision depends on what you have selected, so
+# only the wording is shared.
+detached_reason() {
+  case "$1" in
+    inmain) REASON='work already in main' ;;
+    merged) REASON="merged in $2" ;;
+    onref)  REASON="on $2" ;;
+    open)   REASON="$2 is open" ;;
+    closed) REASON="$2 closed without merging" ;;
+    *)      REASON='on no branch, in no pull request' ;;
+  esac
+  return 0
+}
+
 # A worktree with no branch on it, as: class, then the reason in words.
 #   blocked  uncommitted changes, so nothing is on offer whatever else is true
 #   landed   its work is in main, or a merged pull request carries it
@@ -587,18 +698,18 @@ detached_verdict() (
   r=$(worktree_block_reason "$wt")
   [ -n "$r" ] && { printf 'blocked\t%s\n' "$r"; return 0; }
 
-  [ "$(commits_not_in_main "$head")" = 0 ] && { printf 'landed\twork already in main\n'; return 0; }
+  [ "$(commits_not_in_main "$head")" = 0 ] && { detached_reason inmain; printf 'landed\t%s\n' "$REASON"; return 0; }
   pr=$(detached_pr "$head" merged)
-  [ -n "$pr" ] && { printf 'landed\tmerged in %s\n' "$pr"; return 0; }
+  [ -n "$pr" ] && { detached_reason merged "$pr"; printf 'landed\t%s\n' "$REASON"; return 0; }
 
   r=$(commit_on_ref "$head")
-  [ -n "$r" ] && { printf 'live\ton %s\n' "$r"; return 0; }
+  [ -n "$r" ] && { detached_reason onref "$r"; printf 'live\t%s\n' "$REASON"; return 0; }
   pr=$(detached_pr "$head" open)
-  [ -n "$pr" ] && { printf 'live\t%s is open\n' "$pr"; return 0; }
+  [ -n "$pr" ] && { detached_reason open "$pr"; printf 'live\t%s\n' "$REASON"; return 0; }
 
   pr=$(detached_pr "$head" closed)
-  [ -n "$pr" ] && { printf 'unsure\t%s closed without merging\n' "$pr"; return 0; }
-  printf 'unsure\ton no branch, in no pull request\n'
+  [ -n "$pr" ] && { detached_reason closed "$pr"; printf 'unsure\t%s\n' "$REASON"; return 0; }
+  detached_reason orphan; printf 'unsure\t%s\n' "$REASON"
 )
 
 # ── bringing main in ────────────────────────────────────────────────────────
@@ -753,6 +864,26 @@ branch_cut_from() (
     done
 )
 
+# Its own remote holds commits the branch does not, so it has diverged from the
+# remote rather than merely sitting ahead of it. A rebase replays the branch and
+# force-pushes the result, which destroys them.
+#
+# --force-with-lease does not save it. The lease compares against the
+# remote-tracking ref, and this run's own fetch has just moved that ref onto the
+# commit in question, so the lease agrees and the push goes through. git
+# catchup's header carries the long version; the preflight is the only guard.
+#
+# The trunk is exempt: being behind origin/$MAIN is its ordinary state and
+# nothing here force-pushes it.
+branch_diverged_from_remote() (
+  wt=$1 b=$2
+  [ "$b" = "$MAIN" ] && return 1
+  up=$(git -C "$wt" rev-parse --verify --quiet '@{u}') || return 1
+  [ -n "$up" ] || return 1
+  git -C "$wt" merge-base --is-ancestor "$up" HEAD && return 1
+  return 0
+)
+
 # How to bring main into this worktree, as: action, then what it needs.
 #   ff              the default branch itself, fast-forward only
 #   merge           it has merged main before, so it merges again
@@ -784,6 +915,46 @@ update_verdict() (
   printf 'rebase\t%s\n' "$base"
 )
 
+# Will git refuse to start this update while the worktree is as it is? That is
+# the whole of what decides a stash, and it is knowable before anything is
+# attempted. Whether the update will CONFLICT is a different question, and that
+# one does need the attempt.
+#
+# A rebase refuses on any tracked change whatever it is, and then its checkout
+# of the new base refuses on an untracked file the incoming commits create. A
+# fast-forward and a merge refuse only on that second collision, so an unrelated
+# modification, even a staged one, does not stop them. Tested on git 2.54.
+#
+# The incoming set is what the operation writes: HEAD..target for a rebase or a
+# fast-forward, which both move HEAD onto the target, and merge-base..target for
+# a merge, which takes only the other side's changes.
+update_needs_stash() (
+  wt=$1 act=$2
+  st=$(git -C "$wt" status --porcelain 2>/dev/null)
+  [ -n "$st" ] || return 1
+  [ "$act" = rebase ] && printf '%s\n' "$st" | grep -qv '^??' && return 0
+  case "$act" in
+    merge) from=$(git -C "$wt" merge-base HEAD "$MAIN_REF" 2>/dev/null) || return 1 ;;
+    *)     from=HEAD ;;
+  esac
+  # -z on both sides. Without it the two commands quote differently: `status
+  # --porcelain` quotes a path containing a space and `diff --name-only` does
+  # not, so no such path can ever match. -z turns quoting off in both, which is
+  # the only way to compare them.
+  git -C "$wt" diff --name-only -z "$from" "$MAIN_REF" 2>/dev/null |
+    tr '\0' '\n' | sort -u > "$CACHE_DIR/incoming"
+  [ -s "$CACHE_DIR/incoming" ] || return 1
+  # Untracked entries included, not just modified ones: a file the incoming
+  # commits create is refused just as hard as one you have edited.
+  #
+  # The status prefix is stripped only from lines that carry one. A rename adds
+  # the old path as a record of its own with no prefix, and both halves of it
+  # are in the way.
+  git -C "$wt" status --porcelain -z 2>/dev/null | tr '\0' '\n' |
+    sed 's/^[ MADRCU?!][ MADRCU?!] //' | sort -u > "$CACHE_DIR/in-the-way"
+  [ -n "$(comm -12 "$CACHE_DIR/incoming" "$CACHE_DIR/in-the-way")" ]
+)
+
 # What git said, first real line only. Reporting every failure as "conflict" is
 # a guess, and a wrong one: an unset committer identity, a missing signing key
 # and a genuine conflict all exit non-zero and only one of them is about the
@@ -793,14 +964,43 @@ why_it_failed() {
     sed -e 's/^fatal: //' -e 's/^error: //' | cut -c1-90
 }
 
-# Carry out one update. A failure is aborted and reported, never left half
-# done. A merge rewrites nothing, so its push is an ordinary one; a rebase
-# rewrote history, so its push needs the lease, which is only sound because the
-# caller fetched once at the start of this run and nothing has moved since.
+# Set aside what is in the way, do the update, put it back. Whether a stash is
+# needed was decided when the plan was built, by update_needs_stash; this only
+# carries it out. A pop that conflicts leaves the entry in the stash list and
+# says so, because resolving it is yours.
+run_update() {
+  local act=$1 b=$2 wt=$3 stash=${4:-no} stashed=no
+  if [ "$stash" = yes ]; then
+    if git -C "$wt" stash push --quiet --include-untracked; then
+      stashed=yes
+    else
+      say "  ${YELLOW}${WARN}${RESET}$b: could not set the working tree aside, skipped"
+      return 0
+    fi
+  fi
+
+  # Unguarded, the pop below is skipped when a caller runs under set -e and the
+  # update returns non-zero, which leaves the work in the stash list with
+  # nothing said about it.
+  carry_out_update "$act" "$b" "$wt" || :
+
+  [ "$stashed" = yes ] || return 0
+  if git -C "$wt" stash pop --quiet; then
+    say "     ${DIM}↳ working tree restored${RESET}"
+  else
+    say "  ${YELLOW}${WARN}${RESET}$b: could not put the working tree back, it is in the stash list"
+  fi
+  return 0
+}
+
+# A failure is aborted and reported, never left half done. A merge rewrites
+# nothing, so its push is an ordinary one; a rebase rewrote history, so its push
+# needs the lease, which is only sound because the caller fetched once at the
+# start of this run and nothing has moved since.
 #
 # The branch name is named to git, not the sha behind it: git builds a merge
 # message from what it is given, and a raw sha writes "Merge commit '<sha>'".
-run_update() {
+carry_out_update() {
   local act=$1 b=$2 wt=$3 base push=no
   git -C "$wt" rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 && push=yes
 
@@ -952,7 +1152,9 @@ run_plan() {
         run_rescue "$branch" "$join" "$n" "$wt"
         ;;
       ff|merge|rebase)
-        run_update "$action" "$branch" "$wt"
+        # join carries the stash flag for an update, which is what git spread's
+        # plan uses that field for too.
+        run_update "$action" "$branch" "$wt" "$join"
         ;;
     esac
   done <<EOF

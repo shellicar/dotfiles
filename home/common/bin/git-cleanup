@@ -75,7 +75,7 @@ ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
 # Asks the library for the verdict, then says it in this command's words. The
 # deciding is not here, so git refresh reaches the same answers.
 process_branch() {
-  local branch=$1 class wt ahead last meta not_in_main gone noun2 icon desc note outcome verdict
+  local branch=$1 class wt ahead last meta not_in_main gone icon desc note outcome verdict
 
   [ "$branch" = "$MAIN" ] && return 0
 
@@ -87,40 +87,33 @@ process_branch() {
   IFS="$TAB" read -r class not_in_main ahead gone wt <<EOF
 $verdict
 EOF
+  # The sentence is the library's, so git refresh says the same one. What this
+  # command adds to it below is its own: the flag that would act on it.
+  branch_reason "$branch" "$class" "$not_in_main" "$gone"
+  desc=$REASON
+  class_icon "$class"
+  icon=$CICON
 
   last=$(git log -1 --format=%cr "refs/heads/$branch" 2>/dev/null)
-  # The commit count stays full-brightness (not dimmed) — it's the number
-  # that actually matters when deciding whether a branch is worth a look.
-  meta="${DIM}[${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
-  [ "$not_in_main" -gt 1 ] && noun2=commits || noun2=commit
+  meta=$(target_meta "$ahead" "$last")
 
   if [ "$class" = empty ]; then
     # Never diverged from main — NOT a squash-merge detection, just a
     # branch identical to main. Git's own ancestor check already knows
     # this on its own; a different class and a different flag.
-    icon="${BLUE}${EMPTYICON}${RESET}"
-    desc='never diverged from main'
     do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_EMPTY" '--empty' 'EMPTY_COUNT'
     return 0
   fi
 
   if [ "$class" = merged ]; then
     # Fully in main — the squash-merge delete case.
-    icon="${GREEN}${OK}${RESET}"
-    if [ "$gone" = true ]; then
-      desc='merged'
-    else
-      # Content is in main, but the remote branch still exists.
-      desc='merged, but remote not gone — check the PR'
-    fi
     do_delete "$branch" "$wt" "$icon" "$desc" "$meta" true '--apply' 'MERGED_COUNT'
     return 0
   fi
 
   if [ "$class" = review ]; then
     # Merged up to the join point, but N commits sit on top of it.
-    note="merged, $not_in_main $noun2 on top not in main"
-    [ "$gone" = true ] && note="$note [gone]"
+    note=$desc
     local block; block=$(worktree_block_reason "$wt")
     if [ -n "$block" ]; then
       say "  ${NOACCESS} $branch $meta ${DIM}($note — $block, blocked)${RESET}"
@@ -128,7 +121,7 @@ EOF
     fi
     REVIEW_COUNT=$((REVIEW_COUNT + 1))
     [ -n "$wt" ] && note="$note, worktree"
-    say "  🟡 $branch $meta ${DIM}($note)${RESET}"
+    say "  $icon $branch $meta ${DIM}($note)${RESET}"
     local rbase rjoin
     rbase=$(git merge-base "refs/heads/$branch" "$MAIN_REF")
     rjoin=$(git rev-list "$rbase..refs/heads/$branch" | sed -n "$((not_in_main + 1))p")
@@ -142,16 +135,14 @@ EOF
   # searched'.
   if [ "$class" = inconclusive ]; then
     INCONCLUSIVE_COUNT=$((INCONCLUSIVE_COUNT + 1))
-    note="$(distance_from_main "refs/heads/$branch") behind, not evaluated"
-    [ "$gone" = true ] && note="$note [gone]"
+    note=$desc
     [ -n "$wt" ] && note="$note, worktree"
-    say "  ${YELLOW}${UNKNOWN}${RESET} $branch $meta ${DIM}($note — run --old)${RESET}"
+    say "  $icon $branch $meta ${DIM}($note — run --old)${RESET}"
     return 0
   fi
 
   if [ "$class" = suspect ]; then
     # Indicator says merged (remote deleted), content cannot confirm it.
-    icon="${RED}${WARN}${RESET}"; desc='gone, but content not found in main'
     do_delete "$branch" "$wt" "$icon" "$desc" "$meta" "$APPLY_GONE" '--gone' 'SUSPECT_COUNT'
     return 0
   fi
@@ -159,9 +150,9 @@ EOF
   # Plain unmerged work.
   HIDDEN_COUNT=$((HIDDEN_COUNT + 1))
   if [ "$SHOW_ALL" = true ]; then
-    note='unmerged'; branch_has_upstream "$branch" || note='unmerged, local-only'
+    note=$desc
     [ -n "$wt" ] && note="$note, worktree"
-    say "  ${DIM}${KEEP} $branch${RESET} $meta ${DIM}($note)${RESET}"
+    say "  $icon ${DIM}$branch${RESET} $meta ${DIM}($note)${RESET}"
   fi
 }
 
@@ -176,7 +167,7 @@ process_detached() {
   short=$(git rev-parse --short "$head" 2>/dev/null)
   ahead=$(git rev-list --count "$MAIN_REF..$head" 2>/dev/null || echo '?')
   last=$(git log -1 --format=%cr "$head" 2>/dev/null)
-  meta="${DIM}[${RESET}$short${DIM}, ${RESET}$ahead ahead${DIM}, ${RESET}$(age_colour "$last")${last}${RESET}${DIM}]${RESET}"
+  meta=$(target_meta "$ahead" "$last" "$short")
 
   # Before the read, for the reason in process_branch.
   verdict=$(detached_verdict "$wt" "$head")
@@ -342,7 +333,7 @@ Options:
   --old            also evaluate branches left inconclusive by the cap: more
                    than $MAX_DISTANCE commits behind main AND untouched for
                    $MAX_AGE_DAYS days
-  -b, --base REF   compare against REF instead of the detected main branch
+  --base REF       compare against REF instead of the detected main branch
   --no-fetch       skip the initial 'git fetch --prune origin'
   -v, --verbose    log progress to stderr
   -h, --help       show this help
@@ -382,7 +373,7 @@ while [ $# -gt 0 ]; do
     -a|--all) SHOW_ALL=true ;;
     --depth) shift; [ $# -gt 0 ] || { echo "Error: --depth requires a number" >&2; exit 1; }; WALK_DEPTH=$1 ;;
     --old) EVALUATE_OLD=true ;;
-    -b|--base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 1; }; BASE_OVERRIDE=$1 ;;
+    --base) shift; [ $# -gt 0 ] || { echo "Error: --base requires a branch name" >&2; exit 1; }; BASE_OVERRIDE=$1 ;;
     --no-fetch) NO_FETCH=true ;;
     -v|--verbose) VERBOSE=true ;;
     -h|--help) usage; exit 0 ;;
@@ -413,12 +404,7 @@ resolve_main
 
 report() {
 
-if [ "$EVALUATE_OLD" = true ]; then
-  CAP_NOTE='cap off (--old)'
-else
-  CAP_NOTE="cap ${MAX_DISTANCE} behind + ${MAX_AGE_DAYS}d"
-fi
-printf '%b\n' "${BOLD}git cleanup${RESET} ${DIM}$MAIN · $(git for-each-ref --format='%(refname:short)' refs/heads/ | grep -c .) branches · $CAP_NOTE${RESET}"
+say_header
 
 step 'fetch origin ...'
 fetch_origin

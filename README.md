@@ -33,6 +33,8 @@ Sourced through `load.sh` in two phases:
 - `setup/<os>/` — bootstrap (`Brewfile`, `packages`)
 - `.gitconfig.d/` — per-context git config (see Git)
 - `.vscode/` — VS Code settings sync
+- `home/common/bin/` — commands linked onto `PATH`, including the git ones (see
+  `docs/git-commands.md`)
 - `docs/`: decisions and their reasoning (see `docs/yubikey.md`)
 
 ## Git

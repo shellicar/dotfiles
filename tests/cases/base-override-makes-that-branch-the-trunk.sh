@@ -5,7 +5,7 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../harness.sh
 . "$TESTS/harness.sh"
 
-describe "-b makes the named branch the trunk, named in full"
+describe "--base makes the named branch the trunk, named in full"
 
 # Overriding the trunk must not reintroduce the short form. A repository with a
 # local branch called origin/develop would otherwise answer for the trunk and
