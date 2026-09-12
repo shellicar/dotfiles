@@ -979,7 +979,10 @@ run_update() {
     fi
   fi
 
-  carry_out_update "$act" "$b" "$wt"
+  # Unguarded, the pop below is skipped when a caller runs under set -e and the
+  # update returns non-zero, which leaves the work in the stash list with
+  # nothing said about it.
+  carry_out_update "$act" "$b" "$wt" || :
 
   [ "$stashed" = yes ] || return 0
   if git -C "$wt" stash pop --quiet; then
