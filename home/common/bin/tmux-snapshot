@@ -361,13 +361,17 @@ function executePlan(plan, tmux) {
   for (const w of plan.createWindows) {
     const tgt = `${w.session}:${w.window_index}`;
 
-    // First pane via new-window, the rest via split. Geometry is fixed from the
-    // saved layout afterward, so the split direction is moot.
+    // First pane via new-window, the rest via split, re-applying the saved
+    // layout after every one. Applying it once at the end cannot work: an
+    // unguided split halves the pane the previous split made, so the panes
+    // shrink geometrically and a seventh has nowhere to go. Re-applying spreads
+    // what exists over the whole window each time; tmux drops the cells it has
+    // no pane for yet, and only refuses the reverse.
     w.panes.forEach((p, i) => {
       if (i === 0) tmux(['new-window', '-t', tgt, '-n', w.window_name, '-c', p.path]);
       else tmux(['split-window', '-t', tgt, '-c', p.path]);
+      tmux(['select-layout', '-t', tgt, w.window_layout]);
     });
-    tmux(['select-layout', '-t', tgt, w.window_layout]);
 
     // Window-scope labels (title/colour/state) — shared across the window's
     // panes, taken from the first.
