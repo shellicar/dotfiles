@@ -116,9 +116,12 @@ function note(msg) {
   process.stderr.write(`tmux-snapshot: ${msg}\n`);
 }
 
+// allowFail says a failure here is expected and handled, which makes the
+// command's own complaint noise: one "error connecting" line per dead socket,
+// and the status view probes every label there is.
 function run(cmd, args, allowFail) {
   try {
-    return execFileSync(cmd, args, { encoding: 'utf8' });
+    return execFileSync(cmd, args, { encoding: 'utf8', stdio: allowFail ? ['pipe', 'pipe', 'ignore'] : undefined });
   } catch (e) {
     if (allowFail) return (e.stdout || '').toString();
     throw e;
@@ -442,12 +445,119 @@ function cmdRestoreServer(values, label) {
   cmdRestore({ ...values, label });
 }
 
+// --- status -----------------------------------------------------------------
+
+// Bare `tmux-snapshot` answers "what can I restore, and would it do anything?".
+// The rows are the union of the labels holding a snapshot and the servers
+// running now: a running server with no snapshot is one nothing is protecting,
+// and a snapshot with no server is one waiting to be restored. The restore
+// column comes from the planner `restore` itself uses, so it cannot promise
+// work the real command would not do.
+
+const COLUMNS = [
+  { head: 'label' },
+  { head: 'saved' },
+  { head: 'sessions', right: true },
+  { head: 'windows', right: true },
+  { head: 'panes', right: true },
+  { head: 'server' },
+  { head: 'restore' },
+];
+
+// The labels that have a snapshot directory. Only directories: the base also
+// holds a stray file from an older layout, which is not a label.
+function snapshotLabels() {
+  try {
+    return fs.readdirSync(snapshotBase(), { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+// Spelled out rather than taken from a locale: en-AU abbreviates to July and
+// Sept, so the column would jitter between three and four characters.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// Precision where it helps: the clock for a snapshot taken today, the date for
+// anything older, the year once it is not this one.
+function when(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '?';
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return `today ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const day = `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  return d.getFullYear() === now.getFullYear() ? `${day} ${pad2(d.getHours())}:${pad2(d.getMinutes())}` : `${day} ${d.getFullYear()}`;
+}
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function statusRows() {
+  const labels = [...new Set([...snapshotLabels(), ...listServers()])].sort();
+  const rows = [];
+  for (const label of labels) {
+    const tmux = serverTmux(label);
+    // Liveness is whether the socket answers, not whether it exists: a dead
+    // server can leave its socket behind.
+    const running = lines(tmux(['list-sessions', '-F', '#{session_name}'], true)).length > 0;
+    const found = readSnapshot(label);
+    // Neither a snapshot nor a server is a leftover directory, not a row.
+    if (!found && !running) continue;
+    if (!found) {
+      rows.push([label, '-', '-', '-', '-', 'running', 'no snapshot']);
+      continue;
+    }
+    const { panes } = found.snapshot;
+    const plan = planRestore(found.snapshot, tmux);
+    const todo = [];
+    if (plan.createSessions.length) todo.push(plural(plan.createSessions.length, 'session'));
+    if (plan.createWindows.length) todo.push(plural(plan.createWindows.length, 'window'));
+    rows.push([
+      label,
+      when(found.snapshot.generated),
+      String(new Set(panes.map((p) => p.session)).size),
+      String(groupWindows(panes).length),
+      String(panes.length),
+      running ? 'running' : '-',
+      todo.length ? todo.join(', ') : 'up to date',
+    ]);
+  }
+  return rows;
+}
+
+// Columns sized to their contents, counts right-aligned so they read as numbers.
+// Colour goes on after padding, since the escape codes are not printed width.
+function renderTable(rows) {
+  const all = [COLUMNS.map((c) => c.head), ...rows];
+  const widths = COLUMNS.map((c, i) => Math.max(...all.map((r) => r[i].length)));
+  const out = all.map((r) => r
+    .map((cell, i) => (COLUMNS[i].right ? cell.padStart(widths[i]) : cell.padEnd(widths[i])))
+    .join('  ')
+    .trimEnd());
+  out[0] = dim(out[0]);
+  return out.join('\n');
+}
+
+function cmdStatus() {
+  const rows = statusRows();
+  process.stdout.write(rows.length ? `${renderTable(rows)}\n\n` : 'no snapshots, no servers running\n\n');
+  process.stdout.write(usageLines().join('\n') + '\n');
+}
+
 // --- dispatch ---------------------------------------------------------------
 
+function usageLines() {
+  return [
+    'usage: tmux-snapshot [-L label | -a] save',
+    '       tmux-snapshot [-L label] restore [--apply]',
+    '       tmux-snapshot restore-server <label> [--apply]',
+  ];
+}
+
 function usage() {
-  process.stderr.write('usage: tmux-snapshot [-L label | -a] save\n');
-  process.stderr.write('       tmux-snapshot [-L label] restore [--apply]\n');
-  process.stderr.write('       tmux-snapshot restore-server <label> [--apply]\n');
+  process.stderr.write(usageLines().join('\n') + '\n');
   process.exit(2);
 }
 
@@ -470,6 +580,8 @@ function main() {
   }
 
   const sub = parsed.positionals[0];
+  // Bare invocation is the status view: what there is to restore, then how to.
+  if (sub === undefined && Object.keys(parsed.values).length === 0) return cmdStatus();
   if (sub === 'save') cmdSave(parsed.values);
   else if (sub === 'restore') cmdRestore(parsed.values);
   else if (sub === 'restore-server') cmdRestoreServer(parsed.values, parsed.positionals[1]);
