@@ -1,0 +1,20 @@
+[Unit]
+# Serves /run/user/<uid>/gnupg/S.gpg-agent from the Windows gpg-agent holding
+# the YubiKey. The packaged gpg-agent sockets are masked rather than merely
+# stopped, so nothing can quietly take that path back; gpg-bridge-install does
+# the masking and explains why.
+Description=gpg-agent bridge to the Windows agent (YubiKey)
+Documentation=file:%h/dotfiles/docs/yubikey.md
+
+[Service]
+Type=simple
+# The script exec's socat, so this tracks socat itself rather than a wrapper.
+ExecStart=%h/bin/gpg-bridge
+# The Windows agent can be down (key out of the dock, Windows not logged in).
+# Restarting keeps the socket present so the next signature works once it is
+# back, instead of leaving a dead unit that has to be started by hand.
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

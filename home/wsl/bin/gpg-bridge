@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+# gpg-bridge: serve this distro's gpg-agent socket from the Windows gpg-agent
+# that holds the YubiKey. Run by gpg-bridge.service; not normally run by hand.
+#
+# WSL2 is a separate VM, so it cannot open a Windows AF_UNIX socket or named
+# pipe. GnuPG on Windows uses neither: S.gpg-agent there is an "Assuan socket",
+# a small file holding a TCP port and a 16 byte nonce, whose listener is bound
+# to Windows' own 127.0.0.1. WSL's loopback is the VM's, not Windows', so in the
+# default NAT networking mode nothing in here can reach that port at all. That
+# is the whole reason a Windows side helper exists: sorelay.exe runs as a
+# Windows process, so 127.0.0.1 means the right thing to it, and -a makes it
+# read the nonce file and perform the handshake. Its data reaches this side over
+# stdio through WSL interop rather than over the network, and socat supplies the
+# real AF_UNIX socket that gpg opens.
+#
+# npiperelay is the tool usually named for this and cannot do it: it dials named
+# pipes only, and has no Assuan support (its flags are -p -s -ep -ei -v, and the
+# -a seen in guides belongs to wsl2-ssh-pageant). win-gpg-agent is archived, but
+# sorelay is a static Go binary doing one thing, so that carries little risk.
+#
+# usbipd-win is the other way, passing the USB device through and running pcscd
+# and scdaemon natively here. Rejected: the key lives in a monitor dock shared
+# between machines, and while attached to WSL the card disappears from Windows,
+# taking WebAuthn and Yubico Authenticator with it.
+#
+# The socket path comes from gpgconf, not from a literal: modern GnuPG on a
+# systemd machine puts it under /run/user/<uid>/gnupg, NOT in ~/.gnupg, and a
+# relay placed in ~/.gnupg is silently ignored. Its unit masks the packaged
+# gpg-agent sockets so this owns that path; see gpg-bridge-install.
+
+set -eu
+
+# Windows paths are resolved rather than hardcoded. wslvar shells out to Windows
+# and costs about 200ms, which is why it runs once here at service start and not
+# per connection: socat bakes the result into the command line it forks.
+RELAY="${GPG_BRIDGE_RELAY:-$(wslpath -u "$(wslvar USERPROFILE)")/bin/sorelay.exe}"
+
+if [ ! -x "$RELAY" ]; then
+  echo "gpg-bridge: relay not found or not executable: $RELAY" >&2
+  echo "  run gpg-bridge-install --apply" >&2
+  exit 1
+fi
+
+# sorelay wants a Windows path with forward slashes. The colon is escaped
+# because socat, not the shell, parses the EXEC argument and treats ':' as a
+# separator; socat unescapes it back to a plain colon before exec.
+# shellcheck disable=SC1003  # '\\' is one backslash for tr, not an escaped quote
+win_local=$(wslvar LOCALAPPDATA | tr '\\' '/')
+win_socket=$(echo "${win_local}/gnupg/S.gpg-agent" | sed 's/:/\\:/')
+
+# gpg refuses to use a socket directory it did not create with the right mode.
+gpgconf --create-socketdir >/dev/null 2>&1 || true
+
+socket=$(gpgconf --list-dirs agent-socket)
+
+# unlink-early clears a socket left behind by an unclean exit, which would
+# otherwise make the listen fail and the unit flap.
+exec socat "UNIX-LISTEN:${socket},fork,unlink-early" "EXEC:${RELAY} -a ${win_socket},nofork"

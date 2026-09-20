@@ -439,6 +439,63 @@ factory-reset needs a typed confirmation that some terminals fail to submit, so 
 silently do nothing; `gpg --card-status` is how you tell, since a real reset returns the
 key attributes to `rsa2048` and zeroes the signature counter.
 
+## GPG in WSL2: bridging to the Windows agent
+
+WSL2 is a separate VM, so it cannot open a Windows AF_UNIX socket or named pipe. GnuPG on
+Windows uses neither: `S.gpg-agent` there is an *Assuan socket*, a 22 byte file holding a
+TCP port and a 16 byte nonce, whose listener binds to Windows' own `127.0.0.1`. WSL's
+loopback is the VM's, so in the default `nat` networking mode nothing inside can reach
+that port. That is the whole reason a Windows side helper exists, rather than a socket
+path that could simply be pointed at.
+
+`sorelay.exe` from `win-gpg-agent` is that helper: run as a Windows process, `127.0.0.1`
+means the right thing to it, and `-a` makes it read the nonce file and perform the
+handshake. Its data reaches Linux over stdio through WSL interop rather than the network,
+and `socat` supplies the real AF_UNIX socket gpg opens. `gpg-bridge` in `home/wsl/bin`
+runs that pair; `gpg-bridge.service` keeps it up.
+
+**`npiperelay` cannot do this**, despite being the tool every guide names. It dials named
+pipes only and has no Assuan support at all: its flags are `-p -s -ep -ei -v`, and the
+`-a` seen in those guides belongs to `wsl2-ssh-pageant`, a different program. Reading the
+source settles in a minute what a day of following recipes will not.
+
+**The socket path comes from `gpgconf --list-dirs agent-socket`, never a literal.** Modern
+GnuPG on a systemd machine puts it under `/run/user/<uid>/gnupg`, *not* in `~/.gnupg`,
+which is where the older guides place the relay. A relay in `~/.gnupg` is not an error, it
+is silently ignored.
+
+**The packaged `gpg-agent` sockets are masked, not disabled.** All four activate the same
+`gpg-agent.service`, and only one listener can own `S.gpg-agent`. Disabling leaves the
+door open for a package update to restore a local agent holding no keys, at which point
+gpg reports a missing card rather than a broken bridge. `dirmngr` and `keyboxd` are left
+alone: network and public keyring services, still legitimately local. `no-autostart` in
+`gpg.conf` closes the same gap from the other side, so a stopped bridge reads as a stopped
+bridge.
+
+**Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
+home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock
+protected, but the Windows and Linux implementations cannot see each other's locks, so
+concurrent use corrupts them. Unix sockets cannot live on DrvFs anyway, `/mnt/c` paths
+present as world readable and draw permission warnings on every invocation, and 9p makes
+every keyring read slow. The public key is imported separately on each side.
+
+**Gpg4win's sockets moved** from `%APPDATA%\gnupg` to `%LOCALAPPDATA%\gnupg`. Most guides
+still name the old path, where they find nothing.
+
+**`win-gpg-agent` was archived in December 2022.** Accepted rather than worked around:
+`sorelay` is a small static Go binary doing one thing, so there is little to rot. It is
+pinned by version and verified against its SHA-256 before unpacking, and downloaded rather
+than committed, because a binary in a dotfiles repo is a thing nobody re-checks.
+
+**usbipd-win is the other route and was rejected.** It passes the USB device through so
+`pcscd` and `scdaemon` run natively in WSL, which is the cleaner architecture in the
+abstract. But the key switches between machines without losing power, and usbipd ties it
+to one: while attached to WSL the card disappears from Windows entirely, taking WebAuthn
+and Yubico Authenticator with it, and every switch becomes a detach and reattach race.
+Mirrored networking mode would remove the need for any Windows binary, at the cost of a
+system wide change to every distro plus a hand written implementation of the nonce
+handshake.
+
 ## Deliberately not here
 
 The service inventory (which account uses which method) and any physical location. The
