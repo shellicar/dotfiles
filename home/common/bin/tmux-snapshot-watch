@@ -9,8 +9,11 @@
 # another" check can: A sees B, B sees A, both quit, nothing left ticking.
 # The lock lives in the same per-label snapshot directory.
 #
-# It exits when the tmux server that spawned it is gone: once the parent dies
-# we get reparented to pid 1, and that is the signal to stand down.
+# It exits when the tmux server that spawned it is gone. Its parent's pid is
+# taken once at start and probed with kill -0 each tick, rather than asking ps
+# for our current ppid: Linux ps reads every process's cmdline whatever it is
+# asked, so one process wedged in the kernel hangs it forever, and the watcher
+# with it (seen under WSL, where a stuck python3 stopped all saves for hours).
 #
 # The lock is only about cadence - making sure exactly one watcher ticks per
 # label. It has nothing to do with save safety: tmux-snapshot writes a
@@ -42,6 +45,11 @@ if ! mkdir "$lock" 2>/dev/null; then
 fi
 echo "$$" >"$pidfile"
 
+# Our parent: tmux itself, or the sh -c its run-shell wraps us in, which goes
+# with it. Fixed at start, never re-read. The old check (reparented to pid 1)
+# watched the same process.
+server="$PPID"
+
 sleeppid=
 cleanup() {
 	[ -n "$sleeppid" ] && kill "$sleeppid" 2>/dev/null
@@ -65,10 +73,9 @@ while :; do
 	wait "$sleeppid"
 	sleeppid=
 
-	# Our parent was the tmux server that spawned us. If it's gone we've been
-	# reparented to pid 1 - stand down rather than save a server we no longer
-	# belong to.
-	[ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" = 1 ] && exit 0
+	# The tmux server that spawned us is gone: stand down rather than save a
+	# server we no longer belong to.
+	kill -0 "$server" 2>/dev/null || exit 0
 
 	"$snapshot" -L "$label" save >/dev/null 2>&1
 done

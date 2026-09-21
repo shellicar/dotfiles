@@ -12,9 +12,9 @@
 // as an array, never re-split.
 //
 // Launcher detection: a pane's foreground is often a `node <script>` wrapper, so
-// the real launcher is a descendant. We scan the pane's tty (ps -t) rather than
-// walk one level of children, which misses it, and match the .mjs basename
-// against the LAUNCHERS allowlist. Args are dropped on purpose: restore re-runs
+// the real launcher is a descendant. We walk the pane's whole process tree (from
+// /proc, or ps -t where there is none) rather than one level of children, which
+// misses it, and match the .mjs basename against the LAUNCHERS allowlist. Args are dropped on purpose: restore re-runs
 // the script bare and lets it re-establish its own per-session state.
 //
 // Every tmux read is pinned to an explicit pane/window id; nothing relies on the
@@ -175,26 +175,97 @@ function resolveTarget(values) {
 
 // --- save -------------------------------------------------------------------
 
-// The allowlisted launcher running on a pane's tty, or null. We scan every
-// process on the tty (ps -t) because the launcher is usually a `node <script>`
-// wrapper, and match the .mjs basename against LAUNCHERS. Args are ignored on
-// purpose: restore re-runs the script bare.
-function detectLauncher(paneTty) {
-  const shortTty = paneTty.replace(/^\/dev\//, '');
-  const out = run('ps', ['-t', shortTty, '-o', 'command='], true) || '';
-  for (const line of out.split('\n')) {
+// The allowlisted launcher among a pane's processes, or null: the first .mjs
+// basename in LAUNCHERS. Args are ignored on purpose: restore re-runs it bare.
+function detectLauncher(panePid, reader) {
+  for (const line of walkTree(panePid, reader)) {
     const m = line.match(/([^/\s]+\.mjs)\b/);
     if (m && LAUNCHERS.has(m[1])) return m[1];
   }
   return null;
 }
 
+// One walk for both platforms: descend the pane's process tree from its shell
+// and collect each process's command. Descendants rather than one level,
+// because the launcher usually sits under a `node <script>` wrapper. A reader
+// supplies the two per-process facts, and only the reader is platform-specific.
+function walkTree(rootPid, reader) {
+  const out = [];
+  const queue = [String(rootPid)];
+  const seen = new Set();
+  while (queue.length) {
+    const pid = queue.shift();
+    if (seen.has(pid)) continue; // a pid cannot be its own ancestor, but never loop on a malformed tree
+    seen.add(pid);
+    const cmd = reader.command(pid);
+    if (cmd) out.push(cmd);
+    queue.push(...reader.children(pid));
+  }
+  return out;
+}
+
+// The reader for this machine, built once per save: /proc where there is one,
+// otherwise ps. The probe is /proc itself, not the OS, since what the reader
+// needs is those files and a Mac has none of them.
+function processReader() {
+  return fs.existsSync('/proc/self/stat') ? procReader() : psReader();
+}
+
+// Linux: read /proc directly, and skip any process in state D. Reading a
+// cmdline takes the target's mmap lock, so a process wedged in the kernel (seen
+// under WSL: a python3 stuck in __vma_start_write) blocks any reader forever,
+// uninterruptibly, with no timeout that can reach it, SIGKILL included. `ps`
+// reads every cmdline on the machine whatever you ask it for, so one wedged
+// process anywhere hung every save and stalled the watcher behind it: that is
+// why Linux cannot share the ps reader below. D is the only state that can
+// block, and stat and children take no such lock, so a wedged pane costs its
+// own launcher and nothing else. Filtering on state rather than on a name is
+// deliberate: node reports comm as MainThread, not node.
+function procReader() {
+  const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+  // stat's second field is comm in parens and may itself contain spaces and
+  // parens, so state is read from after the last ')', never by splitting.
+  const wedged = (pid) => {
+    const stat = read(`/proc/${pid}/stat`);
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] === 'D';
+  };
+  return {
+    command: (pid) => (wedged(pid) ? '' : read(`/proc/${pid}/cmdline`).split('\0').join(' ').trim()),
+    children: (pid) => {
+      let tids = [];
+      try { tids = fs.readdirSync(`/proc/${pid}/task`); } catch { return []; } // exited
+      return tids.flatMap((tid) => read(`/proc/${pid}/task/${tid}/children`).split(' ').filter(Boolean));
+    },
+  };
+}
+
+// No /proc (macOS): one ps for the whole machine, read once and indexed by pid.
+// One fork per save, shared by every pane, rather than one per pane as the
+// earlier per-tty scan did. ps prints ppid before the command, and a command
+// contains spaces, so the line is split twice and the remainder kept whole.
+function psReader() {
+  const byPid = new Map();
+  const kids = new Map();
+  for (const line of (run('ps', ['-axo', 'pid=,ppid=,command='], true) || '').split('\n')) {
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    if (!m) continue;
+    const [, pid, ppid, cmd] = m;
+    byPid.set(pid, cmd);
+    if (!kids.has(ppid)) kids.set(ppid, []);
+    kids.get(ppid).push(pid);
+  }
+  return {
+    command: (pid) => byPid.get(pid) || '',
+    children: (pid) => kids.get(pid) || [],
+  };
+}
+
 function saveServer(label, tmux) {
   const fmt = [
     '#{session_name}', '#{window_index}', '#{window_name}',
-    '#{window_layout}', '#{pane_index}', '#{pane_tty}', '#{pane_current_path}',
+    '#{window_layout}', '#{pane_index}', '#{pane_current_path}',
     '#{pane_current_command}', '#{@title}', '#{@colour}', '#{@state}',
-    '#{@role}', '#{@status}',
+    '#{@role}', '#{@status}', '#{pane_pid}',
   ].join(SEP);
 
   // A stale socket (file present but server dead) makes list-panes fail hard.
@@ -217,16 +288,17 @@ function saveServer(label, tmux) {
   }
 
   note(`saving server '${label}'`);
+  const reader = processReader(); // built once, shared by every pane
   const panes = rows.map((line) => {
     const [
       session, windowIndex, windowName, windowLayout, paneIndex,
-      paneTty, path, cmd, title, colour, state, role, status,
+      path, cmd, title, colour, state, role, status, panePid,
     ] = line.split(SEP);
 
     return {
       session, window_index: windowIndex, window_name: windowName,
       window_layout: windowLayout, pane_index: paneIndex, path, cmd,
-      launcher: detectLauncher(paneTty),
+      launcher: detectLauncher(panePid, reader),
       options: {
         '@title': title, '@colour': colour, '@state': state,
         '@role': role, '@status': status,
