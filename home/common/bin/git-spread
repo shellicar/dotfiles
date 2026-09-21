@@ -16,6 +16,7 @@
 # because the lease reflects the fetch this same run just did. A branch that
 # merges rewrites nothing, so its push is an ordinary fast-forward, no lease.
 # A branch cut from another branch is skipped: see branch_cut_from in the lib.
+# So is a branch with commits by anyone but you: see branch_foreign_authors.
 
 set -u
 
@@ -132,6 +133,17 @@ EOF
     # unpushed commits.
     printf '⛔ %s [%s]: %s, skipping\n' "$wt" "$branch" "$detail"
     continue
+  fi
+
+  # Someone else's branch is theirs to update. There is no selector here to
+  # offer it unticked, and a flag may only narrow what --apply does, never add
+  # to it, so it is left alone and git refresh is where to choose the merge.
+  if [ "$action" = merge ] || [ "$action" = rebase ]; then
+    owner=$(branch_foreign_authors "$branch" "$(git -C "$wt" config user.email)")
+    if [ -n "$owner" ]; then
+      printf '⛔ %s [%s]: not yours (%s), skipping, git refresh can merge it\n' "$wt" "$branch" "$owner"
+      continue
+    fi
   fi
 
   # All three icons are double-width with no variation selector, so they take one
