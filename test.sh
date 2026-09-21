@@ -54,7 +54,21 @@ $1"
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
-    *.zsh)  zsh -n "$f" || note_unparseable "$f"; continue ;;
+    # No zsh is not a broken file, and stopping here would take shellcheck and
+    # the suite down with it. Said rather than silent, so the gap is in front of
+    # you: on the Mac, where zsh is the shell, this parse always runs.
+    #
+    # Known limit: zsh also runs every .sh file load.sh sources, and those are
+    # checked as POSIX sh only. zsh differs from sh (no word splitting of an
+    # unquoted $var, a glob matching nothing is an error), so an edit to one can
+    # pass here and still break a Mac shell.
+    *.zsh)
+      if command -v zsh >/dev/null 2>&1; then
+        zsh -n "$f" || note_unparseable "$f"
+      else
+        echo "zsh not installed, $f not parsed" >&2
+      fi
+      continue ;;
     *.bash) bash -n "$f" || note_unparseable "$f"; continue ;;
   esac
   case $(file "$f") in
