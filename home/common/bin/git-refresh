@@ -438,7 +438,7 @@ derive() {
       # says whose it is, which is also how a commit under an old address of
       # your own shows up.
       uwhy="$behind behind"
-      case "$owner" in ''|-) ;; *) udef=off; uwhy="$uwhy, not yours: $owner" ;; esac
+      [ "$owner" != - ] && { udef=off; uwhy="$uwhy, not yours: $owner"; }
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
       emit "${name}U" "$st" "$uact" "$act" "$wt" "$uwhy" - - "$ucls" "$meta" "$stash"

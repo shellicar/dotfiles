@@ -25,8 +25,8 @@ guard_path
 # block. Nothing whatever is on offer for it.
 #
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta, unpushed, stash
-BFACTS="idle/one${TAB}-${TAB}unmerged${TAB}3${TAB}-1${TAB}unmerged${TAB}0${TAB}-${TAB}-${TAB}-${TAB}-${TAB}[3 ahead, 6 weeks ago]${TAB}0${TAB}no$NL"
+# its detail, ignored, meta, unpushed, stash, other authors
+BFACTS="idle/one${TAB}-${TAB}unmerged${TAB}3${TAB}-1${TAB}unmerged${TAB}0${TAB}-${TAB}-${TAB}-${TAB}-${TAB}[3 ahead, 6 weeks ago]${TAB}0${TAB}no${TAB}-$NL"
 DFACTS=''
 
 derive
