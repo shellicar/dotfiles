@@ -72,6 +72,15 @@ trunk, so a plain rebase replays that branch's commits too and publishes them un
 ids as though they were yours. Where two live branches genuinely share history past the
 trunk, no update is offered at all, because nothing can tell which was cut from which.
 
+In `git refresh`, a branch is yours only when every commit it has that the trunk does
+not is authored under the email the repository resolves to, exactly. Anything else is
+someone else's branch, checked out to review or built on, and theirs to rebase. It is
+offered a merge instead, unticked, with the row saying whose commits they are. The merge
+is pushed, and with no upstream nothing is offered, because a merge left local on a
+branch its author pushes to only waits to conflict. There is deliberately no list of
+your other addresses: a commit under an old identity reads as not yours, which is how it
+gets noticed. A bot you run is not you. `git spread` and `git catchup` do not ask this.
+
 What happens afterwards follows from what was done. A fast-forward publishes nothing so
 it is not pushed. A merge rewrites nothing so its push is ordinary. A rebase rewrote
 history, so it is force-pushed with a lease.

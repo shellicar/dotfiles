@@ -164,7 +164,7 @@ step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 step 'reading branches and worktrees ...'
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta, unpushed, stash
+# its detail, ignored, meta, unpushed, stash, other authors
 BFACTS=''
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs,
 # ignored, meta
@@ -188,7 +188,7 @@ EOF
   unpushed=0
   [ "$b" = "$MAIN" ] || unpushed=$(git rev-list --count "$b@{u}..refs/heads/$b" 2>/dev/null || echo 0)
 
-  block='-'; behind=0; uact='-'; udetail='-'; ign='-'; stash=no
+  block='-'; behind=0; uact='-'; udetail='-'; ign='-'; stash=no; owner=-
   if [ -n "$wt" ]; then
     ign=$(worktree_ignored "$wt"); ign=${ign:--}
     b_reason=$(worktree_block_reason "$wt")
@@ -218,11 +218,27 @@ EOF
       else
         uv=$(update_verdict "$wt" "$b")
         uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
+        # Someone else's branch is theirs to rebase, never ours: that rewrites
+        # their commits and force-pushes the copies. A merge only adds to it,
+        # so it is offered, unticked. It is pushed or it is nothing, because a
+        # merge left local on a branch its author pushes to is a conflict
+        # waiting to happen, so with no upstream there is nothing on offer.
+        # A fast-forward has no commits of its own to belong to anyone.
+        if [ "$uact" = merge ] || [ "$uact" = rebase ]; then
+          owner=$(branch_foreign_authors "$b" "$(git -C "$wt" config user.email)")
+          if [ -z "$owner" ]; then
+            owner=-
+          elif branch_has_upstream "$b"; then
+            uact=merge; udetail=-
+          else
+            uact=none; udetail="not yours ($owner), and nowhere to push a merge"
+          fi
+        fi
         if [ "$uact" != none ] && update_needs_stash "$wt" "$uact"; then stash=yes; fi
       fi
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$NL"
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$TAB$owner$NL"
 done
 
 # With --branch the run is about the branches you named, so a worktree with no
@@ -319,7 +335,7 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash; do
+  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash owner; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
 
@@ -418,9 +434,14 @@ derive() {
       udef=on
       [ -n "$offered" ] && udef=$def
       [ "$stash" = yes ] && udef=off
+      # Someone else's branch is updated only because you asked, and the row
+      # says whose it is, which is also how a commit under an old address of
+      # your own shows up.
+      uwhy="$behind behind"
+      case "$owner" in ''|-) ;; *) udef=off; uwhy="$uwhy, not yours: $owner" ;; esac
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - "$ucls" "$meta" "$stash"
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$uwhy" - - "$ucls" "$meta" "$stash"
     fi
   done <<EOF
 $BFACTS

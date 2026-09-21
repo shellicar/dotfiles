@@ -884,6 +884,30 @@ branch_diverged_from_remote() (
   return 0
 )
 
+# Who else wrote the commits this branch has that main does not, as "<n> of
+# <total> by <email>, ...". Nothing when every one of them is yours.
+#
+# Yours means the email the repository resolves to, exactly, and nothing else.
+# A commit under an address you used to have is not counted as yours, because
+# that is a mismatch worth seeing rather than one to paper over with a list of
+# aliases. A repository with no user.email has nothing to match, so nothing in
+# it is yours, which is the side to fail on. A bot you run is not you either.
+#
+# Asked because bringing the trunk in rewrites or adds to the branch, and a
+# branch you checked out to review is someone else's history to change.
+branch_foreign_authors() (
+  b=$1 me=$2
+  all=$(git log --format=%ae "$MAIN_REF..refs/heads/$b" 2>/dev/null)
+  [ -n "$all" ] || return 0
+  # grep -x with an empty pattern matches only empty lines, so an unset
+  # identity leaves every author standing, which is what is wanted.
+  others=$(printf '%s\n' "$all" | grep -vxF -- "$me")
+  [ -n "$others" ] || return 0
+  printf '%s of %s by %s\n' \
+    "$(printf '%s\n' "$others" | grep -c .)" "$(printf '%s\n' "$all" | grep -c .)" \
+    "$(printf '%s\n' "$others" | sort -u | paste -sd, - | sed 's/,/, /g')"
+)
+
 # How to bring main into this worktree, as: action, then what it needs.
 #   ff              the default branch itself, fast-forward only
 #   merge           it has merged main before, so it merges again
