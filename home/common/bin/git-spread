@@ -115,15 +115,13 @@ while IFS= read -r wt; do
     continue
   fi
 
-  if [ -n "$dirty" ] && [ "$stash" -eq 0 ]; then
-    printf '⚠️  %s [%s]: dirty — skipping (use --stash)\n' "$wt" "$branch"
-    continue
-  fi
-
   # Computed before the read: a here-doc is expanded as part of setting up the
   # command it feeds, so the substitution would run with IFS already set to tab.
-  verdict=$(update_verdict "$wt" "$branch")
-  IFS="$TAB" read -r action detail <<EOF
+  #
+  # And before the dirty check. A reason --stash cannot change comes first,
+  # because naming the one it can sends you to use it and then stop here anyway.
+  verdict=$(owned_update_verdict "$wt" "$branch")
+  IFS="$TAB" read -r action detail owner <<EOF
 $verdict
 EOF
 
@@ -138,12 +136,14 @@ EOF
   # Someone else's branch is theirs to update. There is no selector here to
   # offer it unticked, and a flag may only narrow what --apply does, never add
   # to it, so it is left alone and git refresh is where to choose the merge.
-  if [ "$action" = merge ] || [ "$action" = rebase ]; then
-    owner=$(branch_foreign_authors "$branch" "$(git -C "$wt" config user.email)")
-    if [ -n "$owner" ]; then
-      printf '⛔ %s [%s]: not yours (%s), skipping, git refresh can merge it\n' "$wt" "$branch" "$owner"
-      continue
-    fi
+  if [ "$owner" != - ]; then
+    printf '⛔ %s [%s]: not yours (%s), skipping, git refresh can merge it\n' "$wt" "$branch" "$owner"
+    continue
+  fi
+
+  if [ -n "$dirty" ] && [ "$stash" -eq 0 ]; then
+    printf '⚠️  %s [%s]: dirty — skipping (use --stash)\n' "$wt" "$branch"
+    continue
   fi
 
   # All three icons are double-width with no variation selector, so they take one

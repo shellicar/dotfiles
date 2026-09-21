@@ -939,6 +939,36 @@ update_verdict() (
   printf 'rebase\t%s\n' "$base"
 )
 
+# update_verdict, and whose branch it is: action, detail, then who else wrote
+# it, or '-' when nobody did.
+#
+# Someone else's branch is theirs to rebase, never ours: that rewrites their
+# commits and force-pushes the copies. A merge only adds to it, so that is what
+# is offered instead. It is pushed or it is nothing, because a merge left local
+# on a branch its author pushes to is a conflict waiting to happen, so with no
+# upstream there is nothing on offer. A fast-forward has no commits of its own
+# to belong to anyone, and 'none' has nothing to offer either way.
+#
+# Whether to offer that merge at all is the caller's: git refresh offers it
+# unticked, git spread has no way to and skips the branch.
+owned_update_verdict() (
+  wt=$1 b=$2
+  uv=$(update_verdict "$wt" "$b")
+  act=${uv%%"$TAB"*}; detail=${uv#*"$TAB"}
+  owner=''
+  case "$act" in
+    merge|rebase) owner=$(branch_foreign_authors "$b" "$(git -C "$wt" config user.email)") ;;
+  esac
+  if [ -z "$owner" ]; then
+    owner=-
+  elif branch_has_upstream "$b"; then
+    act=merge; detail=-
+  else
+    act=none; detail="not yours ($owner), and nowhere to push a merge"
+  fi
+  printf '%s%s%s%s%s\n' "$act" "$TAB" "$detail" "$TAB" "$owner"
+)
+
 # Will git refuse to start this update while the worktree is as it is? That is
 # the whole of what decides a stash, and it is knowable before anything is
 # attempted. Whether the update will CONFLICT is a different question, and that

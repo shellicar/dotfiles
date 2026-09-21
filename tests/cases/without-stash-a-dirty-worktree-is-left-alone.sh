@@ -21,6 +21,8 @@ git_says() {
     "-C /wt/foo rev-list --count main-tip..HEAD") echo 0 ;;
     "-C /wt/foo rev-parse --verify --quiet @{u}") echo upstream-tip ;;
     "-C /wt/foo merge-base --is-ancestor upstream-tip HEAD") return 0 ;;
+    "-C /wt/foo rev-list --merges --parents refs/remotes/origin/HEAD..HEAD") : ;;
+    "rev-list --count refs/remotes/origin/HEAD..refs/heads/feature/foo") echo 0 ;;
     *) fail "unexpected: git $*" ;;
   esac
 }

@@ -239,6 +239,8 @@ git_says() (
       ancestry "$a" | while read -r c; do
         reaches "$b" "$c" && { printf '%s\n' "$c"; break; }
       done ;;
+    "-C "*" config user.email")
+      printf '%s\n' "$ME" ;;
     "log --format=%ae "*)
       spec=$(last_word "$@")
       range "${spec%%..*}" "${spec##*..}" | while read -r c; do author_of "$c"; done ;;

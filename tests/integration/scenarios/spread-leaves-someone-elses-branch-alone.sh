@@ -29,12 +29,20 @@ commit A2 a2.txt
 git push -q origin main
 git fetch -q origin
 
+# Uncommitted work on theirs as well. --stash cannot change whose branch it is,
+# so that is the reason given, not the dirty tree.
+echo local > "$ROOT/wt-theirs/their.txt"
+
 theirs_before=$(git rev-parse refs/heads/theirs)
 mine_before=$(git rev-parse refs/heads/mine)
 
-run_command git-spread --apply
+out=$(run_command git-spread --apply)
+printf '%s\n' "$out"
 
 echo '--- outcome ---'
+
+printf '%s\n' "$out" | grep -q '\[theirs\]: not yours' || fail 'theirs was not skipped as not yours'
+printf '  ok   theirs skipped as not yours, not as dirty\n'
 
 [ "$(git rev-parse refs/heads/theirs)" = "$theirs_before" ] || fail 'theirs was changed'
 printf '  ok   theirs untouched\n'

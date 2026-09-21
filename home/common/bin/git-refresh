@@ -216,24 +216,13 @@ EOF
       if branch_diverged_from_remote "$wt" "$b"; then
         uact=none; udetail='diverged from its own remote, resolve that first'
       else
-        uv=$(update_verdict "$wt" "$b")
-        uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
-        # Someone else's branch is theirs to rebase, never ours: that rewrites
-        # their commits and force-pushes the copies. A merge only adds to it,
-        # so it is offered, unticked. It is pushed or it is nothing, because a
-        # merge left local on a branch its author pushes to is a conflict
-        # waiting to happen, so with no upstream there is nothing on offer.
-        # A fast-forward has no commits of its own to belong to anyone.
-        if [ "$uact" = merge ] || [ "$uact" = rebase ]; then
-          owner=$(branch_foreign_authors "$b" "$(git -C "$wt" config user.email)")
-          if [ -z "$owner" ]; then
-            owner=-
-          elif branch_has_upstream "$b"; then
-            uact=merge; udetail=-
-          else
-            uact=none; udetail="not yours ($owner), and nowhere to push a merge"
-          fi
-        fi
+        # Computed before the read: a here-doc is expanded as part of setting
+        # up the command it feeds, so the substitution would run with IFS
+        # already set to tab.
+        uv=$(owned_update_verdict "$wt" "$b")
+        IFS="$TAB" read -r uact udetail owner <<EOF
+$uv
+EOF
         if [ "$uact" != none ] && update_needs_stash "$wt" "$uact"; then stash=yes; fi
       fi
     fi
