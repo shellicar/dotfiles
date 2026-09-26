@@ -482,8 +482,12 @@ is silently ignored.
 **The packaged `gpg-agent` sockets are masked, not disabled.** Only one listener can own
 `S.gpg-agent`, and Ubuntu enables all four sockets globally in
 `/etc/systemd/user/sockets.target.wants`, which a user-level `disable` does not turn off.
-`dirmngr` and `keyboxd` stay local. `no-autostart` in `gpg.conf` stops gpg starting its
-own agent when the bridge is down.
+A disable alone would also leave the door open for a package update, or another unit, to
+restore a local agent holding no keys, at which point gpg would report a missing card
+rather than a broken bridge. `no-autostart` in `gpg.conf` closes the same gap from the
+other side: it stops gpg starting its own agent when the bridge is down, so a stopped
+bridge reads as a stopped bridge. `dirmngr` and `keyboxd` stay local: they're the network
+and public keyring services, still legitimately local.
 
 **Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
 home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock
