@@ -9,8 +9,10 @@
 # another" check can: A sees B, B sees A, both quit, nothing left ticking.
 # The lock lives in the same per-label snapshot directory.
 #
-# It exits when the tmux server that spawned it is gone: once the parent dies
-# we get reparented to pid 1, and that is the signal to stand down.
+# It exits when the tmux server is gone: the server's pid is taken once at
+# start from $TMUX and probed with kill -0 each tick, which needs no ps. The
+# server itself is watched, not our parent, because the sh -c run-shell wraps
+# us in outlives a server killed with SIGKILL.
 #
 # The lock is only about cadence - making sure exactly one watcher ticks per
 # label. It has nothing to do with save safety: tmux-snapshot writes a
@@ -42,6 +44,13 @@ if ! mkdir "$lock" 2>/dev/null; then
 fi
 echo "$$" >"$pidfile"
 
+# The server's pid is $TMUX's middle field (socket,pid,session), which tmux sets
+# for run-shell jobs; the socket path may hold commas, so it is cut from the
+# right. Without $TMUX, our parent stands in for it. Fixed at start.
+server="${TMUX%,*}"
+server="${server##*,}"
+case "$server" in '' | *[!0-9]*) server="$PPID" ;; esac
+
 sleeppid=
 cleanup() {
 	[ -n "$sleeppid" ] && kill "$sleeppid" 2>/dev/null
@@ -65,10 +74,9 @@ while :; do
 	wait "$sleeppid"
 	sleeppid=
 
-	# Our parent was the tmux server that spawned us. If it's gone we've been
-	# reparented to pid 1 - stand down rather than save a server we no longer
-	# belong to.
-	[ "$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ')" = 1 ] && exit 0
+	# The tmux server that spawned us is gone: stand down rather than save a
+	# server we no longer belong to.
+	kill -0 "$server" 2>/dev/null || exit 0
 
 	"$snapshot" -L "$label" save >/dev/null 2>&1
 done
