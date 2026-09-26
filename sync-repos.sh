@@ -18,6 +18,15 @@
 #
 # A failed push or pull shows git's own output (the pre-push hook's rejection
 # of a branch name, for one) and the script carries on with the next worktree.
+#
+# Exit status is 1 if anything was marked ❌ (a failed fetch, pull or push, a
+# worktree directory that is gone, no origin/HEAD to compare against), once
+# every repo has been through; 0 otherwise. ⚠️ outcomes and skips are not
+# failures.
+
+# Set to 1 by any ❌. sync_worktree runs in the current shell (the worktree
+# loop's input is a redirection, not a pipe), so its setting survives.
+failed=0
 
 REPOS="
 $HOME/dotfiles
@@ -32,56 +41,59 @@ $HOME/repos/shellicar/claude-fleet-eagers
 
 # sync_worktree <path> <branch>
 sync_worktree() {
-  path=$1
+  wt_path=$1
   branch=$2
 
-  printf '\n  --- %s [%s] ---\n' "$path" "$branch"
+  printf '\n  --- %s [%s] ---\n' "$wt_path" "$branch"
 
   # A worktree git still lists but whose directory is gone (prunable) is
   # reported and skipped, unlike a missing repo, which the REPOS loop passes
   # over in silence. Reporting keeps the stale entry visible.
-  if [ ! -d "$path" ]; then
+  if [ ! -d "$wt_path" ]; then
     echo "    ❌ Directory missing, skipping"
+    failed=1
     return
   fi
 
-  if git -C "$path" rev-parse --verify --quiet '@{u}' >/dev/null 2>&1; then
-    ahead=$(git -C "$path" rev-list '@{u}..HEAD' --count)
-    behind=$(git -C "$path" rev-list 'HEAD..@{u}' --count)
+  if git -C "$wt_path" rev-parse --verify --quiet '@{u}' >/dev/null 2>&1; then
+    ahead=$(git -C "$wt_path" rev-list '@{u}..HEAD' --count)
+    behind=$(git -C "$wt_path" rev-list 'HEAD..@{u}' --count)
 
     if [ "$ahead" -eq 0 ] && [ "$behind" -eq 0 ]; then
-      echo "    ✅ Up to date ($(git -C "$path" rev-parse --short HEAD))"
+      echo "    ✅ Up to date ($(git -C "$wt_path" rev-parse --short HEAD))"
 
     elif [ "$ahead" -gt 0 ] && [ "$behind" -gt 0 ]; then
-      echo "    ⚠️ Diverged (ahead $ahead, behind $behind): local $(git -C "$path" rev-parse --short HEAD) vs upstream $(git -C "$path" rev-parse --short '@{u}'), skipping"
+      echo "    ⚠️ Diverged (ahead $ahead, behind $behind): local $(git -C "$wt_path" rev-parse --short HEAD) vs upstream $(git -C "$wt_path" rev-parse --short '@{u}'), skipping"
 
     elif [ "$behind" -gt 0 ]; then
       echo "    Behind by $behind, pulling (rebase, autostash)"
-      if git -C "$path" pull --rebase --autostash --quiet 2>&1; then
+      if git -C "$wt_path" pull --rebase --autostash --quiet 2>&1; then
         # pull exits 0 even when putting the local changes back conflicts:
         # the worktree is left with conflict markers and git keeps the
         # changes as an entry on the repo's stash list. This only reports it:
         # nothing resets the worktree or touches the stash entry, and git's
         # own message above says how to resolve it.
-        if [ -n "$(git -C "$path" diff --name-only --diff-filter=U)" ]; then
-          echo "    ⚠️ Pulled ($(git -C "$path" rev-parse --short HEAD)), but putting local changes back conflicted; they are also kept on the stash list"
+        if [ -n "$(git -C "$wt_path" diff --name-only --diff-filter=U)" ]; then
+          echo "    ⚠️ Pulled ($(git -C "$wt_path" rev-parse --short HEAD)), but putting local changes back conflicted; they are also kept on the stash list"
         else
-          echo "    ✅ Done ($(git -C "$path" rev-parse --short HEAD))"
+          echo "    ✅ Done ($(git -C "$wt_path" rev-parse --short HEAD))"
         fi
       else
         echo "    ❌ Pull failed"
+        failed=1
       fi
 
     elif [ "$ahead" -gt 0 ]; then
       echo "    Ahead by $ahead, pushing"
-      if git -C "$path" push --quiet 2>&1; then
+      if git -C "$wt_path" push --quiet 2>&1; then
         echo "    ✅ Done"
       else
         echo "    ❌ Push failed"
+        failed=1
       fi
     fi
 
-  elif [ -n "$(git -C "$path" config "branch.$branch.merge")" ]; then
+  elif [ -n "$(git -C "$wt_path" config "branch.$branch.merge")" ]; then
     # The branch has an upstream configured but its remote-tracking ref is
     # gone (fetch.prune removes it once the remote branch is deleted, e.g.
     # after a PR merges), so this reports and skips. Treating it as "no
@@ -89,30 +101,32 @@ sync_worktree() {
     # lacks, which a squash-merged branch always has: that recreates the
     # branch the PR just deleted. The cost is that a remote branch deleted by
     # mistake is never restored by this script.
-    echo "    ⚠️ Upstream $(git -C "$path" config "branch.$branch.remote")/$(git -C "$path" config "branch.$branch.merge" | sed 's|^refs/heads/||') is gone, skipping"
+    printf '    ⚠️ Upstream %s/%s is gone, skipping\n' "$(git -C "$wt_path" config "branch.$branch.remote")" "$(git -C "$wt_path" config "branch.$branch.merge" | sed 's|^refs/heads/||')"
 
   else
     # With no refs/remotes/origin/HEAD (never set, or no remote called
     # origin) there is nothing to compare against, so this reports and skips
     # rather than acting on a guess about which branch is the trunk.
-    if ! new=$(git -C "$path" rev-list --count 'refs/remotes/origin/HEAD..HEAD' 2>/dev/null); then
+    if ! new=$(git -C "$wt_path" rev-list --count 'refs/remotes/origin/HEAD..HEAD' 2>/dev/null); then
       echo "    ❌ No upstream and no origin/HEAD to compare against, skipping"
+      failed=1
     elif [ "$new" -eq 0 ]; then
-      echo "    ✅ No upstream, nothing beyond origin/HEAD, nothing to push ($(git -C "$path" rev-parse --short HEAD))"
+      echo "    ✅ No upstream, nothing beyond origin/HEAD, nothing to push ($(git -C "$wt_path" rev-parse --short HEAD))"
     else
       echo "    No upstream, $new commit(s) beyond origin/HEAD, pushing to origin/$branch"
-      if git -C "$path" push --quiet -u origin "$branch" 2>&1; then
+      if git -C "$wt_path" push --quiet -u origin "$branch" 2>&1; then
         echo "    ✅ Done"
       else
         echo "    ❌ Push failed"
+        failed=1
       fi
     fi
   fi
 
-  dirty=$(git -C "$path" status --porcelain)
+  dirty=$(git -C "$wt_path" status --porcelain)
   if [ -n "$dirty" ]; then
     echo "    Dirty:"
-    echo "$dirty" | sed 's/^/      /'
+    printf '%s\n' "$dirty" | sed 's/^/      /'
   fi
 }
 
@@ -127,6 +141,7 @@ for repo in $REPOS; do
 
   if ! git fetch --quiet 2>&1; then
     echo "  ❌ Fetch failed, skipping"
+    failed=1
     continue
   fi
 
@@ -165,3 +180,5 @@ $(git worktree list --porcelain)
 
 EOF
 done
+
+exit "$failed"
