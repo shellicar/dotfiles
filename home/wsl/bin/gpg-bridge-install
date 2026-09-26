@@ -49,6 +49,8 @@ for cmd in wslvar wslpath socat curl sha256sum systemctl gpgconf gpg; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "$TOOL: missing $cmd" >&2; exit 1; }
 done
 
+systemctl --user is-system-running >/dev/null 2>&1 || { echo "$TOOL: systemd --user is not running" >&2; exit 1; }
+
 win_bin=$(wslpath -u "$(wslvar USERPROFILE)")/bin
 relay="$win_bin/npiperelay.exe"
 gpg_conf="${GNUPGHOME:-$HOME/.gnupg}/gpg.conf"
