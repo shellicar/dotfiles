@@ -414,9 +414,8 @@ there is a window with only one key holding them.
 
 **One key plugged in at a time.** `scdaemon` binds to a single card, so two present at
 once means signing requests can address the wrong one and stall. `gpgconf --kill
-gpg-agent` clears a stale binding. Under WSL use `gpgconf --kill scdaemon` instead: it
-stops only the Windows `scdaemon`, and the agent starts a fresh one, whereas killing the
-agent stops the Windows one and nothing restarts it.
+gpg-agent` clears a stale binding. Under WSL use `gpg-setup.sh --reset` instead, since a
+bare kill stops the Windows agent and nothing restarts it.
 
 **The agent's cache and the card's own state are separate gates, and either one prompts.**
 `gpg-agent`'s `default-cache-ttl` governs only how long the agent holds the passphrase.
@@ -500,11 +499,9 @@ and public keyring services, still legitimately local.
 **`gpgconf --kill gpg-agent` run from WSL kills the Windows agent too**, since the socket
 it addresses is served by the Windows process, not a separate local one. Nothing restarts
 the Windows agent afterwards, so signing from WSL stops until it is started again on
-Windows. That is why `gpg-setup.sh --configure` and `--reset` reload it with
-`gpg-connect-agent reloadagent` instead, which re-reads `gpg-agent.conf` without stopping
-the agent. A reload does not relock the card, because `scdaemon` keeps it unlocked, so
-`--reset` also runs `gpgconf --kill scdaemon`. That stops only the Windows `scdaemon`, and
-the agent starts a new one that asks for the PIN on the next sign.
+Windows. That is why `gpg-setup.sh --configure` reloads it with `gpg-connect-agent
+reloadagent`, which re-reads `gpg-agent.conf` without stopping it, and `--reset` kills it
+and starts it again with the Windows `gpgconf.exe --launch gpg-agent`.
 
 **Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
 home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock

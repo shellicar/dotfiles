@@ -34,8 +34,8 @@ usage() {
   echo "  --configure    Configure this distro to sign with the card"
   echo "  --configure --hardware"
   echo "                 The same thing. There is no on-disk key mode under WSL"
-  echo "  --reset        Restart the bridge, reload the Windows agent and restart"
-  echo "                 the Windows scdaemon, so the next sign prompts for the PIN"
+  echo "  --reset        Restart the Windows gpg-agent"
+  echo "                 (next sign prompts for the PIN)"
   echo "  --schedule     Not applicable under WSL; explains why"
   exit 1
 }
@@ -224,8 +224,7 @@ EOF
 
   # Reaches the Windows agent through the bridge and makes it re-read
   # gpg-agent.conf without stopping it. A kill would stop it, and nothing
-  # restarts it; see docs/yubikey.md. The card stays unlocked, since scdaemon
-  # keeps it so; --reset is what relocks it.
+  # restarts it; see docs/yubikey.md.
   gpg-connect-agent --no-autostart reloadagent /bye 2>/dev/null || true
   echo "  Agent reloaded."
 
@@ -233,16 +232,28 @@ EOF
   echo "Done. Signing uses the Windows pinentry; the PIN prompt appears there."
 }
 
-reset_bridge() {
-  echo "Restarting $SERVICE..."
-  systemctl --user restart "$SERVICE"
-  # Reloaded rather than killed, for the reason given in configure.
-  gpg-connect-agent --no-autostart reloadagent /bye
-  # The card stays unlocked while scdaemon holds it, and a reload does not
-  # restart scdaemon. Killed through the bridge, only the Windows scdaemon
-  # stops; the agent starts a fresh one on the next card use, which asks for
-  # the PIN.
-  gpgconf --kill scdaemon
+# A kill from WSL reaches the Windows agent through the bridge, and nothing
+# restarts it there, so this starts it again itself. The bridge reads the
+# socket file on every connection, so it needs no restart.
+reset_agent() {
+  echo "Restarting the Windows gpg-agent..."
+  gpgconf --kill gpg-agent
+
+  # Waited out so --launch does not find the old agent still exiting.
+  win_socket="$(wslpath -u "$(wslvar LOCALAPPDATA)")/gnupg/S.gpg-agent"
+  waited=0
+  while [ -e "$win_socket" ] && [ "$waited" -lt 50 ]; do
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  if [ -e "$win_socket" ]; then
+    echo "ERROR: the Windows gpg-agent did not exit: $win_socket is still there" >&2
+    exit 1
+  fi
+
+  # The Windows gpgconf, on PATH because WSL appends the Windows PATH to an
+  # interactive shell's.
+  gpgconf.exe --launch gpg-agent
   echo "Done. Next sign will prompt for the PIN again."
 }
 
@@ -259,7 +270,7 @@ schedule() {
 case "${1:-}" in
   --test-sign)  shift; test_sign "$@" ;;
   --configure)  shift; configure "$@" ;;
-  --reset)      reset_bridge ;;
+  --reset)      reset_agent ;;
   --schedule)   schedule ;;
   *)            usage ;;
 esac
