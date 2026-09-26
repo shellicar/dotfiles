@@ -1,7 +1,7 @@
 # APT packages the dotfiles configs rely on.
 # (Linux ls is already GNU, so no coreutils needed here.)
 
-# curl is used by setup.sh itself (fnm, pnpm, GitVersion), not by a config.
+# curl is used by setup.sh itself (fnm, pnpm, rustup, GitVersion, Go), not by a config.
 curl
 git
 tmux
@@ -9,3 +9,6 @@ vim
 gnupg
 xclip
 shellcheck
+
+# cargo needs a C linker to link, and rustup doesn't ship one.
+build-essential
