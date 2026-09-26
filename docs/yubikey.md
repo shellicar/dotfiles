@@ -470,23 +470,20 @@ systemctl --user enable --now gpg-agent.socket gpg-agent-extra.socket gpg-agent-
 sed -i '/^no-autostart$/d' ~/.gnupg/gpg.conf
 ```
 
-**`npiperelay` cannot do this**, despite being the tool every guide names. It dials named
-pipes only and has no Assuan support at all: its flags are `-p -s -ep -ei -v`, and the
-`-a` seen in those guides belongs to `wsl2-ssh-pageant`, a different program. Reading the
-source settles in a minute what a day of following recipes will not.
+**`jstarks/npiperelay` cannot do this.** It dials named pipes only and has no Assuan
+support. Its fork `albertony/npiperelay` can: its `-a` flag reads the nonce file and
+performs the handshake, and it ships a `gpg-relay` script for this case.
 
 **The socket path comes from `gpgconf --list-dirs agent-socket`, never a literal.** Modern
 GnuPG on a systemd machine puts it under `/run/user/<uid>/gnupg`, *not* in `~/.gnupg`,
 which is where the older guides place the relay. A relay in `~/.gnupg` is not an error, it
 is silently ignored.
 
-**The packaged `gpg-agent` sockets are masked, not disabled.** All four activate the same
-`gpg-agent.service`, and only one listener can own `S.gpg-agent`. Disabling leaves the
-door open for a package update to restore a local agent holding no keys, at which point
-gpg reports a missing card rather than a broken bridge. `dirmngr` and `keyboxd` are left
-alone: network and public keyring services, still legitimately local. `no-autostart` in
-`gpg.conf` closes the same gap from the other side, so a stopped bridge reads as a stopped
-bridge.
+**The packaged `gpg-agent` sockets are masked, not disabled.** Only one listener can own
+`S.gpg-agent`, and Ubuntu enables all four sockets globally in
+`/etc/systemd/user/sockets.target.wants`, which a user-level `disable` does not turn off.
+`dirmngr` and `keyboxd` stay local. `no-autostart` in `gpg.conf` stops gpg starting its
+own agent when the bridge is down.
 
 **Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
 home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock

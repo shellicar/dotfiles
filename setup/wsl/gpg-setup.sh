@@ -42,11 +42,14 @@ require_bridge() {
   fi
 }
 
-# The Windows scdaemon binds one reader, so the agent reports at most one card.
+# The serial of the card gpg --card-status reports. gpg 2.3+ can see several
+# cards; this is the one it currently addresses.
 card_serial() {
   gpg --card-status --with-colons 2>/dev/null | grep '^serial:' | head -1 | cut -d: -f2
 }
 
+# Checks the bridge is up, a card answers, and it is one of the three in
+# yubikeys.sh. It does not count the cards.
 require_one_card() {
   require_bridge
 

@@ -8,10 +8,10 @@
 #
 # Each step checks its own end state, so a re-run resumes a partial install.
 #
-# The packaged gpg-agent sockets are masked, not disabled, so an update cannot
-# bring back a keyless local agent on the bridge's socket. no-autostart in
-# gpg.conf stops gpg starting one itself when the bridge is down. The undo steps
-# are in docs/yubikey.md.
+# The packaged gpg-agent sockets are masked, not disabled: Ubuntu enables them
+# globally, which a user-level disable does not turn off. no-autostart in
+# gpg.conf stops gpg starting its own agent when the bridge is down. The undo
+# steps are in docs/yubikey.md.
 
 set -eu
 
