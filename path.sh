@@ -18,6 +18,12 @@ path_prepend() {
   unset _new _rest _seg
 }
 
+# Go: .go/bin is GOROOT/bin (the toolchain, from setup/install-go.sh);
+# go/bin is GOPATH/bin, where `go install` drops tools. Listed first so the
+# user bins below take precedence over both.
+path_prepend "$HOME/.go/bin"
+path_prepend "$HOME/go/bin"
+
 path_prepend "$HOME/bin"
 path_prepend "$HOME/.local/bin"
 path_prepend "$HOME/repos/shellicar/skills/scripts"
