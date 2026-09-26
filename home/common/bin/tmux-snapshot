@@ -212,31 +212,28 @@ function processReader() {
   return fs.existsSync('/proc/self/stat') ? procReader() : psReader();
 }
 
-// Linux: read /proc directly, and skip any process in state D. Reading a
-// cmdline takes the target's mmap lock, so a process wedged in the kernel (seen
-// under WSL: a python3 stuck in __vma_start_write) blocks any reader forever,
-// uninterruptibly, with no timeout that can reach it, SIGKILL included. `ps`
-// reads every cmdline on the machine whatever you ask it for, so one wedged
-// process anywhere hung every save and stalled the watcher behind it: that is
-// why Linux cannot share the ps reader below. D is the only state that can
-// block, and stat and children take no such lock, so a wedged pane costs its
-// own launcher and nothing else. Filtering on state rather than on a name is
-// deliberate: node reports comm as MainThread, not node.
+// Linux: read /proc directly, and skip any process with a thread in state D.
+// Reading a cmdline takes the target's mmap lock, so a process wedged in the
+// kernel (seen under WSL: a python3 stuck in __vma_start_write) blocks any
+// reader forever, uninterruptibly, with no timeout that can reach it, SIGKILL
+// included. `ps` reads every cmdline on the machine whatever you ask it for, so
+// one wedged process anywhere hung every save and stalled the watcher behind
+// it: that is why Linux cannot share the ps reader below. D is the only state
+// that can block, and stat and children take no such lock, so a wedged pane
+// costs its own launcher and nothing else. Filtering on state rather than on a
+// name is deliberate: node reports comm as MainThread, not node.
 function procReader() {
   const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
+  const tids = (pid) => { try { return fs.readdirSync(`/proc/${pid}/task`); } catch { return []; } }; // exited
   // stat's second field is comm in parens and may itself contain spaces and
   // parens, so state is read from after the last ')', never by splitting.
-  const wedged = (pid) => {
-    const stat = read(`/proc/${pid}/stat`);
-    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] === 'D';
-  };
+  const inD = (stat) => stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] === 'D';
+  // Every thread, because /proc/<pid>/stat reports the main thread alone and
+  // the thread holding the lock can be any of them.
+  const wedged = (pid) => tids(pid).some((tid) => inD(read(`/proc/${pid}/task/${tid}/stat`)));
   return {
     command: (pid) => (wedged(pid) ? '' : read(`/proc/${pid}/cmdline`).split('\0').join(' ').trim()),
-    children: (pid) => {
-      let tids = [];
-      try { tids = fs.readdirSync(`/proc/${pid}/task`); } catch { return []; } // exited
-      return tids.flatMap((tid) => read(`/proc/${pid}/task/${tid}/children`).split(' ').filter(Boolean));
-    },
+    children: (pid) => tids(pid).flatMap((tid) => read(`/proc/${pid}/task/${tid}/children`).split(' ').filter(Boolean)),
   };
 }
 
