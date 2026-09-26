@@ -448,9 +448,9 @@ loopback is the VM's, so in the default `nat` networking mode nothing inside can
 that port. That is the whole reason a Windows side helper exists, rather than a socket
 path that could simply be pointed at.
 
-`sorelay.exe` from `win-gpg-agent` is that helper: run as a Windows process, `127.0.0.1`
-means the right thing to it, and `-a` makes it read the nonce file and perform the
-handshake. Its data reaches Linux over stdio through WSL interop rather than the network,
+`npiperelay.exe` from `albertony/npiperelay` is that helper: run as a Windows process,
+`127.0.0.1` means the right thing to it, and `-a` makes it read the nonce file and perform
+the handshake. Its data reaches Linux over stdio through WSL interop rather than the network,
 and `socat` supplies the real AF_UNIX socket gpg opens. `gpg-bridge` in `home/wsl/bin`
 runs that pair; `gpg-bridge.service` keeps it up.
 
@@ -470,9 +470,9 @@ systemctl --user enable --now gpg-agent.socket gpg-agent-extra.socket gpg-agent-
 sed -i '/^no-autostart$/d' ~/.gnupg/gpg.conf
 ```
 
-**`jstarks/npiperelay` cannot do this.** It dials named pipes only and has no Assuan
-support. Its fork `albertony/npiperelay` can: its `-a` flag reads the nonce file and
-performs the handshake, and it ships a `gpg-relay` script for this case.
+**It is the fork, not `jstarks/npiperelay`,** because the original dials named pipes
+only and has no Assuan support, and the fork ships a `gpg-relay` script for this exact
+case.
 
 **The socket path comes from `gpgconf --list-dirs agent-socket`, never a literal.** Modern
 GnuPG on a systemd machine puts it under `/run/user/<uid>/gnupg`, *not* in `~/.gnupg`,
@@ -495,10 +495,9 @@ every keyring read slow. The public key is imported separately on each side.
 **Gpg4win's sockets moved** from `%APPDATA%\gnupg` to `%LOCALAPPDATA%\gnupg`. Most guides
 still name the old path, where they find nothing.
 
-**`win-gpg-agent` was archived in December 2022.** Accepted rather than worked around:
-`sorelay` is a small static Go binary doing one thing, so there is little to rot. It is
-pinned by version and verified against its SHA-256 before unpacking, and downloaded rather
-than committed, because a binary in a dotfiles repo is a thing nobody re-checks.
+**`npiperelay.exe` is downloaded rather than committed**, because a binary in a dotfiles
+repo is a thing nobody re-checks. It is pinned by version, and `gpg-bridge-install` checks
+its SHA-256 on every run.
 
 **usbipd-win is the other route and was rejected.** It passes the USB device through so
 `pcscd` and `scdaemon` run natively in WSL, which is the cleaner architecture in the

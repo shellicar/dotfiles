@@ -28,10 +28,9 @@ else
   . "$DIR/../../common/lib/yubikeys.sh"
 fi
 
-RELAY_VERSION=v1.6.3
-RELAY_URL="https://github.com/rupor-github/win-gpg-agent/releases/download/${RELAY_VERSION}/win-gpg-agent.zip"
-RELAY_SHA256=23cc5e7b7e1937049ab7a416871713f44fbf84a002aa58fd6326d99876b79cd0
-RELAY_MEMBER=sorelay.exe
+RELAY_VERSION=v1.12.1
+RELAY_URL="https://github.com/albertony/npiperelay/releases/download/${RELAY_VERSION}/npiperelay_windows_amd64.exe"
+RELAY_EXE_SHA256=dbb448aea38835a65e2e10d83e2dd770a8e4dfa5f43b5669d7551a3125445ca4
 
 MASKED_UNITS='gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket'
 SERVICE=gpg-bridge.service
@@ -46,17 +45,24 @@ done
 
 [ -n "${WSL_DISTRO_NAME:-}" ] || { echo "$TOOL: WSL only" >&2; exit 2; }
 
-for cmd in wslvar wslpath socat curl unzip sha256sum systemctl gpgconf gpg; do
+for cmd in wslvar wslpath socat curl sha256sum systemctl gpgconf gpg; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "$TOOL: missing $cmd" >&2; exit 1; }
 done
 
 win_bin=$(wslpath -u "$(wslvar USERPROFILE)")/bin
-relay="$win_bin/$RELAY_MEMBER"
+relay="$win_bin/npiperelay.exe"
 gpg_conf="${GNUPGHOME:-$HOME/.gnupg}/gpg.conf"
 
 # The plan lists only what is left to change.
-need_relay=0
-[ -x "$relay" ] || need_relay=1
+# A present but wrong or truncated relay is replaced, not trusted.
+relay_state=missing
+if [ -f "$relay" ]; then
+  if [ "$(sha256sum "$relay" | cut -d' ' -f1)" = "$RELAY_EXE_SHA256" ]; then
+    relay_state=ok
+  else
+    relay_state=mismatch
+  fi
+fi
 
 need_mask=''
 for unit in $MASKED_UNITS; do
@@ -74,11 +80,11 @@ need_service=0
 
 echo "plan: bridge gpg-agent to the Windows agent"
 echo "  relay        $relay"
-if [ "$need_relay" -eq 1 ]; then
-  echo "               download $RELAY_VERSION and verify SHA-256"
-else
-  echo "               already present"
-fi
+case "$relay_state" in
+  ok)       echo "               already present, SHA-256 matches" ;;
+  missing)  echo "               download $RELAY_VERSION and verify SHA-256" ;;
+  mismatch) echo "               SHA-256 does not match, download $RELAY_VERSION and replace" ;;
+esac
 echo "  socket       $(gpgconf --list-dirs agent-socket)"
 if [ -n "$need_mask" ]; then
   echo "  mask        $need_mask"
@@ -102,20 +108,22 @@ if [ "$apply" -eq 0 ]; then
   exit 0
 fi
 
-if [ "$need_relay" -eq 1 ]; then
+if [ "$relay_state" != ok ]; then
   tmp=$(mktemp -d)
+  relay_new="$tmp/npiperelay.exe"
   trap 'rm -rf "$tmp"' EXIT INT TERM
   echo "downloading $RELAY_VERSION"
-  curl -fsSL -o "$tmp/win-gpg-agent.zip" "$RELAY_URL"
-  got=$(sha256sum "$tmp/win-gpg-agent.zip" | cut -d' ' -f1)
-  if [ "$got" != "$RELAY_SHA256" ]; then
-    echo "$TOOL: checksum mismatch, refusing to unpack" >&2
-    echo "  expected $RELAY_SHA256" >&2
+  curl -fsSL -o "$relay_new" "$RELAY_URL"
+  got=$(sha256sum "$relay_new" | cut -d' ' -f1)
+  if [ "$got" != "$RELAY_EXE_SHA256" ]; then
+    echo "$TOOL: checksum mismatch" >&2
+    echo "  expected $RELAY_EXE_SHA256" >&2
     echo "  got      $got" >&2
     exit 1
   fi
   mkdir -p "$win_bin"
-  unzip -o -q -j "$tmp/win-gpg-agent.zip" "$RELAY_MEMBER" -d "$win_bin"
+  chmod +x "$relay_new"
+  mv -f "$relay_new" "$relay"
   echo "  installed $relay"
 fi
 
