@@ -251,9 +251,9 @@ schedule() {
   echo "Not applicable under WSL."
   echo ""
   echo "  The macOS version schedules a daily 'gpgconf --kill gpg-agent' to bound"
-  echo "  the passphrase cache window. There is no local agent here to kill: the"
-  echo "  cache belongs to the Windows agent, and the card clears its own verified"
-  echo "  state when it leaves the dock. Set the TTL on the Windows side instead."
+  echo "  how long an on-disk key's decrypted passphrase stays cached. WSL is"
+  echo "  hardware-only, and --configure already sets a ~400-day cache TTL on the"
+  echo "  Windows agent, so a daily forced re-auth has nothing to protect here."
   exit 1
 }
 
