@@ -1,0 +1,16 @@
+[Unit]
+Description=gpg-agent bridge to the Windows agent (YubiKey)
+Documentation=file:%h/dotfiles/docs/yubikey.md
+# Stop restarting after 5 failures in 60s instead of looping forever.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=%h/bin/gpg-bridge
+# The Windows agent can be down (key undocked, Windows logged out).
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

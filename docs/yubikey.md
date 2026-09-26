@@ -414,7 +414,8 @@ there is a window with only one key holding them.
 
 **One key plugged in at a time.** `scdaemon` binds to a single card, so two present at
 once means signing requests can address the wrong one and stall. `gpgconf --kill
-gpg-agent` clears a stale binding.
+gpg-agent` clears a stale binding. Under WSL use `gpg-setup.sh --reset` instead, since a
+bare kill stops the Windows agent and nothing restarts it.
 
 **The agent's cache and the card's own state are separate gates, and either one prompts.**
 `gpg-agent`'s `default-cache-ttl` governs only how long the agent holds the passphrase.
@@ -438,6 +439,92 @@ forever, since the agent dies at logout long before it elapses.
 factory-reset needs a typed confirmation that some terminals fail to submit, so it can
 silently do nothing; `gpg --card-status` is how you tell, since a real reset returns the
 key attributes to `rsa2048` and zeroes the signature counter.
+
+## GPG in WSL2: bridging to the Windows agent
+
+WSL2 is a separate VM, so it cannot open a Windows AF_UNIX socket or named pipe. GnuPG on
+Windows uses neither: `S.gpg-agent` there is an *Assuan socket*, a 22 byte file holding a
+TCP port and a 16 byte nonce, whose listener binds to Windows' own `127.0.0.1`. WSL's
+loopback is the VM's, so in the default `nat` networking mode nothing inside can reach
+that port. That is the whole reason a Windows side helper exists, rather than a socket
+path that could simply be pointed at.
+
+`npiperelay.exe` from `albertony/npiperelay` is that helper: run as a Windows process,
+`127.0.0.1` means the right thing to it, and `-a` makes it read the nonce file and perform
+the handshake. Its data reaches Linux over stdio through WSL interop rather than the network,
+and `socat` supplies the real AF_UNIX socket gpg opens. `gpg-bridge` in `home/wsl/bin`
+runs that pair; `gpg-bridge.service` keeps it up.
+
+**Setting up a WSL machine**, with the key in the dock and the Windows gpg-agent running:
+
+1. `gpg-bridge-install` prints the plan; `gpg-bridge-install --apply` carries it out.
+2. `gpg-setup.sh --configure` imports the public key from the card.
+3. If the card's certificate slot is empty, export the public key on Windows and import it
+   here instead, with the commands `gpg-bridge-install --apply` prints.
+
+**Undoing it** hands the socket back to the packaged agent and removes what setup put on
+the Windows side:
+
+```sh
+systemctl --user disable --now gpg-bridge.service
+systemctl --user unmask gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket
+systemctl --user enable --now gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket
+sed -i '/^no-autostart$/d' ~/.gnupg/gpg.conf
+rm "$(wslpath -u "$(wslvar APPDATA)")/gnupg/gpg-agent.conf"
+rm "$(wslpath -u "$(wslvar USERPROFILE)")/bin/npiperelay.exe"
+```
+
+The Windows agent keeps the 400-day cache TTL until it is reloaded or restarted after
+`gpg-agent.conf` is gone.
+
+**It is the fork, not `jstarks/npiperelay`,** because the original dials named pipes
+only and has no Assuan support, and the fork ships a `gpg-relay` script for this exact
+case.
+
+**The socket path comes from `gpgconf --list-dirs agent-socket`, never a literal.** Modern
+GnuPG on a systemd machine puts it under `/run/user/<uid>/gnupg`, *not* in `~/.gnupg`,
+which is where the older guides place the relay. A relay in `~/.gnupg` is not an error, it
+is silently ignored.
+
+**The packaged `gpg-agent` sockets are masked, not disabled.** Only one listener can own
+`S.gpg-agent`, and Ubuntu enables all four sockets globally in
+`/etc/systemd/user/sockets.target.wants`, which a user-level `disable` does not turn off.
+A disable alone would also leave the door open for a package update, or another unit, to
+restore a local agent holding no keys, at which point gpg would report a missing card
+rather than a broken bridge. `no-autostart` in `gpg.conf` closes the same gap from the
+other side: it stops gpg starting its own agent when the bridge is down, so a stopped
+bridge reads as a stopped bridge. `dirmngr` and `keyboxd` stay local: they're the network
+and public keyring services, still legitimately local.
+
+**`gpgconf --kill gpg-agent` run from WSL kills the Windows agent too**, since the socket
+it addresses is served by the Windows process, not a separate local one. Nothing restarts
+the Windows agent afterwards, so signing from WSL stops until it is started again on
+Windows. That is why `gpg-setup.sh --configure` reloads it with `gpg-connect-agent
+reloadagent`, which re-reads `gpg-agent.conf` without stopping it, and `--reset` kills it
+and starts it again with the Windows `gpgconf.exe --launch gpg-agent`.
+
+**Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
+home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock
+protected, but the Windows and Linux implementations cannot see each other's locks, so
+concurrent use corrupts them. Unix sockets cannot live on DrvFs anyway, `/mnt/c` paths
+present as world readable and draw permission warnings on every invocation, and 9p makes
+every keyring read slow. The public key is imported separately on each side.
+
+**Gpg4win's sockets moved** from `%APPDATA%\gnupg` to `%LOCALAPPDATA%\gnupg`. Most guides
+still name the old path, where they find nothing.
+
+**`npiperelay.exe` is downloaded rather than committed**, because a binary in a dotfiles
+repo is a thing nobody re-checks. It is pinned by version, and `gpg-bridge-install` checks
+its SHA-256 on every run.
+
+**usbipd-win is the other route and was rejected.** It passes the USB device through so
+`pcscd` and `scdaemon` run natively in WSL, which is the cleaner architecture in the
+abstract. But the key switches between machines without losing power, and usbipd ties it
+to one: while attached to WSL the card disappears from Windows entirely, taking WebAuthn
+and Yubico Authenticator with it, and every switch becomes a detach and reattach race.
+Mirrored networking mode would remove the need for any Windows binary, at the cost of a
+system wide change to every distro plus a hand written implementation of the nonce
+handshake.
 
 ## Deliberately not here
 

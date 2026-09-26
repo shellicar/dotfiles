@@ -1,0 +1,184 @@
+#!/bin/sh
+#
+# gpg-bridge-install: put the Windows side relay in place and hand this distro's
+# gpg-agent socket to it.
+#
+#   gpg-bridge-install           print the plan, touch nothing
+#   gpg-bridge-install --apply   print the plan, then do it
+#
+# Each step checks its own end state, so a re-run resumes a partial install.
+#
+# The packaged gpg-agent sockets are masked, not disabled: Ubuntu enables them
+# globally, which a user-level disable does not turn off. no-autostart in
+# gpg.conf stops gpg starting its own agent when the bridge is down. The undo
+# steps are in docs/yubikey.md.
+
+set -eu
+
+DIR=$(cd "$(dirname "$0")" && pwd)
+TOOL='gpg-bridge-install'
+
+# ~/lib when installed, home/common/lib when run from the repo.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../common/lib/yubikeys.sh
+# shellcheck disable=SC1091  # resolved at runtime; the directive above names the repo copy
+if [ -f "$DIR/../lib/yubikeys.sh" ]; then
+  . "$DIR/../lib/yubikeys.sh"
+else
+  . "$DIR/../../common/lib/yubikeys.sh"
+fi
+
+RELAY_VERSION=v1.12.1
+RELAY_URL="https://github.com/albertony/npiperelay/releases/download/${RELAY_VERSION}/npiperelay_windows_amd64.exe"
+RELAY_EXE_SHA256=dbb448aea38835a65e2e10d83e2dd770a8e4dfa5f43b5669d7551a3125445ca4
+
+MASKED_UNITS='gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket'
+SERVICE=gpg-bridge.service
+
+apply=0
+for arg in "$@"; do
+  case "$arg" in
+    --apply) apply=1 ;;
+    *) echo "usage: $TOOL [--apply]" >&2; exit 2 ;;
+  esac
+done
+
+[ -n "${WSL_DISTRO_NAME:-}" ] || { echo "$TOOL: WSL only" >&2; exit 2; }
+
+for cmd in wslvar wslpath socat curl sha256sum systemctl gpgconf gpg; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "$TOOL: missing $cmd" >&2; exit 1; }
+done
+
+systemctl --user is-system-running >/dev/null 2>&1 || { echo "$TOOL: systemd --user is not running" >&2; exit 1; }
+
+win_bin=$(wslpath -u "$(wslvar USERPROFILE)")/bin
+relay="$win_bin/npiperelay.exe"
+gpg_conf="${GNUPGHOME:-$HOME/.gnupg}/gpg.conf"
+
+# The plan lists only what is left to change.
+# A present but wrong or truncated relay is replaced, not trusted.
+relay_state=missing
+if [ -f "$relay" ]; then
+  if [ "$(sha256sum "$relay" | cut -d' ' -f1)" = "$RELAY_EXE_SHA256" ]; then
+    relay_state=ok
+  else
+    relay_state=mismatch
+  fi
+fi
+
+need_mask=''
+for unit in $MASKED_UNITS; do
+  state=$(systemctl --user is-enabled "$unit" 2>/dev/null || true)
+  [ "$state" = masked ] || need_mask="$need_mask $unit"
+done
+
+need_autostart=0
+if [ ! -f "$gpg_conf" ] || ! grep -qx 'no-autostart' "$gpg_conf"; then
+  need_autostart=1
+fi
+
+need_service=0
+[ "$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)" = active ] || need_service=1
+
+echo "plan: bridge gpg-agent to the Windows agent"
+echo "  relay        $relay"
+case "$relay_state" in
+  ok)       echo "               already present, SHA-256 matches" ;;
+  missing)  echo "               download $RELAY_VERSION and verify SHA-256" ;;
+  mismatch) echo "               SHA-256 does not match, download $RELAY_VERSION and replace" ;;
+esac
+echo "  socket       $(gpgconf --list-dirs agent-socket)"
+if [ -n "$need_mask" ]; then
+  echo "  mask        $need_mask"
+else
+  echo "  mask         already masked"
+fi
+if [ "$need_autostart" -eq 1 ]; then
+  echo "  gpg.conf     add no-autostart"
+else
+  echo "  gpg.conf     no-autostart already set"
+fi
+if [ "$need_service" -eq 1 ]; then
+  echo "  service      enable and start $SERVICE"
+else
+  echo "  service      already active"
+fi
+echo "  key          $GPG_FINGERPRINT"
+
+if [ "$apply" -eq 0 ]; then
+  echo "run: $TOOL --apply"
+  exit 0
+fi
+
+if [ "$relay_state" != ok ]; then
+  tmp=$(mktemp -d)
+  relay_new="$tmp/npiperelay.exe"
+  trap 'rm -rf "$tmp"' EXIT INT TERM
+  echo "downloading $RELAY_VERSION"
+  curl -fsSL -o "$relay_new" "$RELAY_URL"
+  got=$(sha256sum "$relay_new" | cut -d' ' -f1)
+  if [ "$got" != "$RELAY_EXE_SHA256" ]; then
+    echo "$TOOL: checksum mismatch" >&2
+    echo "  expected $RELAY_EXE_SHA256" >&2
+    echo "  got      $got" >&2
+    exit 1
+  fi
+  mkdir -p "$win_bin"
+  chmod +x "$relay_new"
+  mv -f "$relay_new" "$relay"
+  echo "  installed $relay"
+fi
+
+if [ -n "$need_mask" ]; then
+  # Masking leaves a running unit running, and a running agent keeps the socket.
+  # shellcheck disable=SC2086  # deliberate split, one word per unit
+  systemctl --user stop $need_mask 2>/dev/null || true
+  systemctl --user stop gpg-agent.service 2>/dev/null || true
+  # shellcheck disable=SC2086
+  systemctl --user mask $need_mask
+  echo "  masked$need_mask"
+fi
+
+if [ "$need_autostart" -eq 1 ]; then
+  mkdir -p "$(dirname "$gpg_conf")"
+  chmod 700 "$(dirname "$gpg_conf")"
+  # Without a final newline the option would join the file's last line.
+  if [ -s "$gpg_conf" ] && [ -n "$(tail -c 1 "$gpg_conf")" ]; then
+    echo >> "$gpg_conf"
+  fi
+  echo 'no-autostart' >> "$gpg_conf"
+  echo "  gpg.conf no-autostart added"
+fi
+
+systemctl --user daemon-reload
+systemctl --user enable --now "$SERVICE"
+echo "  $SERVICE enabled"
+
+# The socket appears a moment after the service starts.
+socket=$(gpgconf --list-dirs agent-socket)
+waited=0
+while [ ! -S "$socket" ] && [ "$waited" -lt 50 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+
+# An active unit proves nothing: socat stays up when the Windows side is broken.
+if gpg --card-status >/dev/null 2>&1; then
+  echo "card reachable through the bridge"
+else
+  echo "$TOOL: bridge up but the card did not answer" >&2
+  echo "  check the key is in the dock and Windows gpg-agent is running:" >&2
+  echo "    gpg --card-status" >&2
+  exit 1
+fi
+
+if gpg --list-keys "$GPG_FINGERPRINT" >/dev/null 2>&1; then
+  echo "public key present"
+else
+  echo "public key $GPG_FINGERPRINT is NOT in this keyring"
+  echo "  signatures will verify as unknown until it is imported. On Windows:"
+  echo "    gpg --export --armor $GPG_FINGERPRINT > C:\\pub.asc"
+  echo "  then here:"
+  echo "    gpg --import \"\$(wslpath -u 'C:\\pub.asc')\""
+  printf '    %s\n' "printf '%s:6:\\n' $GPG_FINGERPRINT | gpg --import-ownertrust"
+fi
