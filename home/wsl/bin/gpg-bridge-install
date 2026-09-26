@@ -132,6 +132,10 @@ fi
 if [ "$need_autostart" -eq 1 ]; then
   mkdir -p "$(dirname "$gpg_conf")"
   chmod 700 "$(dirname "$gpg_conf")"
+  # Without a final newline the option would join the file's last line.
+  if [ -s "$gpg_conf" ] && [ -n "$(tail -c 1 "$gpg_conf")" ]; then
+    echo >> "$gpg_conf"
+  fi
   echo 'no-autostart' >> "$gpg_conf"
   echo "  gpg.conf no-autostart added"
 fi

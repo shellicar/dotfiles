@@ -330,6 +330,10 @@ EOF
 
   # --- gpg.conf ---
   if [ ! -f "$GPG_CONF" ] || ! grep -q "no-tty" "$GPG_CONF" 2>/dev/null; then
+    # Without a final newline the option would join the file's last line.
+    if [ -s "$GPG_CONF" ] && [ -n "$(tail -c 1 "$GPG_CONF")" ]; then
+      echo >> "$GPG_CONF"
+    fi
     echo "no-tty" >> "$GPG_CONF"
   fi
 
