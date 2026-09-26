@@ -31,7 +31,7 @@ fi
 "$DIR/../install-gitversion.sh" 5
 "$DIR/../install-gitversion.sh" 6
 
-# 5. Go toolchain. apt has 1.22, older than repos pinning go 1.24.x; see
+# 5. Go toolchain. Ubuntu 24.04's apt has 1.22, older than repos pinning go 1.24.x; see
 #    install-go.sh for why a single version is enough.
 "$DIR/../install-go.sh"
 

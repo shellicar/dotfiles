@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# The Go toolchain. Debian/Ubuntu ships 1.22, which
+# The Go toolchain. Ubuntu 24.04's apt has 1.22, which
 # is older than repos pinning `go 1.24.x` in go.mod, so apt is not an option.
 #
 # Only one version is installed, deliberately. Since Go 1.21 the `go` command
