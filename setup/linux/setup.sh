@@ -25,11 +25,23 @@ if ! command -v pnpm >/dev/null 2>&1 && [ ! -x "${PNPM_HOME:-$HOME/.local/share/
   curl -fsSL https://get.pnpm.io/install.sh | sh -
 fi
 
-# 4. GitVersion, both majors. The `gitversion` wrapper picks one per repo from
+# 4. Rust via rustup's own script, which installs to ~/.rustup and ~/.cargo.
+#    --no-modify-path stops the installer from editing shell rc files (it
+#    would add `. "$HOME/.cargo/env"`); the dotfiles put ~/.cargo/bin on PATH
+#    in os/linux.env.sh instead. -y answers its prompts so setup runs unattended.
+#    The command is Rust's own, verbatim, with arguments passed the way its docs
+#    show: https://rust-lang.github.io/rustup/installation/other.html
+#    Only rustup is checked, so every machine gets the same rustup-managed
+#    Rust: one from apt is ignored, and rustup's, first on PATH, is the one used.
+if ! command -v rustup >/dev/null 2>&1 && [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+fi
+
+# 5. GitVersion, both majors. The `gitversion` wrapper picks one per repo from
 #    that repo's GitVersion.yml, so a machine carrying only one still fails
 #    wherever the other is wanted.
 "$DIR/../install-gitversion.sh" 5
 "$DIR/../install-gitversion.sh" 6
 
-# 5. Link the configs into $HOME.
+# 6. Link the configs into $HOME.
 "$DOTFILES/install.sh"

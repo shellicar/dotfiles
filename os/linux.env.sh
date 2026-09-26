@@ -10,3 +10,9 @@ export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 # path.sh prepends PNPM_BIN to PATH.
 export PNPM_HOME="$HOME/.local/share/pnpm"
 export PNPM_BIN="$PNPM_HOME/bin"
+
+# rust (rustup, ~/.cargo)
+case ":$PATH:" in
+  *":$HOME/.cargo/bin:"*) ;;
+  *) export PATH="$HOME/.cargo/bin:$PATH" ;;
+esac
