@@ -34,8 +34,8 @@ usage() {
   echo "  --configure    Configure this distro to sign with the card"
   echo "  --configure --hardware"
   echo "                 The same thing. There is no on-disk key mode under WSL"
-  echo "  --reset        Restart the bridge and reload the Windows agent"
-  echo "                 (next sign prompts for the PIN)"
+  echo "  --reset        Restart the bridge, reload the Windows agent and restart"
+  echo "                 the Windows scdaemon, so the next sign prompts for the PIN"
   echo "  --schedule     Not applicable under WSL; explains why"
   exit 1
 }

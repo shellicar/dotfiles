@@ -414,7 +414,9 @@ there is a window with only one key holding them.
 
 **One key plugged in at a time.** `scdaemon` binds to a single card, so two present at
 once means signing requests can address the wrong one and stall. `gpgconf --kill
-gpg-agent` clears a stale binding.
+gpg-agent` clears a stale binding. Under WSL use `gpgconf --kill scdaemon` instead: it
+stops only the Windows `scdaemon`, and the agent starts a fresh one, whereas killing the
+agent stops the Windows one and nothing restarts it.
 
 **The agent's cache and the card's own state are separate gates, and either one prompts.**
 `gpg-agent`'s `default-cache-ttl` governs only how long the agent holds the passphrase.
@@ -461,14 +463,20 @@ runs that pair; `gpg-bridge.service` keeps it up.
 3. If the card's certificate slot is empty, export the public key on Windows and import it
    here instead, with the commands `gpg-bridge-install --apply` prints.
 
-**Undoing it** hands the socket back to the packaged agent:
+**Undoing it** hands the socket back to the packaged agent and removes what setup put on
+the Windows side:
 
 ```sh
 systemctl --user disable --now gpg-bridge.service
 systemctl --user unmask gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket
 systemctl --user enable --now gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket
 sed -i '/^no-autostart$/d' ~/.gnupg/gpg.conf
+rm "$(wslpath -u "$(wslvar APPDATA)")/gnupg/gpg-agent.conf"
+rm "$(wslpath -u "$(wslvar USERPROFILE)")/bin/npiperelay.exe"
 ```
+
+The Windows agent keeps the 400-day cache TTL until it is reloaded or restarted after
+`gpg-agent.conf` is gone.
 
 **It is the fork, not `jstarks/npiperelay`,** because the original dials named pipes
 only and has no Assuan support, and the fork ships a `gpg-relay` script for this exact
