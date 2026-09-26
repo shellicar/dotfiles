@@ -318,6 +318,9 @@ EOF
       if [ -f "$SCDAEMON_CONF" ] && grep -q 'keep-chv-on-timeout' "$SCDAEMON_CONF"; then
         echo "  scdaemon: keep-chv-on-timeout already set"
       else
+        if [ -s "$SCDAEMON_CONF" ] && [ -n "$(tail -c 1 "$SCDAEMON_CONF")" ]; then
+          echo >> "$SCDAEMON_CONF"
+        fi
         echo "keep-chv-on-timeout" >> "$SCDAEMON_CONF"
         echo "  scdaemon: keep-chv-on-timeout added"
       fi
