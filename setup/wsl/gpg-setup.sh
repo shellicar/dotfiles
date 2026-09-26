@@ -237,9 +237,6 @@ reset_bridge() {
   echo "Restarting $SERVICE..."
   systemctl --user restart "$SERVICE"
   # Reloaded rather than killed, for the reason given in configure.
-  # TODO(undecided): a failure of either command below ends --reset under
-  # set -e, as a failed kill does in the macOS reset; the alternative is
-  # configure's `|| true`.
   gpg-connect-agent --no-autostart reloadagent /bye
   # The card stays unlocked while scdaemon holds it, and a reload does not
   # restart scdaemon. Killed through the bridge, only the Windows scdaemon
