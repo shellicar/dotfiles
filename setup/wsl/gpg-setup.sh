@@ -147,7 +147,10 @@ configure() {
   for arg in "$@"; do
     case "$arg" in
       # Accepted so the macOS command line works here; nothing to configure.
-      --hardware|--touch) ;;
+      --hardware) ;;
+      --touch)
+        echo "ERROR: --touch is not supported on WSL: scdaemon runs on the Windows side" >&2
+        exit 64 ;;
       *) echo "ERROR: unknown option: $arg" >&2; exit 64 ;;
     esac
   done
