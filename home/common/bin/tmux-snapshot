@@ -242,7 +242,23 @@ function procReader() {
 function psReader() {
   const byPid = new Map();
   const kids = new Map();
-  for (const line of (run('ps', ['-axo', 'pid=,ppid=,command='], true) || '').split('\n')) {
+  // -ww so ps never cuts a command line to a width, which could drop a long
+  // launcher path's .mjs. The whole table can be large, so the buffer is raised,
+  // and overflowing it fails the save: a cut-off table would lose launchers
+  // silently.
+  // TODO: untested on macOS. On a Mac, check that
+  //   ps -axo pid=,ppid=,command= -ww | awk '{ print length }' | sort -n | tail -1
+  // shows uncut lines, and that a launcher with a long path is still detected.
+  const maxBuffer = 64 * 1024 * 1024;
+  let out;
+  try {
+    out = execFileSync('ps', ['-ww', '-axo', 'pid=,ppid=,command='],
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer });
+  } catch (e) {
+    if (e.code === 'ENOBUFS') die(`ps output exceeded ${maxBuffer} bytes; not saving a partial process table`);
+    out = (e.stdout || '').toString();
+  }
+  for (const line of out.split('\n')) {
     const m = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
     if (!m) continue;
     const [, pid, ppid, cmd] = m;
