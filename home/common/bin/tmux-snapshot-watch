@@ -10,10 +10,9 @@
 # The lock lives in the same per-label snapshot directory.
 #
 # It exits when the tmux server that spawned it is gone. Its parent's pid is
-# taken once at start and probed with kill -0 each tick, rather than asking ps
-# for our current ppid: Linux ps reads every process's cmdline whatever it is
-# asked, so one process wedged in the kernel hangs it forever, and the watcher
-# with it (seen under WSL, where a stuck python3 stopped all saves for hours).
+# taken once at start and probed with kill -0 each tick. That needs no ps at
+# all, and it also notices the parent going when we are reparented to
+# something other than pid 1 (a subreaper), which a check for ppid 1 misses.
 #
 # The lock is only about cadence - making sure exactly one watcher ticks per
 # label. It has nothing to do with save safety: tmux-snapshot writes a

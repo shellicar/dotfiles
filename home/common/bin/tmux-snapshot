@@ -12,10 +12,11 @@
 // as an array, never re-split.
 //
 // Launcher detection: a pane's foreground is often a `node <script>` wrapper, so
-// the real launcher is a descendant. We walk the pane's whole process tree (from
-// /proc, or ps -t where there is none) rather than one level of children, which
-// misses it, and match the .mjs basename against the LAUNCHERS allowlist. Args are dropped on purpose: restore re-runs
-// the script bare and lets it re-establish its own per-session state.
+// the real launcher is a descendant. We walk the pane's whole process tree
+// (from /proc on Linux, or one `ps -axo` call on macOS) rather than one level of
+// children, which misses it, and match the .mjs basename against the LAUNCHERS
+// allowlist. Args are dropped on purpose: restore re-runs the script bare and
+// lets it re-establish its own per-session state.
 //
 // Every tmux read is pinned to an explicit pane/window id; nothing relies on the
 // "current" pane, which follows focus.
