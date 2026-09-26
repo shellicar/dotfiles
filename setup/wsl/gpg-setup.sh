@@ -136,6 +136,14 @@ import_pubkey_from_card() {
 test_sign() {
   require_one_card
 
+  # Without no-autostart, gpg silently starts a keyless local agent instead
+  # of reaching the card through the bridge.
+  if ! { [ -f "$GPG_CONF" ] && grep -qx 'no-autostart' "$GPG_CONF"; }; then
+    echo "ERROR: gpg.conf does not have no-autostart set" >&2
+    echo "  run gpg-setup.sh --configure first" >&2
+    exit 1
+  fi
+
   echo "Testing sign with $GPG_FINGERPRINT through the bridge..."
   if echo "banana" | gpg --no-options --local-user "$GPG_FINGERPRINT" --clearsign >/dev/null 2>&1; then
     echo "Signing works."
