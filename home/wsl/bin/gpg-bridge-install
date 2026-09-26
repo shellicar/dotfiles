@@ -144,6 +144,14 @@ systemctl --user daemon-reload
 systemctl --user enable --now "$SERVICE"
 echo "  $SERVICE enabled"
 
+# The socket appears a moment after the service starts.
+socket=$(gpgconf --list-dirs agent-socket)
+waited=0
+while [ ! -S "$socket" ] && [ "$waited" -lt 50 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+
 # An active unit proves nothing: socat stays up when the Windows side is broken.
 if gpg --card-status >/dev/null 2>&1; then
   echo "card reachable through the bridge"
