@@ -489,6 +489,9 @@ other side: it stops gpg starting its own agent when the bridge is down, so a st
 bridge reads as a stopped bridge. `dirmngr` and `keyboxd` stay local: they're the network
 and public keyring services, still legitimately local.
 
+**`gpgconf --kill gpg-agent` run from WSL kills the Windows agent too**, since the socket
+it addresses is served by the Windows process, not a separate local one.
+
 **Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
 home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock
 protected, but the Windows and Linux implementations cannot see each other's locks, so
