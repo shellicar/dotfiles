@@ -25,6 +25,13 @@ fi
 win_local=$(wslvar LOCALAPPDATA | tr '\\' '/')
 RELAY_SOCKET="${win_local}/gnupg/S.gpg-agent"
 
+# On Windows the socket is a regular file holding a port and nonce, so -S would fail.
+socket_file=$(wslpath -u "$RELAY_SOCKET")
+if [ ! -e "$socket_file" ]; then
+  echo "gpg-bridge: Windows agent socket not found: $socket_file" >&2
+  exit 1
+fi
+
 # socat splits an EXEC command on spaces even inside quotes, so the paths reach
 # the relay through the environment of a SYSTEM shell.
 export RELAY_EXE RELAY_SOCKET
