@@ -88,8 +88,8 @@ import_pubkey_from_card() {
   fi
 
   if [ ! -s "$tmp/cert.der" ]; then
-    echo "ERROR: slot $CERT_SLOT is empty" >&2
-    echo "  write the public key to it from a machine with gpg-card:" >&2
+    echo "ERROR: no data came back for slot $CERT_SLOT" >&2
+    echo "  confirm with gpg --card-status before writing to the card; if the slot really is empty:" >&2
     echo "    gpg-card --no-history writecert --openpgp OPENPGP.$CERT_SLOT <fingerprint>" >&2
     exit 1
   fi
