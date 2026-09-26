@@ -12,7 +12,7 @@
 set -eu
 
 # wslvar costs about 200ms, so it runs once at start, not per connection.
-RELAY_EXE="$(wslpath -u "$(wslvar USERPROFILE)")/bin/npiperelay.exe"
+RELAY_EXE="${GPG_BRIDGE_RELAY:-$(wslpath -u "$(wslvar USERPROFILE)")/bin/npiperelay.exe}"
 
 if [ ! -x "$RELAY_EXE" ]; then
   echo "gpg-bridge: relay not found or not executable: $RELAY_EXE" >&2
