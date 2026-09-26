@@ -16,6 +16,10 @@ LIB="$DIR/../../home/common/lib/yubikeys.sh"
 GPG_CONF="${GNUPGHOME:-$HOME/.gnupg}/gpg.conf"
 SERVICE=gpg-bridge.service
 CERT_SLOT=3
+# gpg-agent has no infinite value: the man page defines both TTLs as plain
+# seconds, and 0 means no caching at all rather than never expiring. 400 days is
+# the stand-in, since the agent dies at logout long before it elapses.
+CACHE_TTL_HARDWARE=34560000
 
 # No --generate here: key generation is always on-card, identical regardless
 # of OS (see docs/yubikey.md), and is not needed from WSL.
@@ -172,18 +176,49 @@ configure() {
 
   require_one_card
 
+  # A daily kill in cron reaches the Windows agent through the bridge too.
+  if crontab -l 2>/dev/null | grep -q 'gpgconf --kill gpg-agent'; then
+    crontab -l 2>/dev/null | grep -v 'gpgconf --kill gpg-agent' | crontab -
+    echo "  Removed the daily gpg-agent kill from cron"
+  else
+    echo "  no leftover cron entry"
+  fi
+
+  mkdir -p "$(dirname "$GPG_CONF")"
+  chmod 700 "$(dirname "$GPG_CONF")"
+
   # Without no-autostart, gpg starts a keyless local agent when the bridge is down.
   if [ -f "$GPG_CONF" ] && grep -qx 'no-autostart' "$GPG_CONF"; then
     echo "  gpg.conf: no-autostart already set"
   else
-    mkdir -p "$(dirname "$GPG_CONF")"
-    chmod 700 "$(dirname "$GPG_CONF")"
     # Without a final newline the option would join the file's last line.
     if [ -s "$GPG_CONF" ] && [ -n "$(tail -c 1 "$GPG_CONF")" ]; then
       echo >> "$GPG_CONF"
     fi
     echo 'no-autostart' >> "$GPG_CONF"
     echo "  gpg.conf: no-autostart added"
+  fi
+
+  # The Windows agent otherwise runs its out-of-the-box cache (10 minutes /
+  # 2 hours); the card should only need its PIN once.
+  win_agent_conf="$(wslpath -u "$(wslvar APPDATA)")/gnupg/gpg-agent.conf"
+  win_ttl_default="default-cache-ttl $CACHE_TTL_HARDWARE"
+  win_ttl_max="max-cache-ttl $CACHE_TTL_HARDWARE"
+  ttl_written=0
+  if [ -f "$win_agent_conf" ] \
+      && grep -qx "$win_ttl_default" "$win_agent_conf" \
+      && grep -qx "$win_ttl_max" "$win_agent_conf"; then
+    echo "  Windows gpg-agent.conf: cache TTL already set"
+  else
+    mkdir -p "$(dirname "$win_agent_conf")"
+    # Without a final newline the option would join the file's last line.
+    if [ -s "$win_agent_conf" ] && [ -n "$(tail -c 1 "$win_agent_conf")" ]; then
+      echo >> "$win_agent_conf"
+    fi
+    grep -qx "$win_ttl_default" "$win_agent_conf" 2>/dev/null || echo "$win_ttl_default" >> "$win_agent_conf"
+    grep -qx "$win_ttl_max" "$win_agent_conf" 2>/dev/null || echo "$win_ttl_max" >> "$win_agent_conf"
+    echo "  Windows gpg-agent.conf: cache TTL set"
+    ttl_written=1
   fi
 
   if gpg --list-keys "$GPG_FINGERPRINT" >/dev/null 2>&1; then
@@ -193,6 +228,11 @@ configure() {
     echo "  marked ultimately trusted"
   else
     import_pubkey_from_card
+  fi
+
+  if [ "$ttl_written" = 1 ]; then
+    # Reaches the Windows agent through the bridge; see docs/yubikey.md.
+    gpgconf --kill gpg-agent
   fi
 
   echo ""
