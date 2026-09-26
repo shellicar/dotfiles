@@ -213,15 +213,13 @@ function processReader() {
 }
 
 // Linux: read /proc directly, and skip any process with a thread in state D.
-// Reading a cmdline takes the target's mmap lock, so a process wedged in the
-// kernel (seen under WSL: a python3 stuck in __vma_start_write) blocks any
-// reader forever, uninterruptibly, with no timeout that can reach it, SIGKILL
-// included. `ps` reads every cmdline on the machine whatever you ask it for, so
-// one wedged process anywhere hung every save and stalled the watcher behind
-// it: that is why Linux cannot share the ps reader below. D is the only state
-// that can block, and stat and children take no such lock, so a wedged pane
-// costs its own launcher and nothing else. Filtering on state rather than on a
-// name is deliberate: node reports comm as MainThread, not node.
+// Reading a cmdline takes the target's mmap lock, so it blocks for as long as a
+// thread stuck in the kernel holds that lock. ps reads every process's cmdline
+// whenever its format includes a command-name field (comm, command, args),
+// whatever -p or -t selects, so one stuck process anywhere blocks it. The ps
+// reader below needs command, which is why Linux cannot share it. D is the
+// only state that can block, and stat and children take no such lock, so a
+// wedged pane costs its own launcher and nothing else.
 function procReader() {
   const read = (p) => { try { return fs.readFileSync(p, 'utf8'); } catch { return ''; } };
   const tids = (pid) => { try { return fs.readdirSync(`/proc/${pid}/task`); } catch { return []; } }; // exited
@@ -237,10 +235,10 @@ function procReader() {
   };
 }
 
-// No /proc (macOS): one ps for the whole machine, read once and indexed by pid.
-// One fork per save, shared by every pane, rather than one per pane as the
-// earlier per-tty scan did. ps prints ppid before the command, and a command
-// contains spaces, so the line is split twice and the remainder kept whole.
+// No /proc (macOS): one ps for the whole machine, read once and indexed by pid,
+// so a save forks once however many panes it has. ps prints ppid before the
+// command, and a command contains spaces, so the line is split twice and the
+// remainder kept whole.
 function psReader() {
   const byPid = new Map();
   const kids = new Map();
