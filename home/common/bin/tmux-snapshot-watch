@@ -9,11 +9,10 @@
 # another" check can: A sees B, B sees A, both quit, nothing left ticking.
 # The lock lives in the same per-label snapshot directory.
 #
-# It exits when its parent goes: the parent's pid is taken once at start and
-# probed with kill -0 each tick, which needs no ps. That parent is the sh -c
-# tmux run-shell wraps it in (tmux itself where sh execs a lone command), and a
-# normal kill-server ends it. A server killed with SIGKILL leaves the sh -c
-# running, and the watcher with it.
+# It exits when the tmux server is gone: the server's pid is taken once at
+# start from $TMUX and probed with kill -0 each tick, which needs no ps. The
+# server itself is watched, not our parent, because the sh -c run-shell wraps
+# us in outlives a server killed with SIGKILL.
 #
 # The lock is only about cadence - making sure exactly one watcher ticks per
 # label. It has nothing to do with save safety: tmux-snapshot writes a
@@ -45,9 +44,12 @@ if ! mkdir "$lock" 2>/dev/null; then
 fi
 echo "$$" >"$pidfile"
 
-# Our parent: the sh -c run-shell wraps us in, or tmux itself where sh execs a
-# lone command. Fixed at start, never re-read.
-server="$PPID"
+# The server's pid is $TMUX's middle field (socket,pid,session), which tmux sets
+# for run-shell jobs; the socket path may hold commas, so it is cut from the
+# right. Without $TMUX, our parent stands in for it. Fixed at start.
+server="${TMUX%,*}"
+server="${server##*,}"
+case "$server" in '' | *[!0-9]*) server="$PPID" ;; esac
 
 sleeppid=
 cleanup() {
