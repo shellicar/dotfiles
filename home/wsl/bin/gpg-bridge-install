@@ -6,34 +6,19 @@
 #   gpg-bridge-install           print the plan, touch nothing
 #   gpg-bridge-install --apply   print the plan, then do it
 #
-# Idempotent: every step checks its own end state first, so a re-run after a
-# partial failure resumes rather than repeating.
+# Each step checks its own end state, so a re-run resumes a partial install.
 #
-# The four packaged sockets are MASKED, not disabled. All four activate the same
-# gpg-agent.service, and only one listener can own S.gpg-agent, so the packaged
-# one has to go. Disabling alone is not enough: a package update or another unit
-# pulling it in would quietly restore a local agent holding no keys, and gpg
-# would then report a missing card rather than a broken bridge. Masking makes
-# that failure impossible instead of merely unlikely. dirmngr and keyboxd are
-# left alone: those are the network and public keyring services, still local.
-# Reverse with: systemctl --user unmask <the four>; systemctl --user enable --now gpg-agent.socket
-#
-# no-autostart is written to gpg.conf for the same reason. Without it, gpg spawns
-# its own agent whenever the socket is missing, so a stopped bridge looks like an
-# absent key instead of an absent bridge.
-#
-# The relay is downloaded rather than committed: a binary in a dotfiles repo is a
-# thing nobody re-checks. The release is pinned by version and verified against
-# its SHA-256 before anything is unpacked, so the repo records exactly what is
-# expected without carrying it.
+# The packaged gpg-agent sockets are masked, not disabled, so an update cannot
+# bring back a keyless local agent on the bridge's socket. no-autostart in
+# gpg.conf stops gpg starting one itself when the bridge is down. Reverse with:
+#   systemctl --user unmask $MASKED_UNITS; systemctl --user enable --now gpg-agent.socket
 
 set -eu
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 TOOL='gpg-bridge-install'
 
-# Installed, this sits in ~/bin and the library in ~/lib. Run straight from the
-# repo, home/wsl/bin has no sibling lib: the serials live in home/common/lib.
+# ~/lib when installed, home/common/lib when run from the repo.
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../../common/lib/yubikeys.sh
 # shellcheck disable=SC1091  # resolved at runtime; the directive above names the repo copy
@@ -69,7 +54,7 @@ win_bin=$(wslpath -u "$(wslvar USERPROFILE)")/bin
 relay="$win_bin/$RELAY_MEMBER"
 gpg_conf="${GNUPGHOME:-$HOME/.gnupg}/gpg.conf"
 
-# What is already true, so the plan states only what is left to change.
+# The plan lists only what is left to change.
 need_relay=0
 [ -x "$relay" ] || need_relay=1
 
@@ -135,9 +120,7 @@ if [ "$need_relay" -eq 1 ]; then
 fi
 
 if [ -n "$need_mask" ]; then
-  # Stop before masking: masking an active unit leaves it running. The service
-  # goes too, not just its sockets, or the agent it already started keeps the
-  # socket path and the bridge cannot listen.
+  # Masking leaves a running unit running, and a running agent keeps the socket.
   # shellcheck disable=SC2086  # deliberate split, one word per unit
   systemctl --user stop $need_mask 2>/dev/null || true
   systemctl --user stop gpg-agent.service 2>/dev/null || true
@@ -157,8 +140,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now "$SERVICE"
 echo "  $SERVICE enabled"
 
-# The card is the proof, not the unit being active: an active socat with a
-# broken Windows side still looks healthy from systemd's point of view.
+# An active unit proves nothing: socat stays up when the Windows side is broken.
 if gpg --card-status >/dev/null 2>&1; then
   echo "card reachable through the bridge"
 else

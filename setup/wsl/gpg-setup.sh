@@ -1,34 +1,13 @@
 #!/bin/sh
 #
-# GPG setup, WSL. Reached through ../../gpg-setup.sh, which dispatches on the raw
-# OS; see that file for why WSL and native Linux are not the same case.
-#
-# The command surface matches the macOS implementation, but almost nothing behind
-# it is shared, because the card is not local here. Windows owns the reader, and
-# its gpg-agent holds the card; this distro reaches that agent through the socket
-# bridge (home/wsl/bin/gpg-bridge, installed by gpg-bridge-install). So:
-#
-#   - There is no local gpg-agent to configure. Its cache TTL, its pinentry and
-#     its scdaemon all live on the Windows side, and the packaged agent sockets
-#     here are masked so the bridge can own the socket path.
-#   - ykman is not used, and does not need installing. "Exactly one card" is
-#     answered by asking the agent what it can see, which is the only card that
-#     can be addressed from here anyway.
-#   - The public key is read off the card rather than fetched, same as macOS, but
-#     without gpg-card: Ubuntu does not ship it. SCD READCERT through the agent
-#     returns the DER container GnuPG wraps the keyblock in, and openssl unwraps
-#     it. The fingerprint is checked before the import, so a wrong card is caught
-#     rather than trusted.
-#
-# What is deliberately not done here: writing gpg-agent.conf, touching a keychain,
-# scheduling an agent kill. All three would be configuring an agent this machine
-# does not run, and would look like they had worked.
+# GPG setup, WSL. The card is held by the Windows gpg-agent and reached through
+# gpg-bridge, so there is no local agent, pinentry or scdaemon to configure.
 
 set -eu
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 
-# GPG_FINGERPRINT and the serials, so a card is checked rather than taken on trust.
+# GPG_FINGERPRINT and the YubiKey serials.
 LIB="$DIR/../../home/common/lib/yubikeys.sh"
 [ -f "$LIB" ] || { echo "ERROR: $LIB not found" >&2; exit 1; }
 # shellcheck source=/dev/null
@@ -53,8 +32,7 @@ usage() {
   exit 1
 }
 
-# The bridge, not a card reader, is what can be missing here, and the difference
-# matters: a stopped bridge and an absent key look identical to gpg otherwise.
+# To gpg, a stopped bridge looks the same as an absent card.
 require_bridge() {
   if [ "$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)" != active ]; then
     echo "ERROR: $SERVICE is not running" >&2
@@ -64,10 +42,7 @@ require_bridge() {
   fi
 }
 
-# The agent answers for exactly one card: scdaemon on the Windows side binds to a
-# single reader, so whatever it reports is the one that can be addressed. This
-# replaces the macOS ykman count, which cannot run here and would add a dependency
-# to answer a question the agent has already answered.
+# The Windows scdaemon binds one reader, so the agent reports at most one card.
 card_serial() {
   gpg --card-status --with-colons 2>/dev/null | grep '^serial:' | head -1 | cut -d: -f2
 }
@@ -83,9 +58,7 @@ require_one_card() {
     exit 1
   fi
 
-  # This card reports the serial unpadded, matching the printed one in the lib.
-  # Stripped anyway: the AID in the same output does pad it, so a future gpg
-  # reporting the padded form would otherwise fail the match for no real reason.
+  # Leading zeros stripped in case gpg reports the padded form.
   serial=$(echo "$serial" | sed 's/^0*//')
   case "$serial" in
     "$YUBIKEY_A_SERIAL"|"$YUBIKEY_B_SERIAL"|"$YUBIKEY_C_SERIAL")
@@ -96,11 +69,8 @@ require_one_card() {
   esac
 }
 
-# Reads the public key off the card and imports it, checking the fingerprint
-# first. gpg-card would do this in one step and Ubuntu does not ship it, so the
-# same bytes are fetched through the agent instead: SCD READCERT returns the DER
-# container, whose only OCTET STRING is the keyblock. The offset is read from the
-# parse rather than hardcoded, so a differently sized key still lands.
+# Ubuntu does not ship gpg-card, so the keyblock is read with SCD READCERT and
+# taken from the only OCTET STRING in its DER container.
 import_pubkey_from_card() {
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT INT TERM
@@ -152,7 +122,7 @@ import_pubkey_from_card() {
   printf '%s:6:\n' "$fpr" | gpg --no-options --quiet --import-ownertrust
   echo "  marked ultimately trusted"
 
-  # Builds the stubs that point gpg at the card, now that it has the public half.
+  # Builds the stubs that point gpg at the card.
   gpg --card-status >/dev/null
   echo "  card stubs created"
 }
@@ -173,9 +143,7 @@ test_sign() {
 configure() {
   for arg in "$@"; do
     case "$arg" in
-      # Accepted and ignored: there is no on-disk key mode here, and no local
-      # scdaemon whose touch timeout could be configured. Taking the flag keeps
-      # one command working on both machines.
+      # Accepted so the macOS command line works here; nothing to configure.
       --hardware|--touch) ;;
       *) echo "ERROR: unknown option: $arg" >&2; exit 64 ;;
     esac
@@ -187,8 +155,7 @@ configure() {
 
   require_one_card
 
-  # Without this gpg starts its own agent whenever the socket is missing, so a
-  # stopped bridge reports an absent card instead of an absent bridge.
+  # Without no-autostart, gpg starts a keyless local agent when the bridge is down.
   if [ -f "$GPG_CONF" ] && grep -qx 'no-autostart' "$GPG_CONF"; then
     echo "  gpg.conf: no-autostart already set"
   else

@@ -1,17 +1,8 @@
 #!/bin/sh
-# GPG setup dispatcher. Detects the OS and runs its implementation.
+# Runs this OS's GPG setup, setup/<os>/gpg-setup.sh.
 #
-# The two are not variants of one procedure. On macOS the card is local, so the
-# work is gpg-agent, the login keychain and pinentry. Under WSL the card belongs
-# to Windows and is reached over the socket bridge, so there is no local agent to
-# configure and the work is the keyring and the bridge. Sharing one file would
-# mean branching on the OS inside it, which the repo does not do: the path is the
-# condition.
-#
-# Dispatch is on the RAW get-os.sh value, not resolve_os. resolve_os collapses
-# wsl to linux for directory selection, and that is exactly wrong here: a native
-# Linux box needs pcscd and scdaemon locally, not a bridge to Windows. Its own
-# header sanctions the raw value for callers that must tell the two apart.
+# Uses the raw get-os.sh value, not resolve_os, which maps wsl to linux: WSL
+# reaches the card through Windows, native Linux has it locally.
 
 set -eu
 
