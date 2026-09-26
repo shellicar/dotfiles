@@ -171,6 +171,9 @@ configure() {
 
   if gpg --list-keys "$GPG_FINGERPRINT" >/dev/null 2>&1; then
     echo "  public key already present"
+    # Trust is per machine and does not travel with the key.
+    printf '%s:6:\n' "$GPG_FINGERPRINT" | gpg --no-options --quiet --import-ownertrust
+    echo "  marked ultimately trusted"
   else
     import_pubkey_from_card
   fi
