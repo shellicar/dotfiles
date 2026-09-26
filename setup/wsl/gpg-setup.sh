@@ -242,7 +242,9 @@ configure() {
 reset_bridge() {
   echo "Restarting $SERVICE..."
   systemctl --user restart "$SERVICE"
-  echo "Done. The Windows agent keeps its own PIN cache; this only re-dials it."
+  # Reaches the Windows agent through the bridge; see docs/yubikey.md.
+  gpgconf --kill gpg-agent
+  echo "Done. Next sign will prompt for the PIN again."
 }
 
 schedule() {
