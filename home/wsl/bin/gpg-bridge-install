@@ -10,8 +10,8 @@
 #
 # The packaged gpg-agent sockets are masked, not disabled, so an update cannot
 # bring back a keyless local agent on the bridge's socket. no-autostart in
-# gpg.conf stops gpg starting one itself when the bridge is down. Reverse with:
-#   systemctl --user unmask $MASKED_UNITS; systemctl --user enable --now gpg-agent.socket
+# gpg.conf stops gpg starting one itself when the bridge is down. The undo steps
+# are in docs/yubikey.md.
 
 set -eu
 

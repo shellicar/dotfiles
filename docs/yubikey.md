@@ -461,6 +461,15 @@ runs that pair; `gpg-bridge.service` keeps it up.
 3. If the card's certificate slot is empty, export the public key on Windows and import it
    here instead, with the commands `gpg-bridge-install --apply` prints.
 
+**Undoing it** hands the socket back to the packaged agent:
+
+```sh
+systemctl --user disable --now gpg-bridge.service
+systemctl --user unmask gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket
+systemctl --user enable --now gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket
+sed -i '/^no-autostart$/d' ~/.gnupg/gpg.conf
+```
+
 **`npiperelay` cannot do this**, despite being the tool every guide names. It dials named
 pipes only and has no Assuan support at all: its flags are `-p -s -ep -ei -v`, and the
 `-a` seen in those guides belongs to `wsl2-ssh-pageant`, a different program. Reading the
