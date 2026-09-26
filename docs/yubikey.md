@@ -454,6 +454,13 @@ handshake. Its data reaches Linux over stdio through WSL interop rather than the
 and `socat` supplies the real AF_UNIX socket gpg opens. `gpg-bridge` in `home/wsl/bin`
 runs that pair; `gpg-bridge.service` keeps it up.
 
+**Setting up a WSL machine**, with the key in the dock and the Windows gpg-agent running:
+
+1. `gpg-bridge-install` prints the plan; `gpg-bridge-install --apply` carries it out.
+2. `gpg-setup.sh --configure` imports the public key from the card.
+3. If the card's certificate slot is empty, export the public key on Windows and import it
+   here instead, with the commands `gpg-bridge-install --apply` prints.
+
 **`npiperelay` cannot do this**, despite being the tool every guide names. It dials named
 pipes only and has no Assuan support at all: its flags are `-p -s -ep -ei -v`, and the
 `-a` seen in those guides belongs to `wsl2-ssh-pageant`, a different program. Reading the
