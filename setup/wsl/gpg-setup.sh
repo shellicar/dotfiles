@@ -34,7 +34,8 @@ usage() {
   echo "  --configure    Configure this distro to sign with the card"
   echo "  --configure --hardware"
   echo "                 The same thing. There is no on-disk key mode under WSL"
-  echo "  --reset        Restart the bridge (next sign re-reaches the agent)"
+  echo "  --reset        Restart the bridge and reload the Windows agent"
+  echo "                 (next sign prompts for the PIN)"
   echo "  --schedule     Not applicable under WSL; explains why"
   exit 1
 }
@@ -164,7 +165,8 @@ configure() {
       # Accepted so the macOS command line works here; nothing to configure.
       --hardware) ;;
       --touch)
-        echo "ERROR: --touch is not supported on WSL: scdaemon runs on the Windows side" >&2
+        echo "ERROR: --touch is not supported on WSL: keep-chv-on-timeout needs a patched scdaemon," >&2
+        echo "  and the Windows scdaemon is not known to be patched" >&2
         exit 64 ;;
       *) echo "ERROR: unknown option: $arg" >&2; exit 64 ;;
     esac
@@ -199,27 +201,17 @@ configure() {
     echo "  gpg.conf: no-autostart added"
   fi
 
-  # The Windows agent otherwise runs its out-of-the-box cache (10 minutes /
+  # Written whole on every run, because --configure is the file's only source.
+  # Without it the Windows agent runs its out-of-the-box cache (10 minutes /
   # 2 hours); the card should only need its PIN once.
   win_agent_conf="$(wslpath -u "$(wslvar APPDATA)")/gnupg/gpg-agent.conf"
-  win_ttl_default="default-cache-ttl $CACHE_TTL_HARDWARE"
-  win_ttl_max="max-cache-ttl $CACHE_TTL_HARDWARE"
-  ttl_written=0
-  if [ -f "$win_agent_conf" ] \
-      && grep -qx "$win_ttl_default" "$win_agent_conf" \
-      && grep -qx "$win_ttl_max" "$win_agent_conf"; then
-    echo "  Windows gpg-agent.conf: cache TTL already set"
-  else
-    mkdir -p "$(dirname "$win_agent_conf")"
-    # Without a final newline the option would join the file's last line.
-    if [ -s "$win_agent_conf" ] && [ -n "$(tail -c 1 "$win_agent_conf")" ]; then
-      echo >> "$win_agent_conf"
-    fi
-    grep -qx "$win_ttl_default" "$win_agent_conf" 2>/dev/null || echo "$win_ttl_default" >> "$win_agent_conf"
-    grep -qx "$win_ttl_max" "$win_agent_conf" 2>/dev/null || echo "$win_ttl_max" >> "$win_agent_conf"
-    echo "  Windows gpg-agent.conf: cache TTL set"
-    ttl_written=1
-  fi
+  mkdir -p "$(dirname "$win_agent_conf")"
+  cat > "$win_agent_conf" <<EOF
+default-cache-ttl $CACHE_TTL_HARDWARE
+max-cache-ttl $CACHE_TTL_HARDWARE
+EOF
+  echo "  Windows gpg-agent cache: ${CACHE_TTL_HARDWARE}s (agent lifetime, in practice)"
+  echo "  config: $win_agent_conf"
 
   if gpg --list-keys "$GPG_FINGERPRINT" >/dev/null 2>&1; then
     echo "  public key already present"
@@ -230,10 +222,11 @@ configure() {
     import_pubkey_from_card
   fi
 
-  if [ "$ttl_written" = 1 ]; then
-    # Reaches the Windows agent through the bridge; see docs/yubikey.md.
-    gpgconf --kill gpg-agent
-  fi
+  # Reaches the Windows agent through the bridge and makes it re-read
+  # gpg-agent.conf and drop its cached PIN without stopping it. A kill would
+  # stop it, and nothing restarts it; see docs/yubikey.md.
+  gpg-connect-agent --no-autostart reloadagent /bye 2>/dev/null || true
+  echo "  Agent reloaded."
 
   echo ""
   echo "Done. Signing uses the Windows pinentry; the PIN prompt appears there."
@@ -242,8 +235,10 @@ configure() {
 reset_bridge() {
   echo "Restarting $SERVICE..."
   systemctl --user restart "$SERVICE"
-  # Reaches the Windows agent through the bridge; see docs/yubikey.md.
-  gpgconf --kill gpg-agent
+  # Reloaded rather than killed, for the reason given in configure.
+  # TODO(undecided): a failed reload ends --reset under set -e, as a failed
+  # kill does in the macOS reset; the alternative is configure's `|| true`.
+  gpg-connect-agent --no-autostart reloadagent /bye
   echo "Done. Next sign will prompt for the PIN again."
 }
 

@@ -490,7 +490,11 @@ bridge reads as a stopped bridge. `dirmngr` and `keyboxd` stay local: they're th
 and public keyring services, still legitimately local.
 
 **`gpgconf --kill gpg-agent` run from WSL kills the Windows agent too**, since the socket
-it addresses is served by the Windows process, not a separate local one.
+it addresses is served by the Windows process, not a separate local one. Nothing restarts
+the Windows agent afterwards, so signing from WSL stops until it is started again on
+Windows. That is why `gpg-setup.sh --configure` and `--reset` reload it with
+`gpg-connect-agent reloadagent` instead, which re-reads `gpg-agent.conf` and drops the
+cached PIN without stopping it.
 
 **Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
 home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock
