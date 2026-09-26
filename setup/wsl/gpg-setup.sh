@@ -17,6 +17,9 @@ GPG_CONF="${GNUPGHOME:-$HOME/.gnupg}/gpg.conf"
 SERVICE=gpg-bridge.service
 CERT_SLOT=3
 
+# No --generate here: key generation is always on-card, identical regardless
+# of OS (see docs/yubikey.md), and is not needed from WSL.
+
 usage() {
   echo "Usage: $(basename "$0") <command>"
   echo ""
