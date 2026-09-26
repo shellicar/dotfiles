@@ -223,8 +223,9 @@ EOF
   fi
 
   # Reaches the Windows agent through the bridge and makes it re-read
-  # gpg-agent.conf and drop its cached PIN without stopping it. A kill would
-  # stop it, and nothing restarts it; see docs/yubikey.md.
+  # gpg-agent.conf without stopping it. A kill would stop it, and nothing
+  # restarts it; see docs/yubikey.md. The card stays unlocked, since scdaemon
+  # keeps it so; --reset is what relocks it.
   gpg-connect-agent --no-autostart reloadagent /bye 2>/dev/null || true
   echo "  Agent reloaded."
 
@@ -236,9 +237,15 @@ reset_bridge() {
   echo "Restarting $SERVICE..."
   systemctl --user restart "$SERVICE"
   # Reloaded rather than killed, for the reason given in configure.
-  # TODO(undecided): a failed reload ends --reset under set -e, as a failed
-  # kill does in the macOS reset; the alternative is configure's `|| true`.
+  # TODO(undecided): a failure of either command below ends --reset under
+  # set -e, as a failed kill does in the macOS reset; the alternative is
+  # configure's `|| true`.
   gpg-connect-agent --no-autostart reloadagent /bye
+  # The card stays unlocked while scdaemon holds it, and a reload does not
+  # restart scdaemon. Killed through the bridge, only the Windows scdaemon
+  # stops; the agent starts a fresh one on the next card use, which asks for
+  # the PIN.
+  gpgconf --kill scdaemon
   echo "Done. Next sign will prompt for the PIN again."
 }
 

@@ -493,8 +493,10 @@ and public keyring services, still legitimately local.
 it addresses is served by the Windows process, not a separate local one. Nothing restarts
 the Windows agent afterwards, so signing from WSL stops until it is started again on
 Windows. That is why `gpg-setup.sh --configure` and `--reset` reload it with
-`gpg-connect-agent reloadagent` instead, which re-reads `gpg-agent.conf` and drops the
-cached PIN without stopping it.
+`gpg-connect-agent reloadagent` instead, which re-reads `gpg-agent.conf` without stopping
+the agent. A reload does not relock the card, because `scdaemon` keeps it unlocked, so
+`--reset` also runs `gpgconf --kill scdaemon`. That stops only the Windows `scdaemon`, and
+the agent starts a new one that asks for the PIN on the next sign.
 
 **Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
 home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock
