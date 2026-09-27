@@ -1,6 +1,9 @@
 #!/bin/sh
 # Linux interactive.
 
+# ls -> GNU ls with the LS_COLORS scheme from env.sh; same as gls on macOS
+alias ls='ls --color=auto -l'
+
 remove_bom() {
     find . -type f -not -path '*/.git/*' -print0 | \
     xargs -0 grep -rl "^$(printf '\357\273\277')" | \
