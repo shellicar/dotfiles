@@ -9,8 +9,11 @@ description of this repo.)
 ## What this is
 
 shellicar's dotfiles, cloned to `~/dotfiles`. Configuration is a **common base +
-per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos`
-| `linux`), the single source of OS truth.
+per-OS overlay**; the OS comes from `get-os.sh` (`wsl` | `macos` | `linux`), the
+single source of OS truth.
+
+Each OS has one supported shell: zsh on macOS, bash on Linux and WSL2. Windows is
+not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
 
 ## Invariants — do not break these
 

@@ -1,10 +1,10 @@
 # APT packages the dotfiles configs rely on.
 # (Linux ls is already GNU, so no coreutils needed here.)
 
-# curl is used by setup.sh itself (fnm, pnpm, rustup, GitVersion, Go), not by a config.
+# curl is for setup's downloads, not a config.
 curl
 git
-tmux
+jq
 vim
 gnupg
 xclip
@@ -12,3 +12,16 @@ shellcheck
 
 # cargo needs a C linker to link, and rustup doesn't ship one.
 build-essential
+
+# Homebrew's installer needs these, with build-essential, curl and git above:
+# https://docs.brew.sh/Homebrew-on-Linux#requirements
+procps
+file
+
+# GitVersion aborts at start without ICU, which a bare Ubuntu 24.04 does not
+# have. The name carries the ICU major, so another Ubuntu release may need a
+# different one.
+libicu74
+
+# pnpm's binary will not start without it.
+libatomic1

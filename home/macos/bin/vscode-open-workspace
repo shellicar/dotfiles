@@ -1,0 +1,20 @@
+#!/bin/sh
+# vscode-open-workspace <name> <workspace-file>
+#
+# Opens <workspace-file> in VS Code unless a window whose title starts with
+# "<name> - " is already open.
+#
+# `code` CLI does not work from a run-shell hook.
+NAME=$1
+WS_FILE=$2
+
+HS=/opt/homebrew/bin/hs
+OSASCRIPT=/usr/bin/osascript
+
+# Is there a window already? Match the title prefix the workspace file sets.
+OPEN=$("$HS" -c 'local a=hs.application.get("Code"); local p="'"$NAME"' - "; local found="n"; if a then for _,w in ipairs(a:allWindows()) do local t=w:title() or ""; if t:sub(1,#p)==p then found="y"; break end end end; print(found)' 2>/dev/null)
+
+# No window yet: open one (osascript brings VS Code forward on first open).
+if [ "$OPEN" != "y" ]; then
+  "$OSASCRIPT" -e 'tell application "Visual Studio Code" to open POSIX file "'"$WS_FILE"'"' >/dev/null 2>&1
+fi

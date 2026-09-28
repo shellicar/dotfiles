@@ -7,30 +7,45 @@ shellicar's dotfiles. Cloned to `~/dotfiles`.
 ## Model
 
 Config is layered: a shared **common** base plus a **per-OS overlay**. The OS is
-detected by `get-os.sh` — one of `windows-bash`, `wsl`, `macos`, `linux`. The
-path/filename *is* the condition; there is no runtime `if macos` branching, and
-overlay files exist only when there's something to put in them.
+detected by `get-os.sh` — one of `wsl`, `macos`, `linux`. The path/filename *is*
+the condition; there is no runtime `if macos` branching, and overlay files exist
+only when there's something to put in them.
+
+Each OS has one supported shell: zsh on macOS, bash on Linux and WSL2. Windows is
+not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
 
 ## Setup
 
-- `./install.sh` — symlinks `home/common/` and `home/<os>/` into `$HOME`.
-  Idempotent and re-runnable. An existing real file is moved to
-  `<name>.pre-dotfiles` before linking, so nothing is clobbered.
-- `./setup.sh` — per-OS bootstrap via `setup/<os>/setup.sh` (Homebrew `Brewfile`
-  on macOS, packages on linux). Safe to run on a bare machine.
+- `./install.sh` — symlinks `home/common/`, then on WSL `home/linux/`, then
+  `home/<os>/` into `$HOME`. Idempotent and re-runnable. An existing real file
+  is moved to `<name>.pre-dotfiles` before linking, so nothing is clobbered.
+  Afterwards it reports, without deleting anything, the dead links and
+  `.pre-dotfiles` backups in the folders it linked into on that run, and
+  anything in `~/bin` and `~/lib` it did not link, each with the command that
+  deletes it. A path it could not link because the path and its backup are
+  both there gets a warning to move one of them aside, and no command. A
+  folder the repo no longer links into is not looked at.
+- `./setup.sh` — per-OS bootstrap via `setup/<os>/setup.sh`. Both OSes install
+  Homebrew and the shared `setup/Brewfile`; macOS adds its own
+  `setup/macos/Brewfile`, and Linux first installs APT packages from
+  `setup/linux/packages`. pnpm comes from its own installer, at the major in
+  `setup/versions`. Safe to run on a bare machine.
 
 ## Shell config
 
 Sourced through `load.sh` in two phases:
 
 - `env` — `env.sh` → `os/<os>.env.sh` → `path.sh`
-- `interactive <shell>` — `common.sh` → `os/<os>.rc.sh` → `<shell>/interactive.<shell>`
+- `interactive [<shell>]` — `common.sh` → `os/<os>.rc.sh` → `<shell>/interactive.<shell>`;
+  without a shell, only `common.sh` and `os/<os>.rc.sh`
 
 ## Layout
 
 - `home/common/`, `home/<os>/` — files symlinked into `$HOME`
 - `os/` — per-OS `env`/`rc` fragments
-- `setup/<os>/` — bootstrap (`Brewfile`, `packages`)
+- `setup/` — bootstrap: what both OSes share (`Brewfile`, `versions`, the
+  install and check scripts), and `setup/<os>/` for each OS's own
+  (`setup.sh`, macOS's `Brewfile`, Linux's `packages`)
 - `.gitconfig.d/` — per-context git config (see Git)
 - `.vscode/` — VS Code settings sync
 - `home/common/bin/` — commands linked onto `PATH`, including the git ones (see
