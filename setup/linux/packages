@@ -5,6 +5,7 @@
 curl
 git
 tmux
+jq
 vim
 gnupg
 xclip
