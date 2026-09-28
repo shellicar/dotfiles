@@ -2,8 +2,8 @@
 
 # Returns: wsl, macos, or linux
 get_os() {
-    # WSL2's kernel is "...-microsoft-standard-WSL2", WSL1's "...-Microsoft".
-    # Not WSL_DISTRO_NAME: ssh, cron, sudo and systemd sessions lack it.
+    # Must work in ssh, cron, sudo and systemd sessions, which lack WSL's
+    # environment variables. WSL1's kernel says "Microsoft", WSL2's "microsoft".
     if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
         echo "wsl"
         return

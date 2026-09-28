@@ -457,9 +457,8 @@ runs that pair; `gpg-bridge.service` keeps it up.
 
 **Setting up a WSL machine**, with the key in the dock and the Windows gpg-agent running:
 
-1. `./setup.sh` runs `gpg-bridge-install --apply`, which carries out the plan that
-   `gpg-bridge-install` alone prints. Running it again by hand is harmless: it reports
-   what is already in place.
+1. `./setup.sh` runs `gpg-bridge-install --apply`. Running it again by hand is harmless:
+   it reports what is already in place.
 2. `gpg-setup.sh --configure` imports the public key from the card.
 3. If the card's certificate slot is empty, export the public key on Windows and import it
    here instead, with the commands `gpg-bridge-install --apply` prints.

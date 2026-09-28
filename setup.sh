@@ -3,10 +3,8 @@
 # Safe on a bare machine: needs only /bin/sh and the OS base (get-os.sh uses
 # uname and grep).
 #
-# Layered the way install.sh links home/: setup/<base>/setup.sh for the
-# resolve_os base runs first, then, for an OS whose base is another OS (wsl on
-# linux), its own setup/<os>/setup.sh when there is one. Each script is one
-# layer, so running setup/<os>/setup.sh directly runs only that layer.
+# Each setup/<os>/setup.sh is one layer, so running one directly does only
+# that layer.
 
 set -eu
 

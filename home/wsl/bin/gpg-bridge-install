@@ -43,8 +43,8 @@ for arg in "$@"; do
   esac
 done
 
-# The kernel name, as get-os.sh checks it: ssh, cron, sudo and systemd sessions
-# lack WSL_DISTRO_NAME.
+# Must work in ssh, cron, sudo and systemd sessions, which lack WSL's
+# environment variables.
 grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null || { echo "$TOOL: WSL only" >&2; exit 2; }
 
 for cmd in wslvar wslpath socat curl sha256sum systemctl gpgconf gpg; do
@@ -52,8 +52,7 @@ for cmd in wslvar wslpath socat curl sha256sum systemctl gpgconf gpg; do
 done
 
 # is-system-running exits non-zero for "degraded" too, which only means a user
-# unit failed, gpg-bridge.service among them once the key has been undocked a
-# while. The manager is up, so that passes.
+# unit failed, as gpg-bridge.service does once the key has been undocked a while.
 manager=$(systemctl --user is-system-running 2>/dev/null || true)
 case "$manager" in
   running|degraded) ;;

@@ -1,11 +1,8 @@
 # APT packages WSL needs on top of setup/linux/packages.
 
-# wslu has two commands in use. wslvar reads Windows variables for the
-# gpg-bridge: home/wsl/bin/gpg-bridge-install, home/wsl/bin/gpg-bridge (which
-# gpg-bridge.service runs) and setup/wsl/gpg-setup.sh. wslview is what
-# os/wsl.env.sh sets as BROWSER. Removing the bridge still leaves BROWSER
-# needing it.
+# wslu: wslvar reads Windows variables for the gpg-bridge, and wslview is
+# BROWSER, so removing the bridge doesn't make wslu removable.
 wslu
 
-# socat runs the gpg-bridge's relay.
+# socat: the gpg-bridge's relay.
 socat
