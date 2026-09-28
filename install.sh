@@ -196,7 +196,7 @@ report_leftovers() {
         *.pre-dotfiles)
           # Reported with the path it backs up, which install.sh could not link.
           case "$skipped_paths" in *"$NL${entry%.pre-dotfiles}$NL"*) continue ;; esac
-          printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is a backup install.sh made of ~/${rel%.pre-dotfiles}.${RESET} To delete it:"
+          printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is a backup of ~/${rel%.pre-dotfiles}.${RESET} To delete it:"
           delete_command "$entry"
           continue ;;
       esac
