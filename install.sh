@@ -146,11 +146,15 @@ link_tree() {
 }
 
 # The command that deletes $1. A link to a directory is removed as a link.
+# The path is single-quoted, each ' in it written as '\'': inside double quotes,
+# a name holding $(…), backticks or $VAR runs or expands when the command is
+# pasted, and a crafted name can make it delete a different path.
 delete_command() {
+  quoted=$(printf '%s\n' "$1" | sed "s/'/'\\\\''/g")
   if [ -d "$1" ] && [ ! -L "$1" ]; then
-    printf '    rm -r "%s"\n' "$1"
+    printf "    rm -r '%s'\n" "$quoted"
   else
-    printf '    rm "%s"\n' "$1"
+    printf "    rm '%s'\n" "$quoted"
   fi
 }
 
