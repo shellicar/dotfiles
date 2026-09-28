@@ -20,7 +20,11 @@ for bin in "${FNM_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fnm}"/node-versions/
   version=${bin%/installation/bin}
   version=${version##*/}
   printf '%s\n' "$QUESTION ${YELLOW}${BOLD}Node $version has corepack's pnpm enabled.${RESET} To turn it off:"
-  printf '    "%s/node" "%s/corepack" disable --install-directory "%s"\n' "$bin" "$bin" "$bin"
+  # Single-quoted, with each ' in the path written as '\'', so the command is
+  # safe to paste: in double quotes the shell would run a $(…) or backticks in
+  # a directory name.
+  quoted=$(printf '%s' "$bin" | sed "s/'/'\\\\''/g")
+  printf "    '%s/node' '%s/corepack' disable --install-directory '%s'\n" "$quoted" "$quoted" "$quoted"
 done
 
 exit 0
