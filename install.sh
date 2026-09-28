@@ -80,7 +80,13 @@ link_dir() {
   for src in "$1"/* "$1"/.[!.]*; do
     [ -e "$src" ] || continue
     rel="${src#"$src_root"/}"
-    [ -n "$overlay_root" ] && [ -e "$overlay_root/$rel" ] && continue
+    # An ordinary directory in both tiers is merged: descend into it, and this
+    # test then skips only the entries inside it that the overlay also has.
+    if [ -n "$overlay_root" ] && [ -e "$overlay_root/$rel" ]; then
+      if ! { [ -d "$src" ] && [ -d "$overlay_root/$rel" ] && ! is_whole_dir "$rel"; }; then
+        continue
+      fi
+    fi
 
     if [ -d "$src" ] && is_whole_dir "$rel"; then
       link_one "$src" "$HOME/$rel"
@@ -96,9 +102,10 @@ link_dir() {
 
 link_tree() {
   src_root="$1"
-  # Optional overlay root: paths that also exist under it are left for that
-  # tier to link, so a base tier and its overlay don't fight over the same
-  # destination on every run.
+  # Optional overlay root: a file or whole-dir entry that also exists under it
+  # is left for that tier to link, so a base tier and its overlay don't fight
+  # over the same destination on every run. An ordinary directory in both is
+  # merged, and the overlay's copy wins only for the files both have.
   overlay_root="${2:-}"
   [ -d "$src_root" ] || return 0
   link_dir "$src_root"
