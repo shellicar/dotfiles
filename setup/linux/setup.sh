@@ -13,9 +13,11 @@ sudo apt-get install -y $(grep -vE '^[[:space:]]*(#|$)' "$DIR/packages")
 
 # 2. fnm is not in apt — install via its script. --skip-shell stops the
 #    installer from editing shell rc files; the dotfiles wire fnm up in
-#    os/linux.rc.sh instead. Installs to ~/.fnm.
+#    os/linux.rc.sh instead, and it looks for fnm only in ~/.fnm.
+#    --install-dir puts it there: the installer uses ~/.fnm only when that
+#    directory already exists, and otherwise ~/.local/share/fnm.
 if ! command -v fnm >/dev/null 2>&1 && [ ! -x "$HOME/.fnm/fnm" ]; then
-  curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+  curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell --install-dir "$HOME/.fnm"
 fi
 
 # 3. pnpm (native, not corepack) is not in apt either -- install via its own
