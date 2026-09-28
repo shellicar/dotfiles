@@ -3,24 +3,16 @@
 #
 # Links the contents of home/common, then on WSL home/linux, then home/<os>
 # into the matching paths under $HOME. Files and ordinary directories are
-# linked per-file, so a folder can also hold files it did not link (those in
-# ~/bin and ~/lib are reported, below); directories named in is_whole_dir()
-# are symlinked whole — for project dirs where per-file linking would drag in
+# linked per-file, so a folder can also hold files it did not link;
+# directories named in is_whole_dir() are symlinked whole — for project dirs where per-file linking would drag in
 # node_modules and the like.
 #
 # Idempotent and re-runnable: already-correct links are left alone, our own
 # symlinks get repointed, and a real path is never clobbered (it is moved to
 # <name>.pre-dotfiles first).
 #
-# Once linked, it reports what is left over, and changes none of it: a dead
-# link in any folder it links into, a <name>.pre-dotfiles backup there, and,
-# in the folders named in is_own_dir(), anything it did not link. Each comes
-# with the command that deletes it, except a path it could not link because the
-# path and its backup are both there: that is one warning to move one of them
-# aside, with no command, as either may be the only copy of what it holds. A
-# leftover does not change the exit status.
-# Only the folders it links into on this run are looked at, so a dead link in a
-# folder the repo no longer has anything for is not reported.
+# After linking, it reports what is left over and deletes none of it. It looks
+# only in the folders it linked into on this run.
 #
 # You run this; it changes $HOME.
 
@@ -41,9 +33,7 @@ is_whole_dir() {
   esac
 }
 
-# Folders under $HOME that exist only to hold what is linked from here, so
-# anything else in them is reported. Every other folder is shared with other
-# programs, and only a dead link is reported there.
+# Folders under $HOME that hold only what is linked from here.
 is_own_dir() {
   case "$1" in
     bin|lib) return 0 ;;
@@ -51,9 +41,7 @@ is_own_dir() {
   esac
 }
 
-# Every destination install.sh has linked, every one it could not link because
-# its backup already exists, and every folder it links into, one per line with
-# a newline either side, for the leftover report.
+# One path per line, with a newline either side.
 NL='
 '
 linked_paths=$NL
@@ -94,8 +82,7 @@ link_one() {
     return 0
   fi
 
-  # The folder is noted before the early returns below, so a re-run reports the
-  # same folders. The path is noted as linked only where the link exists.
+  # Noted before the early returns below, so a re-run reports the same folders.
   note_dir "$dst"
 
   # Already linked correctly -> nothing to do.
@@ -131,8 +118,8 @@ link_dir() {
   for src in "$1"/* "$1"/.[!.]*; do
     [ -e "$src" ] || continue
     rel="${src#"$src_root"/}"
-    # An ordinary directory in both tiers is merged: descend into it, and this
-    # test then skips only the entries inside it that the overlay also has.
+    # Skips what the overlay also has, except an ordinary directory in both,
+    # which is descended into.
     if [ -n "$overlay_root" ] && [ -e "$overlay_root/$rel" ]; then
       if ! { [ -d "$src" ] && [ -d "$overlay_root/$rel" ] && ! is_whole_dir "$rel"; }; then
         continue
@@ -155,17 +142,14 @@ link_tree() {
   src_root="$1"
   # Optional overlay root: a file or whole-dir entry that also exists under it
   # is left for that tier to link, so a base tier and its overlay don't fight
-  # over the same destination on every run. An ordinary directory in both is
-  # merged, and the overlay's copy wins only for the files both have.
+  # over the same destination on every run.
   overlay_root="${2:-}"
   [ -d "$src_root" ] || return 0
   link_dir "$src_root"
 }
 
-# The command that deletes $1. A link to a directory is removed as a link.
-# The path is single-quoted, each ' in it written as '\'': inside double quotes,
-# a name holding $(…), backticks or $VAR runs or expands when the command is
-# pasted, and a crafted name can make it delete a different path.
+# The command that deletes $1. The path is single-quoted: in double quotes, a
+# name holding $(…), backticks or $VAR would run or expand when pasted.
 delete_command() {
   quoted=$(printf '%s\n' "$1" | sed "s/'/'\\\\''/g")
   if [ -d "$1" ] && [ ! -L "$1" ]; then
@@ -175,8 +159,8 @@ delete_command() {
   fi
 }
 
-# Looks only at the folders themselves, not below them: a whole-dir link is
-# the repo, and anything deeper was never linked into.
+# Looks only at the folders themselves, not below them: a whole-dir link leads
+# into the repo.
 report_leftovers() {
   while IFS= read -r dir; do
     [ -n "$dir" ] || continue
@@ -194,7 +178,7 @@ report_leftovers() {
       esac
       case "$entry" in
         *.pre-dotfiles)
-          # Reported with the path it backs up, which install.sh could not link.
+          # Already reported with the path it backs up.
           case "$skipped_paths" in *"$NL${entry%.pre-dotfiles}$NL"*) continue ;; esac
           printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is a backup of ~/${rel%.pre-dotfiles}.${RESET} To delete it:"
           delete_command "$entry"
