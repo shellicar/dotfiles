@@ -4,8 +4,7 @@
 # the __tmux_* helpers.
 
 # --- history ---
-# history -a runs from __prompt_command, after each command. bash does not create
-# HISTFILE's directory; setup/linux/setup.sh does.
+# bash does not create HISTFILE's directory; setup/linux/setup.sh does.
 HISTFILE="${XDG_STATE_HOME:-$HOME/.local/state}/bash/history"
 shopt -s histappend
 HISTSIZE=100000
