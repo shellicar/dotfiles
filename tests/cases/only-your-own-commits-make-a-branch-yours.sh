@@ -43,7 +43,7 @@ MAIN_REF=refs/remotes/origin/HEAD
 
 assert_eq "[$(branch_foreign_authors mine "$ME")]" "[]"
 assert_eq "$(branch_foreign_authors theirs "$ME")" "2 of 2 by them@example.com"
-# An address you used to have is not you; the row naming it is how you find it.
+# An address you used to have is not you.
 assert_eq "$(branch_foreign_authors mixed "$ME")" "1 of 2 by old-me@example.com"
 # A repository with no identity has nobody to match, so nothing is yours.
 assert_eq "$(branch_foreign_authors mine '')" "2 of 2 by me@example.com"

@@ -54,9 +54,8 @@ $1"
 while IFS= read -r f; do
   [ -n "$f" ] || continue
   case "$f" in
-    # No zsh is not a broken file, and stopping here would take shellcheck and
-    # the suite down with it. Said rather than silent, so the gap is in front of
-    # you: on the Mac, where zsh is the shell, this parse always runs.
+    # Without zsh the parse is skipped, not failed. The Mac, where zsh is the
+    # shell, always runs it.
     #
     # Known limit: zsh also runs every .sh file load.sh sources, and those are
     # checked as POSIX sh only. zsh differs from sh (no word splitting of an

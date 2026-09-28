@@ -7,9 +7,8 @@ REPO=$(cd "$TESTS/.." && pwd)
 
 describe "someone else's branch is offered its update unticked, and says whose it is"
 
-# The analysis has already turned its rebase into a merge; what derive owes it
-# is to not tick it, and to say why, since that is the only place a commit
-# under the wrong address of your own shows up.
+# The analysis has already turned its rebase into a merge. derive leaves it
+# unticked and names the other authors.
 
 git_says() { fail "deriving asks git nothing: git $*"; }
 

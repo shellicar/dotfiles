@@ -423,9 +423,6 @@ derive() {
       udef=on
       [ -n "$offered" ] && udef=$def
       [ "$stash" = yes ] && udef=off
-      # Someone else's branch is updated only because you asked, and the row
-      # says whose it is, which is also how a commit under an old address of
-      # your own shows up.
       uwhy="$behind behind"
       [ "$owner" != - ] && { udef=off; uwhy="$uwhy, not yours: $owner"; }
       note_default "${name}U" "$udef"

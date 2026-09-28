@@ -118,8 +118,7 @@ while IFS= read -r wt; do
   # Computed before the read: a here-doc is expanded as part of setting up the
   # command it feeds, so the substitution would run with IFS already set to tab.
   #
-  # And before the dirty check. A reason --stash cannot change comes first,
-  # because naming the one it can sends you to use it and then stop here anyway.
+  # And before the dirty check, so a reason --stash cannot fix is the one given.
   verdict=$(owned_update_verdict "$wt" "$branch")
   IFS="$TAB" read -r action detail owner <<EOF
 $verdict
@@ -133,9 +132,8 @@ EOF
     continue
   fi
 
-  # Someone else's branch is theirs to update. There is no selector here to
-  # offer it unticked, and a flag may only narrow what --apply does, never add
-  # to it, so it is left alone and git refresh is where to choose the merge.
+  # Skipped rather than merged: there is no selector here to offer it
+  # unselected, and a flag may only narrow what --apply does.
   if [ "$owner" != - ]; then
     printf '⛔ %s [%s]: not yours (%s), skipping, git refresh can merge it\n' "$wt" "$branch" "$owner"
     continue

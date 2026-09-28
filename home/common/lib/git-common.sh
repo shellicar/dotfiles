@@ -887,22 +887,15 @@ branch_diverged_from_remote() (
 # Who else wrote the commits this branch has that main does not, as "<n> of
 # <total> by <email>, ...". Nothing when every one of them is yours.
 #
-# Yours means the email the repository resolves to, exactly, and nothing else.
-# A commit under an address you used to have is not counted as yours, because
-# that is a mismatch worth seeing rather than one to paper over with a list of
-# aliases. A repository with no user.email has nothing to match, so nothing in
-# it is yours, which is the side to fail on. A bot you run is not you either.
-#
-# Asked because bringing the trunk in rewrites or adds to the branch, and a
-# branch you checked out to review is someone else's history to change.
+# Yours means exactly the email the repository resolves to, with no aliases: a
+# commit under an old address of your own counts as someone else's, and in a
+# repository with no user.email nothing is yours.
 branch_foreign_authors() (
   b=$1 me=$2
   all=$(git log --format=%ae "$MAIN_REF..refs/heads/$b" 2>/dev/null)
   [ -n "$all" ] || return 0
-  # An unset identity matches nobody, so every author stands. Written as its own
-  # branch rather than left to grep: -x with an empty pattern is an edge case,
-  # and GNU and BSD are not worth trusting to agree on one when the cost of
-  # their disagreeing is a colleague's branch read as yours.
+  # An unset identity matches nobody. Handled here rather than by grep, because
+  # -x with an empty pattern is an edge case GNU and BSD may not agree on.
   if [ -z "$me" ]; then
     others=$all
   else
@@ -948,15 +941,12 @@ update_verdict() (
 # update_verdict, and whose branch it is: action, detail, then who else wrote
 # it, or '-' when nobody did.
 #
-# Someone else's branch is theirs to rebase, never ours: that rewrites their
-# commits and force-pushes the copies. A merge only adds to it, so that is what
-# is offered instead. It is pushed or it is nothing, because a merge left local
-# on a branch its author pushes to is a conflict waiting to happen, so with no
-# upstream there is nothing on offer. A fast-forward has no commits of its own
-# to belong to anyone, and 'none' has nothing to offer either way.
+# On someone else's branch a rebase becomes a merge, and with no upstream to
+# push the merge to, nothing is offered. A fast-forward and 'none' pass through
+# unchanged.
 #
 # Whether to offer that merge at all is the caller's: git refresh offers it
-# unticked, git spread has no way to and skips the branch.
+# unticked, git spread skips the branch.
 owned_update_verdict() (
   wt=$1 b=$2
   uv=$(update_verdict "$wt" "$b")
@@ -1074,26 +1064,18 @@ carry_out_update() {
       return 0
       ;;
     merge)
-      # The tip before the merge, so a push that fails can name the commit to go
-      # back to. A merge commit is not undone by aborting: it exists by then, and
-      # the only thing that moves a branch off it is a name for where it was.
+      # The pre-merge tip, so a failed push can say which commit undoes the merge.
       before=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
       if ! git -C "$wt" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
         say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
       fi
-      # Said rather than undone. A merge that is here and not on the remote is a
-      # state to resolve either way, and which way is yours: pushing it is right
-      # for your own branch, and dropping it is right for someone else's. What
-      # the command owes you is both the state and the commit to go back to.
       if [ "$push" = yes ] && ! git -C "$wt" push --quiet 2>/dev/null; then
         say "  ${YELLOW}${WARN}${RESET}$b: merged, but the push failed. The merge is local only: push it, or undo it with git switch -C $b $before"
         return 0
       fi
-      # No upstream at all, or one whose remote-tracking ref has been pruned. The
-      # merge still happened, and saying so is the difference between a local
-      # merge you know about and one you find later.
+      # No upstream, or its remote-tracking ref was pruned: the merge stays local.
       [ "$push" = yes ] || {
         say "  ${GREEN}${OK}${RESET} $b merged origin/$MAIN locally, nothing to push it to (before: $before)"
         return 0
