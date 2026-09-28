@@ -1,4 +1,7 @@
 # Versions the setup scripts pin, sourced by them as sh.
 
 # pnpm's major. setup/install-pnpm.sh installs the newest release within it.
+# This is the major the repo supports; changing it may need changes elsewhere
+# in the repo. pnpm 10, for one, put its binary in $PNPM_HOME rather than
+# $PNPM_HOME/bin, so a major below 11 does not work with the current setup.
 PNPM_MAJOR=11
