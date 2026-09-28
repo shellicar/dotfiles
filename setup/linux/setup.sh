@@ -36,12 +36,14 @@ brew bundle --file="$DOTFILES/setup/Brewfile"
 #    --no-modify-path stops the installer from editing shell rc files (it
 #    would add `. "$HOME/.cargo/env"`); the dotfiles put ~/.cargo/bin on PATH
 #    in os/linux.env.sh instead. -y answers its prompts so setup runs unattended.
-#    The command is Rust's own, verbatim, with arguments passed the way its docs
-#    show: https://rust-lang.github.io/rustup/installation/other.html
+#    The download and the arguments are Rust's own, from
+#    https://rust-lang.github.io/rustup/installation/other.html, with the script
+#    saved to a file instead of piped into sh.
 #    Only rustup is checked, so every machine gets the same rustup-managed
 #    Rust: one from apt is ignored, and rustup's, first on PATH, is the one used.
 if ! command -v rustup >/dev/null 2>&1 && [ ! -x "$HOME/.cargo/bin/rustup" ]; then
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+  curl --proto '=https' --tlsv1.2 -sSf -o "$tmp/rustup-init.sh" https://sh.rustup.rs
+  sh "$tmp/rustup-init.sh" -y --no-modify-path
 fi
 
 # 5. GitVersion, both majors. The `gitversion` wrapper picks one per repo from
