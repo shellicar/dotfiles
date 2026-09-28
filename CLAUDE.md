@@ -3,9 +3,6 @@
 Operating context for an agent working in this repo. The human-facing overview is
 in `README.md`; this file is the rules of the road for *changing* things here.
 
-(`copilot.instructions.md` is a separate Copilot behavioural protocol — not a
-description of this repo.)
-
 ## What this is
 
 shellicar's dotfiles, cloned to `~/dotfiles`. Configuration is a **common base +
@@ -17,13 +14,16 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 - **The path is the condition.** Per-OS behaviour is selected by filename
   (`os/<os>.rc.sh`, `home/<os>/…`), never by runtime `if [ "$os" = macos ]`. To
   change OS-specific behaviour, edit or add the OS-specific file.
-- **Overlays are optional; don't create empty ones.** e.g. `os/wsl.env.sh` exists
-  but there is no `os/wsl.rc.sh`. A file exists only when it has content.
+- **Overlays are optional; don't create empty ones.** e.g. `windows-bash` has no
+  `os/` file and no `home/windows-bash/`. A file exists only when it has content.
 - **`install.sh` is one-way and non-clobbering.** It symlinks `home/common` +
-  `home/<os>` into `$HOME`, moving any existing real file to `<name>.pre-dotfiles`
-  first. Keep it idempotent and re-runnable.
-- **`home/macos/.gitconfig` and `home/linux/.gitconfig` are the live `~/.gitconfig`**
-  (symlinked). Edits take effect immediately on the running machine.
+  `home/<os>` into `$HOME`; for `wsl` that is `home/common`, then `home/linux`,
+  then `home/wsl`, a path present in `home/wsl` being linked from there rather
+  than from `home/linux`. It moves any existing real file to
+  `<name>.pre-dotfiles` first. Keep it idempotent and re-runnable.
+- **`home/macos/.gitconfig`, `home/linux/.gitconfig` and `home/wsl/.gitconfig` are
+  the live `~/.gitconfig`** (symlinked; the WSL one includes the linux one). Edits
+  take effect immediately on the running machine.
 - **`bin/` tools are dry-run by default.** Anything that deletes, rewrites history
   or force-pushes prints its plan on no args; `--apply` is the only flag that acts.
   Every other flag narrows *what is in the plan*, never causes it to happen.
@@ -37,9 +37,14 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 ## Map
 
 - `install.sh` — symlink installer (`home/` → `$HOME`)
-- `setup.sh` → `setup/<os>/setup.sh` — per-OS bootstrap
+- `setup.sh` → `setup/<os>/setup.sh` — per-OS bootstrap; `wsl` runs
+  `setup/linux/setup.sh`
+- `gpg-setup.sh` → `setup/<os>/gpg-setup.sh` by the raw OS: `wsl` runs
+  `setup/wsl/gpg-setup.sh`, the only file in `setup/wsl/`
 - `load.sh` — shell-config router (`env` / `interactive` phases)
 - `get-os.sh` — OS detection oracle
+- `resolve-os.sh`: maps `wsl` to `linux` where `setup.sh` and `install.sh` pick
+  a directory
 - `home/common/bin/` — executables linked per-file into `~/bin`, which `path.sh`
   prepends to `PATH` (see Commands)
 - `home/common/lib/` — sourced by the commands in `bin/`, linked into `~/lib`.
@@ -152,11 +157,14 @@ passed` or `tests: N of M FAILED`, and that line is what to read. The bar for a
 change is no new finding *class*, not a clean exit, which is why the count is
 not written down here: it moves with every line added and the classes do not.
 
-It exits 64 when it cannot lint at all —
-never 0 for "did not actually run". Targets are
-found with `file`, not by extension, because most scripts here are commands on
-`PATH` with no extension. Nothing in `setup/` installs shellcheck, so it falls
-back to the `koalaman/shellcheck` container when the binary is absent.
+It exits 64 when it cannot lint at all, shellcheck missing included —
+never 0 for "did not actually run". `setup/linux/packages` and
+`setup/macos/Brewfile` install shellcheck. Targets are found with `file`, not by
+extension, because most scripts here are commands on `PATH` with no extension.
+The exception is the `.zsh` and `.bash` fragments `load.sh` sources, which have
+no shebang and are matched by name. `setup/linux/packages` does not install zsh,
+so on Linux and WSL a `.zsh` fragment is skipped with `zsh not installed, <file>
+not parsed`; that line is expected there.
 
 The scripts are POSIX `sh`, and the environments span BSD and GNU coreutils, so a
 GNU-only flag to `sed` or `date` passes on Linux and fails on the Mac.
