@@ -36,6 +36,9 @@ brew bundle --file="$DOTFILES/setup/Brewfile"
 #    Homebrew's.
 "$DOTFILES/setup/check-corepack.sh"
 
+#    And warn when Homebrew's tmux is not the only one on PATH.
+"$DOTFILES/setup/check-tmux.sh"
+
 # 4. Rust via rustup's own script, which installs to ~/.rustup and ~/.cargo.
 #    --no-modify-path stops the installer from editing shell rc files (it
 #    would add `. "$HOME/.cargo/env"`); the dotfiles put ~/.cargo/bin on PATH

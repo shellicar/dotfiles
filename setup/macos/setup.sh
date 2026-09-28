@@ -21,6 +21,9 @@ cat "$DOTFILES/setup/Brewfile" "$DIR/Brewfile" | brew bundle --file=-
 #    Homebrew's.
 "$DOTFILES/setup/check-corepack.sh"
 
+#    And warn when Homebrew's tmux is not the only one on PATH.
+"$DOTFILES/setup/check-tmux.sh"
+
 # 3. Node toolchain (fnm and pnpm are installed by setup/Brewfile). Pick a
 #    Node version to taste:
 # fnm install --lts
