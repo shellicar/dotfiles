@@ -1,0 +1,4 @@
+# Versions the setup scripts pin, sourced by them as sh.
+
+# pnpm's major. setup/install-pnpm.sh installs the newest release within it.
+PNPM_MAJOR=11

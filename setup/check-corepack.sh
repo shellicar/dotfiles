@@ -4,8 +4,11 @@
 # fails setup.
 #
 # Node ships no pnpm of its own. Corepack, once enabled, links one into that
-# version's bin directory, and a shell using that version then finds it ahead
-# of Homebrew's. So a pnpm symlink there is what this looks for.
+# version's bin directory, and it answers ahead of the native pnpm in PNPM_BIN
+# wherever that directory comes first on PATH. `fnm env` puts it first, and
+# os/<os>.rc.sh puts PNPM_BIN back ahead of it in the dotfiles' interactive
+# shells, so it is anything that loads fnm without that line after it that gets
+# corepack's. So a pnpm symlink there is what this looks for.
 
 DOTFILES=$(cd "$(dirname "$0")/.." && pwd)
 # shellcheck source-path=SCRIPTDIR

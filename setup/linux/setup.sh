@@ -36,11 +36,16 @@ fi
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv sh)"
 
 # 3. Declared dependencies. Linux has no Brewfile of its own, so this is only
-#    the one it shares with macOS (fnm, pnpm, tmux, go).
+#    the one it shares with macOS (fnm, tmux, go).
 brew bundle --file="$DOTFILES/setup/Brewfile"
 
-#    Then report any Node version whose corepack pnpm would answer ahead of
-#    Homebrew's.
+#    pnpm, from its own installer, into the PNPM_HOME os/linux.env.sh gives
+#    shells.
+. "$DOTFILES/os/linux.env.sh"
+"$DOTFILES/setup/install-pnpm.sh"
+
+#    Then report any Node version whose corepack pnpm could answer ahead of
+#    that one.
 "$DOTFILES/setup/check-corepack.sh"
 
 #    And warn when Homebrew's tmux is not the only one on PATH.
