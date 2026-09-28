@@ -1,29 +1,36 @@
 #!/bin/sh
-# Linux bootstrap (Debian/Ubuntu): packages -> link configs.
+# Linux bootstrap (Debian/Ubuntu): APT packages -> Homebrew -> declared packages
+# -> link configs.
 
 set -eu
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 DOTFILES=$(cd "$DIR/../.." && pwd)
 
-# 1. APT packages (apt already ships, so no package-manager bootstrap needed).
+# Installers are downloaded here whole and run from the file, so a download cut
+# short is never run as a partial script.
+# TODO(undecided): a failed download stops setup here (set -e). The other way
+# is to warn and carry on without that tool.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# 1. APT packages, including what Homebrew's installer needs.
 sudo apt-get update
 # shellcheck disable=SC2046
 sudo apt-get install -y $(grep -vE '^[[:space:]]*(#|$)' "$DIR/packages")
 
-# 2. fnm is not in apt — install via its script. --skip-shell stops the
-#    installer from editing shell rc files; the dotfiles wire fnm up in
-#    os/linux.rc.sh instead. Installs to ~/.fnm.
-if ! command -v fnm >/dev/null 2>&1 && [ ! -x "$HOME/.fnm/fnm" ]; then
-  curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+# 2. Homebrew, with its official installer, into its default prefix
+#    /home/linuxbrew/.linuxbrew. os/linux.env.sh puts it on PATH in new shells;
+#    shellenv does the same for the rest of this script.
+if ! command -v brew >/dev/null 2>&1 && [ ! -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+  curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
+  /bin/bash "$tmp/homebrew-install.sh"
 fi
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
-# 3. pnpm (native, not corepack) is not in apt either -- install via its own
-#    script. Installs to $PNPM_HOME (os/linux.env.sh), or ~/.local/share/pnpm
-#    if that isn't set yet in this shell.
-if ! command -v pnpm >/dev/null 2>&1 && [ ! -x "${PNPM_HOME:-$HOME/.local/share/pnpm}/pnpm" ]; then
-  curl -fsSL https://get.pnpm.io/install.sh | sh -
-fi
+# 3. Declared dependencies. Linux has no Brewfile of its own, so this is only
+#    the one it shares with macOS (fnm, pnpm, tmux, go).
+brew bundle --file="$DOTFILES/setup/Brewfile"
 
 # 4. Rust via rustup's own script, which installs to ~/.rustup and ~/.cargo.
 #    --no-modify-path stops the installer from editing shell rc files (it
@@ -43,9 +50,5 @@ fi
 "$DIR/../install-gitversion.sh" 5
 "$DIR/../install-gitversion.sh" 6
 
-# 6. Go toolchain. Ubuntu 24.04's apt has 1.22, older than repos pinning go 1.24.x; see
-#    install-go.sh for why a single version is enough.
-"$DIR/../install-go.sh"
-
-# 7. Link the configs into $HOME.
+# 6. Link the configs into $HOME.
 "$DOTFILES/install.sh"
