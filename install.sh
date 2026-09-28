@@ -11,6 +11,11 @@
 # symlinks get repointed, and a real path is never clobbered (it is moved to
 # <name>.pre-dotfiles first).
 #
+# Once linked, it reports what is left over, and changes none of it: a dead
+# link in any folder it links into, a <name>.pre-dotfiles backup there, and,
+# in the folders named in is_own_dir(), anything it did not link. Each comes
+# with the command that deletes it. A leftover does not change the exit status.
+#
 # You run this; it changes $HOME.
 
 set -eu
@@ -19,6 +24,7 @@ DOTFILES="${DOTFILES:-$HOME/dotfiles}"
 . "$DOTFILES/resolve-os.sh"
 OS="${DOTFILES_OS:-$("$DOTFILES/get-os.sh")}"
 BASE_OS=$(resolve_os "$OS")
+. "$DOTFILES/presentation.sh"
 
 # Directories symlinked whole rather than file-by-file.
 is_whole_dir() {
@@ -26,6 +32,31 @@ is_whole_dir() {
     .hammerspoon) return 0 ;;
     .config/git/hooks) return 0 ;;
     *) return 1 ;;
+  esac
+}
+
+# Folders under $HOME that exist only to hold what is linked from here, so
+# anything else in them is reported. Every other folder is shared with other
+# programs, and only a dead link is reported there.
+is_own_dir() {
+  case "$1" in
+    bin|lib) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Every destination install.sh owns, and the folders they are in, one per line
+# with a newline either side, for the leftover report.
+NL='
+'
+linked_paths=$NL
+linked_dirs=$NL
+note_linked() {
+  linked_paths="$linked_paths$1$NL"
+  note_dir=$(dirname "$1")
+  case "$linked_dirs" in
+    *"$NL$note_dir$NL"*) ;;
+    *) linked_dirs="$linked_dirs$note_dir$NL" ;;
   esac
 }
 
@@ -49,6 +80,9 @@ link_one() {
     echo "refusing ~/${dst#"$HOME"/}: a parent dir is a symlink, remove it and re-run" >&2
     return 0
   fi
+
+  # Noted before the early return below, so a re-run reports the same folders.
+  note_linked "$dst"
 
   # Already linked correctly -> nothing to do.
   if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
@@ -111,10 +145,50 @@ link_tree() {
   link_dir "$src_root"
 }
 
+# The command that deletes $1. A link to a directory is removed as a link.
+delete_command() {
+  if [ -d "$1" ] && [ ! -L "$1" ]; then
+    printf '    rm -r "%s"\n' "$1"
+  else
+    printf '    rm "%s"\n' "$1"
+  fi
+}
+
+# Looks only at the folders themselves, not below them: a whole-dir link is
+# the repo, and anything deeper was never linked into.
+report_leftovers() {
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    for entry in "$dir"/* "$dir"/.[!.]*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      rel=${entry#"$HOME"/}
+      if [ -L "$entry" ] && [ ! -e "$entry" ]; then
+        printf '%s\n' "$WARN${YELLOW}${BOLD}~/$rel is a link to $(readlink "$entry"), which does not exist.${RESET} To delete it:"
+        delete_command "$entry"
+        continue
+      fi
+      case "$entry" in
+        *.pre-dotfiles)
+          printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is the backup install.sh made when it linked ~/${rel%.pre-dotfiles}.${RESET} To delete it:"
+          delete_command "$entry"
+          continue ;;
+      esac
+      is_own_dir "${dir#"$HOME"/}" || continue
+      case "$linked_paths" in *"$NL$entry$NL"*) continue ;; esac
+      printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is not linked from the dotfiles.${RESET} To delete it:"
+      delete_command "$entry"
+    done
+  done <<EOF
+$linked_dirs
+EOF
+  return 0
+}
+
 echo "Installing dotfiles ($OS)..."
 link_tree "$DOTFILES/home/common"
 # BASE_OS is a family base (e.g. linux for WSL). Link it first so the
 # OS-specific tree below can still override individual files in it.
 [ "$BASE_OS" != "$OS" ] && link_tree "$DOTFILES/home/$BASE_OS" "$DOTFILES/home/$OS"
 link_tree "$DOTFILES/home/$OS"
+report_leftovers
 echo "Done."
