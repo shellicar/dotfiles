@@ -22,6 +22,9 @@ file
 # Ubuntu release may need a different one.
 libicu74
 
+# pnpm's binary (setup/install-pnpm.sh) will not start without it.
+libatomic1
+
 # The WSL gpg-bridge needs these.
 # TODO: WSL-only, so they belong in a WSL-only list (e.g. setup/wsl/packages).
 # That needs setup.sh to give WSL its own layer on top of the Linux setup.
