@@ -18,11 +18,12 @@ trap 'rm -rf "$tmp"' EXIT
 #    (git, compilers), which breaks the no-git / no-brew chicken-and-egg.
 #    NONINTERACTIVE=1 is its documented switch for running without prompts.
 #    It also makes the installer call sudo with -n, which never asks for a
-#    password, so it needs sudo already unlocked and aborts with "Insufficient
-#    permissions" otherwise.
-#    TODO(undecided): nothing earlier in this script runs sudo, so on a fresh
-#    Mac sudo is not unlocked here and the unattended install aborts.
+#    password and aborts the install with "Insufficient permissions" when
+#    sudo is locked, as it is here unless something before setup unlocked it:
+#    nothing earlier in this script runs sudo. sudo -v first asks for the
+#    password if sudo is locked, so the install then runs unattended.
 if ! command -v brew >/dev/null 2>&1; then
+  sudo -v
   curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
   NONINTERACTIVE=1 /bin/bash "$tmp/homebrew-install.sh"
 fi

@@ -25,11 +25,12 @@ sudo apt-get install -y $(grep -vE '^[[:space:]]*(#|$)' "$DIR/packages")
 #    so it does not run ps (see os/linux.env.sh).
 #    NONINTERACTIVE=1 is the installer's documented switch for running without
 #    prompts. It also makes the installer call sudo with -n, which never asks
-#    for a password, so it relies on sudo still being unlocked from the
-#    apt-get above; an apt-get that runs past sudo's timeout (15 minutes by
-#    default) leaves it locked, and the install aborts with "Insufficient
-#    permissions".
+#    for a password and aborts the install with "Insufficient permissions"
+#    when sudo is locked. sudo -v first asks for the password if sudo is
+#    locked, which it can be again when the apt-get above outlasted sudo's
+#    timeout (15 minutes by default), so the install then runs unattended.
 if ! command -v brew >/dev/null 2>&1 && [ ! -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+  sudo -v
   curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
   NONINTERACTIVE=1 /bin/bash "$tmp/homebrew-install.sh"
 fi
