@@ -13,9 +13,13 @@ overlay files exist only when there's something to put in them.
 
 ## Setup
 
-- `./install.sh` — symlinks `home/common/` and `home/<os>/` into `$HOME`.
-  Idempotent and re-runnable. An existing real file is moved to
-  `<name>.pre-dotfiles` before linking, so nothing is clobbered.
+- `./install.sh` — symlinks `home/common/`, then on WSL `home/linux/`, then
+  `home/<os>/` into `$HOME`. Idempotent and re-runnable. An existing real file
+  is moved to `<name>.pre-dotfiles` before linking, so nothing is clobbered.
+  Afterwards it reports, without deleting anything, the dead links and
+  `.pre-dotfiles` backups in the folders it linked into on that run, and
+  anything in `~/bin` and `~/lib` it did not link, each with the command that
+  deletes it. A folder the repo no longer links into is not looked at.
 - `./setup.sh` — per-OS bootstrap via `setup/<os>/setup.sh` (Homebrew `Brewfile`
   on macOS, packages on linux). Safe to run on a bare machine.
 

@@ -1,9 +1,10 @@
 #!/bin/sh
 # install.sh — make $HOME mirror the pointers under home/.
 #
-# Links the contents of home/common and home/<os> into the matching paths
-# under $HOME. Files and ordinary directories are linked per-file (so e.g.
-# ~/bin can also hold unmanaged files); directories named in is_whole_dir()
+# Links the contents of home/common, then on WSL home/linux, then home/<os>
+# into the matching paths under $HOME. Files and ordinary directories are
+# linked per-file, so a folder can also hold files it did not link (those in
+# ~/bin and ~/lib are reported, below); directories named in is_whole_dir()
 # are symlinked whole — for project dirs where per-file linking would drag in
 # node_modules and the like.
 #
@@ -15,6 +16,8 @@
 # link in any folder it links into, a <name>.pre-dotfiles backup there, and,
 # in the folders named in is_own_dir(), anything it did not link. Each comes
 # with the command that deletes it. A leftover does not change the exit status.
+# Only the folders it links into on this run are looked at, so a dead link in a
+# folder the repo no longer has anything for is not reported.
 #
 # You run this; it changes $HOME.
 
