@@ -49,3 +49,7 @@ fi
 
 # 7. Link the configs into $HOME.
 "$DOTFILES/install.sh"
+
+# 8. The directory for bash's HISTFILE (bash/interactive.bash), which bash will
+#    not create.
+mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/bash"
