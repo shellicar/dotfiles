@@ -22,8 +22,10 @@ fi
 
 # 3. pnpm (native, not corepack) is not in apt either -- install via its own
 #    script. Installs to $PNPM_HOME (os/linux.env.sh), or ~/.local/share/pnpm
-#    if that isn't set yet in this shell.
-if ! command -v pnpm >/dev/null 2>&1 && [ ! -x "${PNPM_HOME:-$HOME/.local/share/pnpm}/pnpm" ]; then
+#    if that isn't set yet in this shell, with the pnpm command in its bin/.
+#    Only that native install is checked: corepack's pnpm shim inside fnm's
+#    node also answers `command -v pnpm`.
+if [ ! -x "${PNPM_HOME:-$HOME/.local/share/pnpm}/bin/pnpm" ]; then
   curl -fsSL https://get.pnpm.io/install.sh | sh -
 fi
 
