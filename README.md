@@ -16,8 +16,11 @@ overlay files exist only when there's something to put in them.
 - `./install.sh` — symlinks `home/common/` and `home/<os>/` into `$HOME`.
   Idempotent and re-runnable. An existing real file is moved to
   `<name>.pre-dotfiles` before linking, so nothing is clobbered.
-- `./setup.sh` — per-OS bootstrap via `setup/<os>/setup.sh` (Homebrew `Brewfile`
-  on macOS, packages on linux). Safe to run on a bare machine.
+- `./setup.sh` — per-OS bootstrap via `setup/<os>/setup.sh`. Both OSes install
+  Homebrew and the shared `setup/Brewfile`; macOS adds its own
+  `setup/macos/Brewfile`, and Linux first installs APT packages from
+  `setup/linux/packages`. pnpm comes from its own installer, at the major in
+  `setup/versions`. Safe to run on a bare machine.
 
 ## Shell config
 
@@ -30,7 +33,9 @@ Sourced through `load.sh` in two phases:
 
 - `home/common/`, `home/<os>/` — files symlinked into `$HOME`
 - `os/` — per-OS `env`/`rc` fragments
-- `setup/<os>/` — bootstrap (`Brewfile`, `packages`)
+- `setup/` — bootstrap: what both OSes share (`Brewfile`, `versions`, the
+  install and check scripts), and `setup/<os>/` for each OS's own
+  (`setup.sh`, macOS's `Brewfile`, Linux's `packages`)
 - `.gitconfig.d/` — per-context git config (see Git)
 - `.vscode/` — VS Code settings sync
 - `home/common/bin/` — commands linked onto `PATH`, including the git ones (see
