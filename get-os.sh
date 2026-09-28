@@ -1,12 +1,7 @@
 #!/bin/sh
 
-# Returns: windows, wsl, macos, or linux
+# Returns: wsl, macos, or linux
 get_os() {
-    if [ -n "$MSYSTEM" ]; then
-        echo "windows-bash"
-        return
-    fi
-    
     # WSL2's kernel is "...-microsoft-standard-WSL2", WSL1's "...-Microsoft".
     # Not WSL_DISTRO_NAME: ssh, cron, sudo and systemd sessions lack it.
     if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
@@ -26,7 +21,6 @@ get_os() {
     fi
     
     echo "Error: Unable to detect OS" >&2
-    echo "MSYSTEM: '$MSYSTEM'" >&2
     echo "kernel osrelease: '$(cat /proc/sys/kernel/osrelease 2>/dev/null)'" >&2
     echo "OSTYPE: '$OSTYPE'" >&2
     echo "uname -s: '$uname_result'" >&2
