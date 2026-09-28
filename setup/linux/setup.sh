@@ -25,8 +25,17 @@ fi
 #    if that isn't set yet in this shell, with the pnpm command in its bin/.
 #    Only that native install is checked: corepack's pnpm shim inside fnm's
 #    node also answers `command -v pnpm`.
+#    pnpm's setup always writes a PATH block into a shell rc file, replacing a
+#    symlinked ~/.bashrc with a plain copy. With SHELL=/bin/sh it writes to $ENV,
+#    here a throwaway file; pnpm reads the *_VERSION variables ahead of SHELL.
 if [ ! -x "${PNPM_HOME:-$HOME/.local/share/pnpm}/bin/pnpm" ]; then
-  curl -fsSL https://get.pnpm.io/install.sh | sh -
+  pnpm_rc=$(mktemp)
+  pnpm_status=0
+  curl -fsSL https://get.pnpm.io/install.sh |
+    env -u ZSH_VERSION -u BASH_VERSION -u FISH_VERSION -u NU_VERSION \
+      SHELL=/bin/sh ENV="$pnpm_rc" sh - || pnpm_status=$?
+  rm -f "$pnpm_rc"
+  [ "$pnpm_status" -eq 0 ] || exit "$pnpm_status"
 fi
 
 # 4. Rust via rustup's own script, which installs to ~/.rustup and ~/.cargo.
