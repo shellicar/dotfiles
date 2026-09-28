@@ -8,9 +8,10 @@
 # checked: corepack's pnpm inside an fnm Node answers `command -v pnpm` too.
 #
 # The installer always ends with `pnpm setup`, which appends a PATH block to the
-# shell's rc file by writing a new file over it, turning a symlinked ~/.bashrc
-# or ~/.zshrc into a plain copy. With SHELL=/bin/sh it writes to $ENV instead,
-# here a throwaway file. pnpm reads ZSH_VERSION, BASH_VERSION, FISH_VERSION and
+# shell's rc file. With the dotfiles linked, pnpm 11.27 writes it through the
+# ~/.bashrc symlink into the repo's own home/common/.bashrc; an earlier pnpm
+# replaced the symlink with a plain copy instead. With SHELL=/bin/sh it writes
+# to $ENV, here a throwaway file. pnpm reads ZSH_VERSION, BASH_VERSION, FISH_VERSION and
 # NU_VERSION ahead of SHELL, so those are removed for it.
 #
 # TODO(undecided): where PNPM_HOME comes from. For now each
