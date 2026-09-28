@@ -45,14 +45,16 @@ is_own_dir() {
   esac
 }
 
-# Every destination install.sh owns, and the folders they are in, one per line
-# with a newline either side, for the leftover report.
+# Every destination install.sh has linked, and every folder it links into, one
+# per line with a newline either side, for the leftover report.
 NL='
 '
 linked_paths=$NL
 linked_dirs=$NL
 note_linked() {
   linked_paths="$linked_paths$1$NL"
+}
+note_dir() {
   note_dir=$(dirname "$1")
   case "$linked_dirs" in
     *"$NL$note_dir$NL"*) ;;
@@ -81,11 +83,14 @@ link_one() {
     return 0
   fi
 
-  # Noted before the early return below, so a re-run reports the same folders.
-  note_linked "$dst"
+  # The folder is noted before the early returns below, so a re-run reports the
+  # same folders. The path is noted only where the link exists: one skipped
+  # below is not install.sh's, and is reported like anything else it did not link.
+  note_dir "$dst"
 
   # Already linked correctly -> nothing to do.
   if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
+    note_linked "$dst"
     return 0
   fi
 
@@ -107,6 +112,7 @@ link_one() {
     ln -s "$src" "$dst"
     echo "linked ~/${dst#"$HOME"/}"
   fi
+  note_linked "$dst"
 }
 
 # Recurses so a whole-dir entry nested below the tree root is still found.
@@ -173,7 +179,7 @@ report_leftovers() {
       fi
       case "$entry" in
         *.pre-dotfiles)
-          printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is the backup install.sh made when it linked ~/${rel%.pre-dotfiles}.${RESET} To delete it:"
+          printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is a backup install.sh made of ~/${rel%.pre-dotfiles}.${RESET} To delete it:"
           delete_command "$entry"
           continue ;;
       esac
