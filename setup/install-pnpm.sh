@@ -28,7 +28,10 @@ DOTFILES=$(cd "$(dirname "$0")/.." && pwd)
 : "${PNPM_HOME:?must be set, from os/<os>.env.sh}"
 
 if [ -x "$PNPM_HOME/bin/pnpm" ]; then
-  installed=$("$PNPM_HOME/bin/pnpm" --version)
+  # Asked from /, because inside a project whose package.json names a
+  # packageManager, such as this repo, pnpm runs that version instead and
+  # reports it.
+  installed=$(cd / && "$PNPM_HOME/bin/pnpm" --version)
   if [ "${installed%%.*}" = "$PNPM_MAJOR" ]; then
     echo "pnpm $installed already installed at $PNPM_HOME/bin/pnpm"
     exit 0
