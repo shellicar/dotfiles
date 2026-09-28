@@ -23,9 +23,9 @@ guard_path
 # empty/one has a removal on offer; idle/two is unmerged, so it has none.
 #
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta, unpushed, stash
-BFACTS="empty/one${TAB}/wt/one${TAB}empty${TAB}0${TAB}0${TAB}never diverged from main${TAB}1${TAB}-${TAB}ff${TAB}-${TAB}-${TAB}[0 ahead, 5 days ago]${TAB}0${TAB}no$NL"
-BFACTS="${BFACTS}idle/two${TAB}/wt/two${TAB}unmerged${TAB}3${TAB}-1${TAB}unmerged${TAB}2${TAB}-${TAB}rebase${TAB}-${TAB}-${TAB}[3 ahead, 2 days ago]${TAB}0${TAB}no$NL"
+# its detail, ignored, meta, unpushed, stash, other authors
+BFACTS="empty/one${TAB}/wt/one${TAB}empty${TAB}0${TAB}0${TAB}never diverged from main${TAB}1${TAB}-${TAB}ff${TAB}-${TAB}-${TAB}[0 ahead, 5 days ago]${TAB}0${TAB}no${TAB}-$NL"
+BFACTS="${BFACTS}idle/two${TAB}/wt/two${TAB}unmerged${TAB}3${TAB}-1${TAB}unmerged${TAB}2${TAB}-${TAB}rebase${TAB}-${TAB}-${TAB}[3 ahead, 2 days ago]${TAB}0${TAB}no${TAB}-$NL"
 DFACTS=''
 
 derive

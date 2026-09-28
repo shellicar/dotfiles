@@ -22,8 +22,8 @@ guard_path
 . "$REPO/home/common/bin/git-refresh"
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta, unpushed, stash
-BFACTS="empty/one${TAB}/wt/one${TAB}empty${TAB}0${TAB}0${TAB}never diverged from main${TAB}1${TAB}worktree has uncommitted changes${TAB}ff${TAB}-${TAB}-${TAB}[0 ahead, 5 days ago]${TAB}0${TAB}no$NL"
+# its detail, ignored, meta, unpushed, stash, other authors
+BFACTS="empty/one${TAB}/wt/one${TAB}empty${TAB}0${TAB}0${TAB}never diverged from main${TAB}1${TAB}worktree has uncommitted changes${TAB}ff${TAB}-${TAB}-${TAB}[0 ahead, 5 days ago]${TAB}0${TAB}no${TAB}-$NL"
 DFACTS=''
 
 derive

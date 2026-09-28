@@ -23,7 +23,7 @@ guard_path
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
 # its detail, ignored, meta, unpushed
-BFACTS="foo${TAB}/wt/foo${TAB}merged${TAB}3${TAB}0${TAB}merged${TAB}0${TAB}-${TAB}-${TAB}-${TAB}2 ignored entries: node_modules/, .env${TAB}[3 ahead, 5 days ago]${TAB}0$NL"
+BFACTS="foo${TAB}/wt/foo${TAB}merged${TAB}3${TAB}0${TAB}merged${TAB}0${TAB}-${TAB}-${TAB}-${TAB}2 ignored entries: node_modules/, .env${TAB}[3 ahead, 5 days ago]${TAB}0${TAB}no${TAB}-$NL"
 DFACTS=''
 
 derive

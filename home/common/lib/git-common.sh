@@ -884,6 +884,29 @@ branch_diverged_from_remote() (
   return 0
 )
 
+# Who else wrote the commits this branch has that main does not, as "<n> of
+# <total> by <email>, ...". Nothing when every one of them is yours.
+#
+# Yours means exactly the email the repository resolves to, with no aliases: a
+# commit under an old address of your own counts as someone else's, and in a
+# repository with no user.email nothing is yours.
+branch_foreign_authors() (
+  b=$1 me=$2
+  all=$(git log --format=%ae "$MAIN_REF..refs/heads/$b" 2>/dev/null)
+  [ -n "$all" ] || return 0
+  # An unset identity matches nobody. Handled here rather than by grep, because
+  # -x with an empty pattern is an edge case GNU and BSD may not agree on.
+  if [ -z "$me" ]; then
+    others=$all
+  else
+    others=$(printf '%s\n' "$all" | grep -vxF -- "$me")
+  fi
+  [ -n "$others" ] || return 0
+  printf '%s of %s by %s\n' \
+    "$(printf '%s\n' "$others" | grep -c .)" "$(printf '%s\n' "$all" | grep -c .)" \
+    "$(printf '%s\n' "$others" | sort -u | paste -sd, - | sed 's/,/, /g')"
+)
+
 # How to bring main into this worktree, as: action, then what it needs.
 #   ff              the default branch itself, fast-forward only
 #   merge           it has merged main before, so it merges again
@@ -913,6 +936,33 @@ update_verdict() (
   # Only reachable when the branch and the trunk share no history at all.
   [ -z "$base" ] && { printf 'none\tshares no history with %s\n' "$MAIN"; return 0; }
   printf 'rebase\t%s\n' "$base"
+)
+
+# update_verdict, and whose branch it is: action, detail, then who else wrote
+# it, or '-' when nobody did.
+#
+# On someone else's branch a rebase becomes a merge, and with no upstream to
+# push the merge to, nothing is offered. A fast-forward and 'none' pass through
+# unchanged.
+#
+# Whether to offer that merge at all is the caller's: git refresh offers it
+# unticked, git spread skips the branch.
+owned_update_verdict() (
+  wt=$1 b=$2
+  uv=$(update_verdict "$wt" "$b")
+  act=${uv%%"$TAB"*}; detail=${uv#*"$TAB"}
+  owner=''
+  case "$act" in
+    merge|rebase) owner=$(branch_foreign_authors "$b" "$(git -C "$wt" config user.email)") ;;
+  esac
+  if [ -z "$owner" ]; then
+    owner=-
+  elif branch_has_upstream "$b"; then
+    act=merge; detail=-
+  else
+    act=none; detail="not yours ($owner), and nowhere to push a merge"
+  fi
+  printf '%s%s%s%s%s\n' "$act" "$TAB" "$detail" "$TAB" "$owner"
 )
 
 # Will git refuse to start this update while the worktree is as it is? That is
@@ -1014,15 +1064,22 @@ carry_out_update() {
       return 0
       ;;
     merge)
+      # The pre-merge tip, so a failed push can say which commit undoes the merge.
+      before=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
       if ! git -C "$wt" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
         say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
       fi
       if [ "$push" = yes ] && ! git -C "$wt" push --quiet 2>/dev/null; then
-        say "  ${YELLOW}${WARN}${RESET}$b: merged, but the push failed — push it yourself"
+        say "  ${YELLOW}${WARN}${RESET}$b: merged, but the push failed. The merge is local only: push it, or undo it with git switch -C $b $before"
         return 0
       fi
+      # No upstream, or its remote-tracking ref was pruned: the merge stays local.
+      [ "$push" = yes ] || {
+        say "  ${GREEN}${OK}${RESET} $b merged origin/$MAIN locally, nothing to push it to (before: $before)"
+        return 0
+      }
       say "  ${GREEN}${OK}${RESET} $b merged origin/$MAIN"
       return 0
       ;;

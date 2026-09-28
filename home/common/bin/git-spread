@@ -16,6 +16,7 @@
 # because the lease reflects the fetch this same run just did. A branch that
 # merges rewrites nothing, so its push is an ordinary fast-forward, no lease.
 # A branch cut from another branch is skipped: see branch_cut_from in the lib.
+# So is a branch with commits by anyone but you: see branch_foreign_authors.
 
 set -u
 
@@ -114,15 +115,12 @@ while IFS= read -r wt; do
     continue
   fi
 
-  if [ -n "$dirty" ] && [ "$stash" -eq 0 ]; then
-    printf '⚠️  %s [%s]: dirty — skipping (use --stash)\n' "$wt" "$branch"
-    continue
-  fi
-
   # Computed before the read: a here-doc is expanded as part of setting up the
   # command it feeds, so the substitution would run with IFS already set to tab.
-  verdict=$(update_verdict "$wt" "$branch")
-  IFS="$TAB" read -r action detail <<EOF
+  #
+  # And before the dirty check, so a reason --stash cannot fix is the one given.
+  verdict=$(owned_update_verdict "$wt" "$branch")
+  IFS="$TAB" read -r action detail owner <<EOF
 $verdict
 EOF
 
@@ -131,6 +129,18 @@ EOF
     # Rebasing it yourself is right for a tangle and wrong for the trunk's
     # unpushed commits.
     printf '⛔ %s [%s]: %s, skipping\n' "$wt" "$branch" "$detail"
+    continue
+  fi
+
+  # Skipped rather than merged: there is no selector here to offer it
+  # unselected, and a flag may only narrow what --apply does.
+  if [ "$owner" != - ]; then
+    printf '⛔ %s [%s]: not yours (%s), skipping, git refresh can merge it\n' "$wt" "$branch" "$owner"
+    continue
+  fi
+
+  if [ -n "$dirty" ] && [ "$stash" -eq 0 ]; then
+    printf '⚠️  %s [%s]: dirty — skipping (use --stash)\n' "$wt" "$branch"
     continue
   fi
 

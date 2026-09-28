@@ -164,7 +164,7 @@ step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 step 'reading branches and worktrees ...'
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta, unpushed, stash
+# its detail, ignored, meta, unpushed, stash, other authors
 BFACTS=''
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs,
 # ignored, meta
@@ -188,7 +188,7 @@ EOF
   unpushed=0
   [ "$b" = "$MAIN" ] || unpushed=$(git rev-list --count "$b@{u}..refs/heads/$b" 2>/dev/null || echo 0)
 
-  block='-'; behind=0; uact='-'; udetail='-'; ign='-'; stash=no
+  block='-'; behind=0; uact='-'; udetail='-'; ign='-'; stash=no; owner=-
   if [ -n "$wt" ]; then
     ign=$(worktree_ignored "$wt"); ign=${ign:--}
     b_reason=$(worktree_block_reason "$wt")
@@ -216,13 +216,18 @@ EOF
       if branch_diverged_from_remote "$wt" "$b"; then
         uact=none; udetail='diverged from its own remote, resolve that first'
       else
-        uv=$(update_verdict "$wt" "$b")
-        uact=${uv%%"$TAB"*}; udetail=${uv#*"$TAB"}
+        # Computed before the read: a here-doc is expanded as part of setting
+        # up the command it feeds, so the substitution would run with IFS
+        # already set to tab.
+        uv=$(owned_update_verdict "$wt" "$b")
+        IFS="$TAB" read -r uact udetail owner <<EOF
+$uv
+EOF
         if [ "$uact" != none ] && update_needs_stash "$wt" "$uact"; then stash=yes; fi
       fi
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$NL"
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$TAB$owner$NL"
 done
 
 # With --branch the run is about the branches you named, so a worktree with no
@@ -319,7 +324,7 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash; do
+  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash owner; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
 
@@ -418,9 +423,11 @@ derive() {
       udef=on
       [ -n "$offered" ] && udef=$def
       [ "$stash" = yes ] && udef=off
+      uwhy="$behind behind"
+      [ "$owner" != - ] && { udef=off; uwhy="$uwhy, not yours: $owner"; }
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
-      emit "${name}U" "$st" "$uact" "$act" "$wt" "$behind behind" - - "$ucls" "$meta" "$stash"
+      emit "${name}U" "$st" "$uact" "$act" "$wt" "$uwhy" - - "$ucls" "$meta" "$stash"
     fi
   done <<EOF
 $BFACTS

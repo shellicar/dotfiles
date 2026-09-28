@@ -17,6 +17,21 @@ WORKTREES=$WORK/worktrees
 : > "$PARENTS"
 : > "$HEAD_REF"
 : > "$WORKTREES"
+AUTHORS=$WORK/authors
+: > "$AUTHORS"
+
+# The address every commit is authored under unless author says otherwise.
+ME=me@example.com
+
+# author <commit> <email>
+author() {
+  printf '%s\t%s\n' "$1" "$2" >> "$AUTHORS"
+}
+
+author_of() {
+  a=$(awk -F"$TAB" -v c="$1" '$1 == c { print $2 }' "$AUTHORS" | tail -1)
+  printf '%s\n' "${a:-$ME}"
+}
 
 # worktree_for <ref> <path>: a branch someone is working in, which counts as
 # live whether or not it was ever pushed.
@@ -224,6 +239,11 @@ git_says() (
       ancestry "$a" | while read -r c; do
         reaches "$b" "$c" && { printf '%s\n' "$c"; break; }
       done ;;
+    "-C "*" config user.email")
+      printf '%s\n' "$ME" ;;
+    "log --format=%ae "*)
+      spec=$(last_word "$@")
+      range "${spec%%..*}" "${spec##*..}" | while read -r c; do author_of "$c"; done ;;
     "rev-list --count "*)
       spec=$(last_word "$@")
       # awk, not grep -c: grep exits non-zero on no matches, and a count of
