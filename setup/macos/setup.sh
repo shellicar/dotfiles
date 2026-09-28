@@ -17,6 +17,10 @@ eval "$(/opt/homebrew/bin/brew shellenv)"
 #    single brew bundle.
 cat "$DOTFILES/setup/Brewfile" "$DIR/Brewfile" | brew bundle --file=-
 
+#    Then report any Node version whose corepack pnpm would answer ahead of
+#    Homebrew's.
+"$DOTFILES/setup/check-corepack.sh"
+
 # 3. Node toolchain (fnm and pnpm are installed by setup/Brewfile). Pick a
 #    Node version to taste:
 # fnm install --lts

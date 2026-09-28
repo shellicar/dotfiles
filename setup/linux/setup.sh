@@ -32,6 +32,10 @@ eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 #    the one it shares with macOS (fnm, pnpm, tmux, go).
 brew bundle --file="$DOTFILES/setup/Brewfile"
 
+#    Then report any Node version whose corepack pnpm would answer ahead of
+#    Homebrew's.
+"$DOTFILES/setup/check-corepack.sh"
+
 # 4. Rust via rustup's own script, which installs to ~/.rustup and ~/.cargo.
 #    --no-modify-path stops the installer from editing shell rc files (it
 #    would add `. "$HOME/.cargo/env"`); the dotfiles put ~/.cargo/bin on PATH
