@@ -21,12 +21,13 @@ sudo apt-get install -y $(grep -vE '^[[:space:]]*(#|$)' "$DIR/packages")
 
 # 2. Homebrew, with its official installer, into its default prefix
 #    /home/linuxbrew/.linuxbrew. os/linux.env.sh puts it on PATH in new shells;
-#    shellenv does the same for the rest of this script.
+#    shellenv does the same for the rest of this script, given the shell name
+#    so it does not run ps (see os/linux.env.sh).
 if ! command -v brew >/dev/null 2>&1 && [ ! -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
   curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
   /bin/bash "$tmp/homebrew-install.sh"
 fi
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv sh)"
 
 # 3. Declared dependencies. Linux has no Brewfile of its own, so this is only
 #    the one it shares with macOS (fnm, pnpm, tmux, go).

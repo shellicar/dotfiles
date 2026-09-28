@@ -2,7 +2,11 @@
 # Linux environment.
 
 # Homebrew, installed by setup/linux/setup.sh.
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+# The shell is named so shellenv does not run ps to guess it, for the reason on
+# fnm's line in linux.rc.sh. This phase does not know which shell it is in;
+# bash and sh get the same output, and only zsh would get more (its completion
+# path).
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 
 # ZScaler certs (Linux)
 export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
