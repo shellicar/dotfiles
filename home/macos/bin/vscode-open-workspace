@@ -2,9 +2,9 @@
 # vscode-open-workspace <name> <workspace-file>
 #
 # Opens <workspace-file> in VS Code unless a window whose title starts with
-# "<name> - " is already open. Called by .local/bin/tmux-vscode-workspace.sh.
+# "<name> - " is already open.
 #
-# `code` CLI does not work from a run-shell hook, so osascript is used to open.
+# `code` CLI does not work from a run-shell hook.
 NAME=$1
 WS_FILE=$2
 

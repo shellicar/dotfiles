@@ -6,8 +6,8 @@
 #            when the directory goes.
 #
 # Rewriting the file live-updates the already-open window in place.
-# Opening a window when none exists yet is left to vscode-open-workspace, which
-# each OS supplies in home/<os>/bin; where there is none, only the file is kept.
+# Opening a window is left to a vscode-open-workspace command if one is on PATH;
+# without it only the workspace file is written.
 exec >> /tmp/tmux-vscode-workspace.log 2>&1
 
 JQ=/usr/bin/jq
@@ -112,8 +112,8 @@ if [ -n "$NEW" ] && { [ ! -f "$WS_FILE" ] || [ "$NEW" != "$(cat "$WS_FILE")" ]; 
   mv "$WS_FILE.tmp" "$WS_FILE"
 fi
 
-# An if rather than &&, so a missing command still exits 0: tmux puts the pane in
-# view mode to report a run-shell that exits non-zero, on every focus.
+# Must exit 0 when the command is missing: tmux puts the pane in view mode on
+# every focus when a run-shell exits non-zero.
 if command -v vscode-open-workspace >/dev/null; then
   vscode-open-workspace "$NAME" "$WS_FILE"
 fi
