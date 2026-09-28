@@ -3,10 +3,6 @@
 # built by hand or left by apt beside Homebrew's is noticed. It removes
 # nothing, and always exits 0 so it never fails setup.
 #
-# TODO(undecided): where this lives. It is its own script beside
-# check-corepack.sh, called by both setups; it could instead be inline in each
-# setup/<os>/setup.sh.
-#
 # A directory reached by two PATH entries counts once: Ubuntu links /bin to
 # /usr/bin and has both on PATH, so one apt tmux would otherwise read as two.
 

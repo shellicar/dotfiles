@@ -8,9 +8,8 @@ DIR=$(cd "$(dirname "$0")" && pwd)
 DOTFILES=$(cd "$DIR/../.." && pwd)
 
 # Installers are downloaded here whole and run from the file, so a download cut
-# short is never run as a partial script.
-# TODO(undecided): a failed download stops setup here (set -e). The other way
-# is to warn and carry on without that tool.
+# short is never run as a partial script. A failed download stops setup, as
+# every failure does under set -e.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 

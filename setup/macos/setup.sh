@@ -8,9 +8,8 @@ DOTFILES=$(cd "$DIR/../.." && pwd)
 
 # Installers are downloaded here whole and run from the file, so a failed or
 # cut-short download is never run: `bash -c "$(curl …)"` runs an empty string
-# as success when curl fails.
-# TODO(undecided): a failed download stops setup here (set -e). The other way
-# is to warn and carry on without that tool.
+# as success when curl fails. A failed download stops setup, as every failure
+# does under set -e.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 

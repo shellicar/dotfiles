@@ -15,9 +15,8 @@
 # to $ENV, here a throwaway file. pnpm reads ZSH_VERSION, BASH_VERSION,
 # FISH_VERSION and NU_VERSION ahead of SHELL, so those are removed for it.
 #
-# TODO(undecided): where PNPM_HOME comes from. For now each
-# setup/<os>/setup.sh sources its os/<os>.env.sh before running this, which
-# brings the rest of that file into setup too.
+# PNPM_HOME comes from os/<os>.env.sh, which each setup/<os>/setup.sh sources
+# before running this, so the rest of that file is in setup too.
 
 set -eu
 
