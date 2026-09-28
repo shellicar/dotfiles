@@ -77,10 +77,16 @@ logic: extract it here instead.
   layout
 
 `docs/git-commands.md` is the documentation: the model they share, what each one
-decides, and what stops it. Each script's header carries the reasoning behind its
-own choices, including what going the other way cost. Read the header before
-changing one, and put what you learn there or in the doc rather than here. This
-list says only what a command is for, so that changing how one behaves leaves
+decides, and what stops it. A script's comments are for someone who did not write
+it, and the test for each one is whether that reader needs it, and for what: a
+constraint, a trap, or an approach that was tried and failed, so it is not tried
+again. Justification argues that a choice was right, which protects whoever made
+it and gives the reader nothing to act on. What helps them is the decision
+itself, recorded the way an ADR records one: what was chosen, in what context, and
+what it rules out. That goes in the commit, the PR or the doc, and a comment keeps
+to what someone changing the code needs in front of them. Read the header before
+changing one, and put what you learn there or in the doc rather than here.
+This list says only what a command is for, so that changing how one behaves leaves
 this file alone.
 
 ## Git
