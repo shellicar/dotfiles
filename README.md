@@ -7,9 +7,12 @@ shellicar's dotfiles. Cloned to `~/dotfiles`.
 ## Model
 
 Config is layered: a shared **common** base plus a **per-OS overlay**. The OS is
-detected by `get-os.sh` — one of `windows-bash`, `wsl`, `macos`, `linux`. The
+detected by `get-os.sh` — one of `wsl`, `macos`, `linux`. The
 path/filename *is* the condition; there is no runtime `if macos` branching, and
 overlay files exist only when there's something to put in them.
+
+Each OS has one supported shell: zsh on macOS, bash on Linux and WSL2. Windows is
+not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
 
 ## Setup
 
