@@ -40,7 +40,7 @@ per-OS overlay**; the OS comes from `get-os.sh` (`windows-bash` | `wsl` | `macos
 - `setup.sh` → `setup/<os>/setup.sh` — per-OS bootstrap; `wsl` runs
   `setup/linux/setup.sh`
 - `gpg-setup.sh` → `setup/<os>/gpg-setup.sh` by the raw OS: `wsl` runs
-  `setup/wsl/gpg-setup.sh`
+  `setup/wsl/gpg-setup.sh`, the only file in `setup/wsl/`
 - `load.sh` — shell-config router (`env` / `interactive` phases)
 - `get-os.sh` — OS detection oracle
 - `resolve-os.sh`: maps `wsl` to `linux` where `setup.sh` and `install.sh` pick
