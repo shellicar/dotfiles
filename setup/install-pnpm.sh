@@ -3,9 +3,10 @@
 # major in setup/versions, into $PNPM_HOME. The caller sets PNPM_HOME, the same
 # value its OS's env file gives shells.
 #
-# It does nothing when $PNPM_HOME/bin/pnpm is already there, so a new
-# PNPM_MAJOR reaches only machines without one. That path is the only thing
-# checked: corepack's pnpm inside an fnm Node answers `command -v pnpm` too.
+# It installs when $PNPM_HOME/bin/pnpm is missing or its --version has a major
+# other than PNPM_MAJOR, and does nothing otherwise, so a new PNPM_MAJOR reaches
+# every machine on its next setup. That path is the only thing checked:
+# corepack's pnpm inside an fnm Node answers `command -v pnpm` too.
 #
 # The installer always ends with `pnpm setup`, which appends a PATH block to the
 # shell's rc file. With the dotfiles linked, pnpm 11.27 writes it through the
@@ -28,8 +29,12 @@ DOTFILES=$(cd "$(dirname "$0")/.." && pwd)
 : "${PNPM_HOME:?must be set, from os/<os>.env.sh}"
 
 if [ -x "$PNPM_HOME/bin/pnpm" ]; then
-  echo "pnpm already installed at $PNPM_HOME/bin/pnpm"
-  exit 0
+  installed=$("$PNPM_HOME/bin/pnpm" --version)
+  if [ "${installed%%.*}" = "$PNPM_MAJOR" ]; then
+    echo "pnpm $installed already installed at $PNPM_HOME/bin/pnpm"
+    exit 0
+  fi
+  echo "pnpm $installed at $PNPM_HOME/bin/pnpm is not major $PNPM_MAJOR; installing it"
 fi
 
 tmp=$(mktemp -d)
