@@ -202,6 +202,7 @@ report_leftovers() {
       esac
       is_own_dir "${dir#"$HOME"/}" || continue
       case "$linked_paths" in *"$NL$entry$NL"*) continue ;; esac
+      case "$linked_dirs" in *"$NL$entry$NL"*) continue ;; esac
       printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is not linked from the dotfiles.${RESET} To delete it:"
       delete_command "$entry"
     done
