@@ -4,8 +4,7 @@
 # the __tmux_* helpers.
 
 # --- history ---
-# __prompt_command appends each command to the file as it finishes (history -a),
-# so every shell's history lands there, not only the last one to exit.
+# history -a runs from __prompt_command, after each command.
 shopt -s histappend
 HISTSIZE=100000
 HISTFILESIZE=100000
