@@ -23,9 +23,15 @@ sudo apt-get install -y $(grep -vE '^[[:space:]]*(#|$)' "$DIR/packages")
 #    /home/linuxbrew/.linuxbrew. os/linux.env.sh puts it on PATH in new shells;
 #    shellenv does the same for the rest of this script, given the shell name
 #    so it does not run ps (see os/linux.env.sh).
+#    NONINTERACTIVE=1 is the installer's documented switch for running without
+#    prompts. It also makes the installer call sudo with -n, which never asks
+#    for a password, so it relies on sudo still being unlocked from the
+#    apt-get above; an apt-get that runs past sudo's timeout (15 minutes by
+#    default) leaves it locked, and the install aborts with "Insufficient
+#    permissions".
 if ! command -v brew >/dev/null 2>&1 && [ ! -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
   curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
-  /bin/bash "$tmp/homebrew-install.sh"
+  NONINTERACTIVE=1 /bin/bash "$tmp/homebrew-install.sh"
 fi
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv sh)"
 

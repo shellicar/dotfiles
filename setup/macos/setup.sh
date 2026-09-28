@@ -16,9 +16,15 @@ trap 'rm -rf "$tmp"' EXIT
 
 # 1. Homebrew. Its installer also pulls in the Xcode Command Line Tools
 #    (git, compilers), which breaks the no-git / no-brew chicken-and-egg.
+#    NONINTERACTIVE=1 is its documented switch for running without prompts.
+#    It also makes the installer call sudo with -n, which never asks for a
+#    password, so it needs sudo already unlocked and aborts with "Insufficient
+#    permissions" otherwise.
+#    TODO(undecided): nothing earlier in this script runs sudo, so on a fresh
+#    Mac sudo is not unlocked here and the unattended install aborts.
 if ! command -v brew >/dev/null 2>&1; then
   curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
-  /bin/bash "$tmp/homebrew-install.sh"
+  NONINTERACTIVE=1 /bin/bash "$tmp/homebrew-install.sh"
 fi
 eval "$(/opt/homebrew/bin/brew shellenv)"
 
