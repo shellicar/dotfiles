@@ -20,6 +20,7 @@
 set -eu
 
 DOTFILES=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source-path=SCRIPTDIR
 # shellcheck source=versions
 . "$DOTFILES/setup/versions"
 
