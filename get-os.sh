@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Returns: windows, wsl, macos, or linux
+# Returns: windows-bash, wsl, macos, or linux
 get_os() {
     if [ -n "$MSYSTEM" ]; then
         echo "windows-bash"
