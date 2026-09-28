@@ -8,8 +8,7 @@ DIR=$(cd "$(dirname "$0")" && pwd)
 DOTFILES=$(cd "$DIR/../.." && pwd)
 
 # Installers are downloaded here whole and run from the file, so a download cut
-# short is never run as a partial script. A failed download stops setup, as
-# every failure does under set -e.
+# short is never run as a partial script.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -18,16 +17,12 @@ sudo apt-get update
 # shellcheck disable=SC2046
 sudo apt-get install -y $(grep -vE '^[[:space:]]*(#|$)' "$DIR/packages")
 
-# 2. Homebrew, with its official installer, into its default prefix
-#    /home/linuxbrew/.linuxbrew. os/linux.env.sh puts it on PATH in new shells;
-#    shellenv does the same for the rest of this script, given the shell name
-#    so it does not run ps (see os/linux.env.sh).
-#    NONINTERACTIVE=1 is the installer's documented switch for running without
-#    prompts. It also makes the installer call sudo with -n, which never asks
-#    for a password and aborts the install with "Insufficient permissions"
-#    when sudo is locked. sudo -v first asks for the password if sudo is
-#    locked, which it can be again when the apt-get above outlasted sudo's
-#    timeout (15 minutes by default), so the install then runs unattended.
+# 2. Homebrew, into its default prefix /home/linuxbrew/.linuxbrew.
+#    NONINTERACTIVE=1 makes the installer run `sudo -n`, which aborts when sudo
+#    is locked, as it can be again once the apt-get above outlasts sudo's
+#    timeout. `sudo -v` unlocks it first.
+#    shellenv is given the shell name so it does not run ps (see
+#    os/linux.env.sh).
 if ! command -v brew >/dev/null 2>&1 && [ ! -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
   sudo -v
   curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
@@ -35,29 +30,22 @@ if ! command -v brew >/dev/null 2>&1 && [ ! -x /home/linuxbrew/.linuxbrew/bin/br
 fi
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv sh)"
 
-# 3. Declared dependencies. Linux has no Brewfile of its own, so this is only
-#    the one it shares with macOS (fnm, tmux, go).
+# 3. Declared dependencies.
 brew bundle --file="$DOTFILES/setup/Brewfile"
 
-#    pnpm, from its own installer, into the PNPM_HOME os/linux.env.sh gives
-#    shells.
+#    pnpm, into the PNPM_HOME that os/linux.env.sh sets.
 . "$DOTFILES/os/linux.env.sh"
 "$DOTFILES/setup/install-pnpm.sh"
 
-#    Then report any Node version whose corepack pnpm could answer ahead of
-#    that one.
 "$DOTFILES/setup/check-corepack.sh"
-
-#    And warn when Homebrew's tmux is not the only one on PATH.
 "$DOTFILES/setup/check-tmux.sh"
 
 # 4. Rust via rustup's own script, which installs to ~/.rustup and ~/.cargo.
 #    --no-modify-path stops the installer from editing shell rc files (it
 #    would add `. "$HOME/.cargo/env"`); the dotfiles put ~/.cargo/bin on PATH
 #    in os/linux.env.sh instead. -y answers its prompts so setup runs unattended.
-#    The download and the arguments are Rust's own, from
-#    https://rust-lang.github.io/rustup/installation/other.html, with the script
-#    saved to a file instead of piped into sh.
+#    The download and the arguments are from
+#    https://rust-lang.github.io/rustup/installation/other.html.
 #    Only rustup is checked, so every machine gets the same rustup-managed
 #    Rust: one from apt is ignored, and rustup's, first on PATH, is the one used.
 if ! command -v rustup >/dev/null 2>&1 && [ ! -x "$HOME/.cargo/bin/rustup" ]; then

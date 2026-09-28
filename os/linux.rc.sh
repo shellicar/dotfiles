@@ -10,13 +10,11 @@ remove_bom() {
     xargs -d '\n' sed -i '1s/^\xEF\xBB\xBF//'
 }
 
-# fnm (Node version manager), from Homebrew, already on PATH.
+# fnm (Node version manager).
 # --shell is passed rather than inferred: fnm infers it by running ps, and Linux
 # ps reads every process's cmdline, so one process wedged in the kernel hangs it
 # forever and every new shell with it. load.sh sets $shell for this phase.
 command -v fnm >/dev/null && eval "$(fnm env --use-on-cd --shell "${shell:-bash}")"
 # fnm's env eval prepends its own bin dir, ahead of PNPM_BIN from path.sh (env
-# phase runs first). PNPM_BIN holds the native pnpm and the commands global
-# installs add; re-prepend it so both come ahead of a corepack pnpm in that
-# Node's bin dir.
+# phase runs first); re-prepend it, or a corepack pnpm there runs instead.
 path_prepend "$PNPM_BIN"

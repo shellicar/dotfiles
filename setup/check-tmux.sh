@@ -1,7 +1,6 @@
 #!/bin/sh
-# Warns when more than one tmux is on PATH, listing each in PATH order, so one
-# built by hand or left by apt beside Homebrew's is noticed. It removes
-# nothing, and always exits 0 so it never fails setup.
+# Warns when more than one tmux is on PATH, listing each in PATH order. It
+# removes nothing.
 #
 # A directory reached by two PATH entries counts once: Ubuntu links /bin to
 # /usr/bin and has both on PATH, so one apt tmux would otherwise read as two.
