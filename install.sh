@@ -15,7 +15,10 @@
 # Once linked, it reports what is left over, and changes none of it: a dead
 # link in any folder it links into, a <name>.pre-dotfiles backup there, and,
 # in the folders named in is_own_dir(), anything it did not link. Each comes
-# with the command that deletes it. A leftover does not change the exit status.
+# with the command that deletes it, except a path it could not link because the
+# path and its backup are both there: that is one warning to move one of them
+# aside, with no command, as either may be the only copy of what it holds. A
+# leftover does not change the exit status.
 # Only the folders it links into on this run are looked at, so a dead link in a
 # folder the repo no longer has anything for is not reported.
 #
@@ -48,14 +51,19 @@ is_own_dir() {
   esac
 }
 
-# Every destination install.sh has linked, and every folder it links into, one
-# per line with a newline either side, for the leftover report.
+# Every destination install.sh has linked, every one it could not link because
+# its backup already exists, and every folder it links into, one per line with
+# a newline either side, for the leftover report.
 NL='
 '
 linked_paths=$NL
+skipped_paths=$NL
 linked_dirs=$NL
 note_linked() {
   linked_paths="$linked_paths$1$NL"
+}
+note_skipped() {
+  skipped_paths="$skipped_paths$1$NL"
 }
 note_dir() {
   note_dir=$(dirname "$1")
@@ -87,8 +95,7 @@ link_one() {
   fi
 
   # The folder is noted before the early returns below, so a re-run reports the
-  # same folders. The path is noted only where the link exists: one skipped
-  # below is not install.sh's, and is reported like anything else it did not link.
+  # same folders. The path is noted as linked only where the link exists.
   note_dir "$dst"
 
   # Already linked correctly -> nothing to do.
@@ -106,6 +113,7 @@ link_one() {
     backup="$dst.pre-dotfiles"
     if [ -e "$backup" ]; then
       echo "skipped ~/${dst#"$HOME"/} - present and backup already exists ($backup)" >&2
+      note_skipped "$dst"
       return 0
     fi
     mv "$dst" "$backup"
@@ -180,8 +188,14 @@ report_leftovers() {
         delete_command "$entry"
         continue
       fi
+      case "$skipped_paths" in *"$NL$entry$NL"*)
+        printf '%s\n' "$WARN${YELLOW}${BOLD}install.sh could not link ~/$rel because it and its backup ~/$rel.pre-dotfiles are both there.${RESET} Move one of them aside."
+        continue ;;
+      esac
       case "$entry" in
         *.pre-dotfiles)
+          # Reported with the path it backs up, which install.sh could not link.
+          case "$skipped_paths" in *"$NL${entry%.pre-dotfiles}$NL"*) continue ;; esac
           printf '%s\n' "$QUESTION ${YELLOW}${BOLD}~/$rel is a backup install.sh made of ~/${rel%.pre-dotfiles}.${RESET} To delete it:"
           delete_command "$entry"
           continue ;;
