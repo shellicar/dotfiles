@@ -1,15 +1,11 @@
-# Dependencies the dotfiles configs rely on.
+# Dependencies only macOS installs from Homebrew, on top of setup/Brewfile.
 # (Broader toolchain — azure-cli, docker, etc. — goes here too if you want it.)
 
 brew "git"        # newer than the system git
 brew "coreutils"  # provides gls (the `ls` alias)
-brew "fnm"        # Node version manager
-brew "pnpm"       # native install, not corepack
-brew "tmux"       # .tmux.conf and the prompt status hooks
 brew "vim"        # EDITOR, .vimrc, the vi alias
 brew "gnupg"
 brew "pinentry-mac" # gpg-agent's pinentry-program
 brew "ykman"        # gpg-setup.sh --hardware, and ykwhich
 brew "git-lfs"
-brew "go"         # toolchain; Linux uses setup/install-go.sh instead
 brew "shellcheck" # ./test.sh

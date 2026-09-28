@@ -1,0 +1,5 @@
+# Pinned versions, sourced as sh.
+
+# pnpm's major; the newest release within it is installed. Below 11 does not
+# work here: pnpm 10 put its binary in $PNPM_HOME, not $PNPM_HOME/bin.
+PNPM_MAJOR=11
