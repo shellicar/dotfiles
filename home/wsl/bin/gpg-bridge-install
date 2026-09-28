@@ -43,7 +43,9 @@ for arg in "$@"; do
   esac
 done
 
-[ -n "${WSL_DISTRO_NAME:-}" ] || { echo "$TOOL: WSL only" >&2; exit 2; }
+# The kernel name, as get-os.sh checks it: ssh, cron, sudo and systemd sessions
+# lack WSL_DISTRO_NAME.
+grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null || { echo "$TOOL: WSL only" >&2; exit 2; }
 
 for cmd in wslvar wslpath socat curl sha256sum systemctl gpgconf gpg; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "$TOOL: missing $cmd" >&2; exit 1; }
