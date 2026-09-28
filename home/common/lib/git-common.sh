@@ -899,9 +899,15 @@ branch_foreign_authors() (
   b=$1 me=$2
   all=$(git log --format=%ae "$MAIN_REF..refs/heads/$b" 2>/dev/null)
   [ -n "$all" ] || return 0
-  # grep -x with an empty pattern matches only empty lines, so an unset
-  # identity leaves every author standing, which is what is wanted.
-  others=$(printf '%s\n' "$all" | grep -vxF -- "$me")
+  # An unset identity matches nobody, so every author stands. Written as its own
+  # branch rather than left to grep: -x with an empty pattern is an edge case,
+  # and GNU and BSD are not worth trusting to agree on one when the cost of
+  # their disagreeing is a colleague's branch read as yours.
+  if [ -z "$me" ]; then
+    others=$all
+  else
+    others=$(printf '%s\n' "$all" | grep -vxF -- "$me")
+  fi
   [ -n "$others" ] || return 0
   printf '%s of %s by %s\n' \
     "$(printf '%s\n' "$others" | grep -c .)" "$(printf '%s\n' "$all" | grep -c .)" \
