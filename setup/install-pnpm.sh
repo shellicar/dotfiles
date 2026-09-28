@@ -11,8 +11,8 @@
 # shell's rc file. With the dotfiles linked, pnpm 11.27 writes it through the
 # ~/.bashrc symlink into the repo's own home/common/.bashrc; an earlier pnpm
 # replaced the symlink with a plain copy instead. With SHELL=/bin/sh it writes
-# to $ENV, here a throwaway file. pnpm reads ZSH_VERSION, BASH_VERSION, FISH_VERSION and
-# NU_VERSION ahead of SHELL, so those are removed for it.
+# to $ENV, here a throwaway file. pnpm reads ZSH_VERSION, BASH_VERSION,
+# FISH_VERSION and NU_VERSION ahead of SHELL, so those are removed for it.
 #
 # TODO(undecided): where PNPM_HOME comes from. For now each
 # setup/<os>/setup.sh sources its os/<os>.env.sh before running this, which
