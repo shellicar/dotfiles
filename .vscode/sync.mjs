@@ -72,13 +72,11 @@ function targetPath(os) {
   switch (os) {
     case 'macos':
       return join(homedir(), 'Library', 'Application Support', 'Code', 'User', 'settings.json');
-    case 'windows-bash':
-      return `/c/Users/${user}/AppData/Roaming/Code/User/settings.json`;
     case 'wsl':
       return `/mnt/c/Users/${user}/AppData/Roaming/Code/User/settings.json`;
     default:
       console.error(`${c.red}Unsupported OS for VS Code settings sync: ${os}${c.reset}`);
-      console.error('Supported: macos, windows-bash, wsl (native Linux is not synced).');
+      console.error('Supported: macos, wsl (native Linux is not synced).');
       process.exit(1);
   }
 }
