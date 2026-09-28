@@ -13,10 +13,11 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 eval "$(/opt/homebrew/bin/brew shellenv)"
 
-# 2. Declared dependencies.
-brew bundle --file="$DIR/Brewfile"
+# 2. Declared dependencies: the ones both OSes share, then macOS's own, in a
+#    single brew bundle.
+cat "$DOTFILES/setup/Brewfile" "$DIR/Brewfile" | brew bundle --file=-
 
-# 3. Node toolchain (fnm and pnpm are installed by the Brewfile). Pick a
+# 3. Node toolchain (fnm and pnpm are installed by setup/Brewfile). Pick a
 #    Node version to taste:
 # fnm install --lts
 # fnm default <version>

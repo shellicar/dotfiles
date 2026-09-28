@@ -1,0 +1,7 @@
+# Dependencies both macOS and Linux install from Homebrew. Each setup feeds this
+# file and its own setup/<os>/Brewfile, if it has one, to a single brew bundle.
+
+brew "fnm"        # Node version manager
+brew "pnpm"       # native install, not corepack
+brew "tmux"       # .tmux.conf and the prompt status hooks
+brew "go"         # toolchain
