@@ -2,11 +2,7 @@
 # Linux environment.
 
 # Homebrew, installed by setup/linux/setup.sh.
-# TODO(undecided): how a shell on a machine without Homebrew yet is kept
-# working. For now the line is skipped when brew is not there, silently.
-if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
-  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-fi
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
 # ZScaler certs (Linux)
 export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
