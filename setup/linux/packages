@@ -1,7 +1,7 @@
 # APT packages the dotfiles configs rely on.
 # (Linux ls is already GNU, so no coreutils needed here.)
 
-# curl is used by setup.sh itself (Homebrew, rustup, GitVersion), not by a config.
+# curl is for setup's downloads, not a config.
 curl
 git
 vim
@@ -16,6 +16,14 @@ build-essential
 # https://docs.brew.sh/Homebrew-on-Linux#requirements
 procps
 file
+
+# GitVersion aborts at start without ICU, which a bare Ubuntu 24.04 does not
+# have. The name carries the ICU major, so another Ubuntu release may need a
+# different one.
+libicu74
+
+# pnpm's binary will not start without it.
+libatomic1
 
 # The WSL gpg-bridge needs these.
 # TODO: WSL-only, so they belong in a WSL-only list (e.g. setup/wsl/packages).

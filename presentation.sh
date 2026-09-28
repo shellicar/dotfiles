@@ -1,14 +1,12 @@
 #!/bin/sh
-# The colours and icons setup and install print with. Sourced, never executed.
-# The git commands in home/common/bin have their own, in
-# home/common/lib/git-common.sh, and these use the same codes and glyphs.
+# Colours and icons to print with. Sourced, never executed.
 #
-# The colours are the escape characters themselves, not '\033' text, so a plain
-# printf '%s' prints them. They are empty when stdout is not a terminal, so a
-# log or a pipe gets no escape codes.
+# The colours are the escape characters themselves, for printf '%s'.
+# home/common/lib/git-common.sh has its own set, stored as '\033' text for
+# printf '%b'. The two cannot stand in for each other: '%s' prints that text
+# literally, and '%b' would also expand a backslash in the text around these.
 
-# The names are defined here and read by the scripts that source this file,
-# which shellcheck cannot see from inside it.
+# Read where this is sourced, which shellcheck cannot see from here.
 # shellcheck disable=SC2034
 
 if [ -t 1 ]; then

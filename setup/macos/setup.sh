@@ -6,26 +6,34 @@ set -eu
 DIR=$(cd "$(dirname "$0")" && pwd)
 DOTFILES=$(cd "$DIR/../.." && pwd)
 
+# Installers are downloaded here whole and run from the file, so a failed or
+# cut-short download is never run: `bash -c "$(curl …)"` runs an empty string
+# as success when curl fails.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
 # 1. Homebrew. Its installer also pulls in the Xcode Command Line Tools
 #    (git, compilers), which breaks the no-git / no-brew chicken-and-egg.
+#    NONINTERACTIVE=1 makes the installer run `sudo -n`, which aborts when
+#    sudo is locked. `sudo -v` unlocks it first.
 if ! command -v brew >/dev/null 2>&1; then
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  sudo -v
+  curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
+  NONINTERACTIVE=1 /bin/bash "$tmp/homebrew-install.sh"
 fi
 eval "$(/opt/homebrew/bin/brew shellenv)"
 
-# 2. Declared dependencies: the ones both OSes share, then macOS's own, in a
-#    single brew bundle.
+# 2. Declared dependencies.
 cat "$DOTFILES/setup/Brewfile" "$DIR/Brewfile" | brew bundle --file=-
 
-#    Then report any Node version whose corepack pnpm would answer ahead of
-#    Homebrew's.
-"$DOTFILES/setup/check-corepack.sh"
+#    pnpm, into the PNPM_HOME that os/macos.env.sh sets.
+. "$DOTFILES/os/macos.env.sh"
+"$DOTFILES/setup/install-pnpm.sh"
 
-#    And warn when Homebrew's tmux is not the only one on PATH.
+"$DOTFILES/setup/check-corepack.sh"
 "$DOTFILES/setup/check-tmux.sh"
 
-# 3. Node toolchain (fnm and pnpm are installed by setup/Brewfile). Pick a
-#    Node version to taste:
+# 3. Node toolchain. Pick a Node version to taste:
 # fnm install --lts
 # fnm default <version>
 

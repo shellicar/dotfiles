@@ -1,7 +1,6 @@
-# Dependencies both macOS and Linux install from Homebrew. Each setup feeds this
-# file and its own setup/<os>/Brewfile, if it has one, to a single brew bundle.
+# Homebrew dependencies for both macOS and Linux.
+# pnpm is not here: a Brewfile cannot hold it to one major.
 
 brew "fnm"        # Node version manager
-brew "pnpm"       # native install, not corepack
 brew "tmux"       # .tmux.conf and the prompt status hooks
 brew "go"         # toolchain
