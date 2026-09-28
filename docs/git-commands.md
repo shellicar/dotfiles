@@ -77,7 +77,9 @@ not is authored under the email the repository resolves to, exactly. Anything el
 someone else's branch, checked out to review or built on, and theirs to rebase. It is
 offered a merge instead, unticked, with the row saying whose commits they are. The merge
 is pushed, and with no upstream nothing is offered, because a merge left local on a
-branch its author pushes to only waits to conflict. There is deliberately no list of
+branch its author pushes to only waits to conflict. An upstream that is configured and
+then pruned away reaches the merge anyway, and a merge that ends up local says so and
+names the commit to go back to, because which way to resolve it is yours. There is deliberately no list of
 your other addresses: a commit under an old identity reads as not yours, which is how it
 gets noticed. A bot you run is not you. `git spread` has nowhere to offer a merge
 unticked, so it skips the branch and says whose it is. `git catchup` does not ask.

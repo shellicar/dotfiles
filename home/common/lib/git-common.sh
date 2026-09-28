@@ -1074,15 +1074,30 @@ carry_out_update() {
       return 0
       ;;
     merge)
+      # The tip before the merge, so a push that fails can name the commit to go
+      # back to. A merge commit is not undone by aborting: it exists by then, and
+      # the only thing that moves a branch off it is a name for where it was.
+      before=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
       if ! git -C "$wt" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
         say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
       fi
+      # Said rather than undone. A merge that is here and not on the remote is a
+      # state to resolve either way, and which way is yours: pushing it is right
+      # for your own branch, and dropping it is right for someone else's. What
+      # the command owes you is both the state and the commit to go back to.
       if [ "$push" = yes ] && ! git -C "$wt" push --quiet 2>/dev/null; then
-        say "  ${YELLOW}${WARN}${RESET}$b: merged, but the push failed — push it yourself"
+        say "  ${YELLOW}${WARN}${RESET}$b: merged, but the push failed. The merge is local only: push it, or undo it with git switch -C $b $before"
         return 0
       fi
+      # No upstream at all, or one whose remote-tracking ref has been pruned. The
+      # merge still happened, and saying so is the difference between a local
+      # merge you know about and one you find later.
+      [ "$push" = yes ] || {
+        say "  ${GREEN}${OK}${RESET} $b merged origin/$MAIN locally, nothing to push it to (before: $before)"
+        return 0
+      }
       say "  ${GREEN}${OK}${RESET} $b merged origin/$MAIN"
       return 0
       ;;
