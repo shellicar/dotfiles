@@ -1,0 +1,8 @@
+# APT packages WSL needs on top of setup/linux/packages.
+
+# wslu: wslvar reads Windows variables for the gpg-bridge, and wslview is
+# BROWSER, so removing the bridge doesn't make wslu removable.
+wslu
+
+# socat: the gpg-bridge's relay.
+socat

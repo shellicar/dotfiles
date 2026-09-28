@@ -25,8 +25,3 @@ libicu74
 
 # pnpm's binary will not start without it.
 libatomic1
-
-# The WSL gpg-bridge needs these.
-# TODO: WSL-only, so they belong in a WSL-only list (e.g. setup/wsl/packages).
-# That needs setup.sh to give WSL its own layer on top of the Linux setup.
-socat

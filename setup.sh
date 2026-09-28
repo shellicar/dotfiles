@@ -1,17 +1,26 @@
 #!/bin/sh
 # Bootstrap dispatcher. Detects the OS and runs its setup.
-# Safe on a bare machine: needs only /bin/sh and the OS base (get-os.sh uses uname).
+# Safe on a bare machine: needs only /bin/sh and the OS base (get-os.sh uses
+# uname and grep).
+#
+# Each setup/<os>/setup.sh is one layer, so running one directly does only
+# that layer.
 
 set -eu
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 . "$DIR/resolve-os.sh"
-os=$(resolve_os "$("$DIR/get-os.sh")")
+os=$("$DIR/get-os.sh")
+base=$(resolve_os "$os")
 
-target="$DIR/setup/$os/setup.sh"
+target="$DIR/setup/$base/setup.sh"
 if [ ! -x "$target" ]; then
-  echo "No setup script for OS: $os ($target)" >&2
+  echo "No setup script for OS: $base ($target)" >&2
   exit 1
 fi
+"$target"
 
-exec "$target"
+overlay="$DIR/setup/$os/setup.sh"
+if [ "$os" != "$base" ] && [ -f "$overlay" ]; then
+  "$overlay"
+fi
