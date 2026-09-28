@@ -1,0 +1,6 @@
+# APT packages WSL needs on top of setup/linux/packages.
+
+# The gpg-bridge (home/wsl/bin/gpg-bridge-install) needs these: wslu for
+# wslvar, socat for the relay.
+wslu
+socat
