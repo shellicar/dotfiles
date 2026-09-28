@@ -27,7 +27,8 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
 Sourced through `load.sh` in two phases:
 
 - `env` — `env.sh` → `os/<os>.env.sh` → `path.sh`
-- `interactive <shell>` — `common.sh` → `os/<os>.rc.sh` → `<shell>/interactive.<shell>`
+- `interactive [<shell>]` — `common.sh` → `os/<os>.rc.sh` → `<shell>/interactive.<shell>`;
+  without a shell, only `common.sh` and `os/<os>.rc.sh`
 
 ## Layout
 
