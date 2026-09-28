@@ -51,7 +51,14 @@ for cmd in wslvar wslpath socat curl sha256sum systemctl gpgconf gpg; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "$TOOL: missing $cmd" >&2; exit 1; }
 done
 
-systemctl --user is-system-running >/dev/null 2>&1 || { echo "$TOOL: systemd --user is not running" >&2; exit 1; }
+# is-system-running exits non-zero for "degraded" too, which only means a user
+# unit failed, gpg-bridge.service among them once the key has been undocked a
+# while. The manager is up, so that passes.
+manager=$(systemctl --user is-system-running 2>/dev/null || true)
+case "$manager" in
+  running|degraded) ;;
+  *) echo "$TOOL: systemd --user is not running" >&2; exit 1 ;;
+esac
 
 win_bin=$(wslpath -u "$(wslvar USERPROFILE)")/bin
 relay="$win_bin/npiperelay.exe"
