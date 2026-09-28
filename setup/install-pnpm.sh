@@ -15,6 +15,10 @@
 # to $ENV, here a throwaway file. pnpm reads ZSH_VERSION, BASH_VERSION,
 # FISH_VERSION and NU_VERSION ahead of SHELL, so those are removed for it.
 #
+# The installer runs from /, as the version check does: inside a project whose
+# package.json names a packageManager, such as this repo, its `pnpm setup` runs
+# under that version of pnpm rather than the one being installed.
+#
 # PNPM_HOME comes from os/<os>.env.sh, which each setup/<os>/setup.sh sources
 # before running this, so the rest of that file is in setup too.
 
@@ -46,6 +50,7 @@ trap 'rm -rf "$tmp"' EXIT
 curl -fsSL -o "$tmp/install.sh" https://get.pnpm.io/install.sh
 
 : >"$tmp/rc"
+cd /
 env -u ZSH_VERSION -u BASH_VERSION -u FISH_VERSION -u NU_VERSION \
   SHELL=/bin/sh ENV="$tmp/rc" PNPM_VERSION="$PNPM_MAJOR" \
   sh "$tmp/install.sh"
