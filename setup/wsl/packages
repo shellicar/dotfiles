@@ -1,6 +1,9 @@
 # APT packages WSL needs on top of setup/linux/packages.
 
-# The gpg-bridge (home/wsl/bin/gpg-bridge-install) needs these: wslu for
-# wslvar, socat for the relay.
+# wslu has two users: wslvar for the gpg-bridge
+# (home/wsl/bin/gpg-bridge-install), and wslview, which os/wsl.env.sh sets as
+# BROWSER. Removing the bridge still leaves BROWSER needing it.
 wslu
+
+# socat runs the gpg-bridge's relay.
 socat
