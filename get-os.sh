@@ -7,7 +7,9 @@ get_os() {
         return
     fi
     
-    if [ -n "$WSL_DISTRO_NAME" ]; then
+    # WSL2's kernel is "...-microsoft-standard-WSL2", WSL1's "...-Microsoft".
+    # Not WSL_DISTRO_NAME: ssh, cron, sudo and systemd sessions lack it.
+    if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
         echo "wsl"
         return
     fi
@@ -25,7 +27,7 @@ get_os() {
     
     echo "Error: Unable to detect OS" >&2
     echo "MSYSTEM: '$MSYSTEM'" >&2
-    echo "WSL_DISTRO_NAME: '$WSL_DISTRO_NAME'" >&2
+    echo "kernel osrelease: '$(cat /proc/sys/kernel/osrelease 2>/dev/null)'" >&2
     echo "OSTYPE: '$OSTYPE'" >&2
     echo "uname -s: '$uname_result'" >&2
     exit 1
