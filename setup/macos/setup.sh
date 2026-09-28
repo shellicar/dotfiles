@@ -6,10 +6,19 @@ set -eu
 DIR=$(cd "$(dirname "$0")" && pwd)
 DOTFILES=$(cd "$DIR/../.." && pwd)
 
+# Installers are downloaded here whole and run from the file, so a failed or
+# cut-short download is never run: `bash -c "$(curl …)"` runs an empty string
+# as success when curl fails.
+# TODO(undecided): a failed download stops setup here (set -e). The other way
+# is to warn and carry on without that tool.
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
 # 1. Homebrew. Its installer also pulls in the Xcode Command Line Tools
 #    (git, compilers), which breaks the no-git / no-brew chicken-and-egg.
 if ! command -v brew >/dev/null 2>&1; then
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  curl -fsSL -o "$tmp/homebrew-install.sh" https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh
+  /bin/bash "$tmp/homebrew-install.sh"
 fi
 eval "$(/opt/homebrew/bin/brew shellenv)"
 
