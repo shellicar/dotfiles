@@ -10,8 +10,8 @@ one-line home, and anything with a decision in it belongs in a script that can b
 and tested.
 
 Every one of them prints its plan and touches nothing until you say otherwise. Each
-script's header carries the reasoning behind its own choices, including the ones that
-went wrong the other way.
+script's header says what someone changing it needs to know, including approaches that
+were tried and did not work.
 
 ## The verdict
 

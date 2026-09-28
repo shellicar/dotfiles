@@ -77,9 +77,12 @@ logic: extract it here instead.
   layout
 
 `docs/git-commands.md` is the documentation: the model they share, what each one
-decides, and what stops it. Each script's header carries the reasoning behind its
-own choices, including what going the other way cost. Read the header before
-changing one, and put what you learn there or in the doc rather than here. This
+decides, and what stops it. A script's comments are for someone who did not write
+it, and the test for each one is whether that reader needs it, and for what: a
+constraint, a trap, or an approach that was tried and failed, so it is not tried
+again. Justifying the choice that was made does not help that reader, and belongs
+in the commit, the PR or the doc. Read the header before changing one, and put
+what you learn there or in the doc rather than here. This
 list says only what a command is for, so that changing how one behaves leaves
 this file alone.
 
