@@ -61,3 +61,6 @@ fi
 
 # 6. Link the configs into $HOME.
 "$DOTFILES/install.sh"
+
+# 7. The directory for bash's HISTFILE, which bash will not create.
+mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/bash"

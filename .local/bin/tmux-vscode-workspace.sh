@@ -6,14 +6,12 @@
 #            when the directory goes.
 #
 # Rewriting the file live-updates the already-open window in place.
-# The window is opened (osascript) only when none exists yet. `code` CLI does not
-# work from a run-shell hook, so osascript is used to open.
+# Opening a window is left to a vscode-open-workspace command if one is on PATH;
+# without it only the workspace file is written.
 exec >> /tmp/tmux-vscode-workspace.log 2>&1
 
 JQ=/usr/bin/jq
 REALPATH=/bin/realpath
-HS=/opt/homebrew/bin/hs
-OSASCRIPT=/usr/bin/osascript
 
 SERVER=$(basename "$(tmux display-message -p '#{socket_path}')")
 SESSION=$(tmux display-message -p '#{session_name}')
@@ -114,10 +112,8 @@ if [ -n "$NEW" ] && { [ ! -f "$WS_FILE" ] || [ "$NEW" != "$(cat "$WS_FILE")" ]; 
   mv "$WS_FILE.tmp" "$WS_FILE"
 fi
 
-# Does this server already have a window? Match the title prefix we set.
-OPEN=$("$HS" -c 'local a=hs.application.get("Code"); local p="'"$NAME"' - "; local found="n"; if a then for _,w in ipairs(a:allWindows()) do local t=w:title() or ""; if t:sub(1,#p)==p then found="y"; break end end end; print(found)' 2>/dev/null)
-
-# No window yet: open one (osascript brings VS Code forward on first open).
-if [ "$OPEN" != "y" ]; then
-  "$OSASCRIPT" -e 'tell application "Visual Studio Code" to open POSIX file "'"$WS_FILE"'"' >/dev/null 2>&1
+# Must exit 0 when the command is missing: tmux puts the pane in view mode on
+# every focus when a run-shell exits non-zero.
+if command -v vscode-open-workspace >/dev/null; then
+  vscode-open-workspace "$NAME" "$WS_FILE"
 fi

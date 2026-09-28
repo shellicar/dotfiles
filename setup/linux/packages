@@ -4,6 +4,7 @@
 # curl is for setup's downloads, not a config.
 curl
 git
+jq
 vim
 gnupg
 xclip

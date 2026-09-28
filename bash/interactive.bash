@@ -3,6 +3,15 @@
 # glyph and project folder), so there is no tmux subprocess and it does not use
 # the __tmux_* helpers.
 
+# --- history ---
+# bash does not create HISTFILE's directory; setup/linux/setup.sh does.
+HISTFILE="${XDG_STATE_HOME:-$HOME/.local/state}/bash/history"
+shopt -s histappend
+HISTSIZE=100000
+HISTFILESIZE=100000
+HISTCONTROL=ignoreboth
+HISTTIMEFORMAT='%F %T '
+
 # --- prompt ---
 # Folder shown in the tmux window status: the nearest enclosing .git root, or the
 # cwd itself when there is none. Walked with builtins alone, and recomputed only
@@ -22,6 +31,7 @@ __tmux_folder() {
 
 __prompt_command() {
   local EXIT="$?"  # This needs to be first
+  history -a
 
   # tmux integration, printf-only (no tmux subprocess): OSC 7 reports the cwd
   # (populates pane_path); OSC 2 carries "<glyph> <folder>", the command state
