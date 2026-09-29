@@ -449,14 +449,19 @@ function executePlan(plan, tmux) {
     const tgt = `${w.session}:${w.window_index}`;
 
     // First pane via new-window, the rest via split, re-applying the saved
-    // layout after every one. Applying it once at the end cannot work: an
-    // unguided split halves the pane the previous split made, so the panes
-    // shrink geometrically and a seventh has nowhere to go. Re-applying spreads
-    // what exists over the whole window each time; tmux drops the cells it has
-    // no pane for yet, and only refuses the reverse.
+    // layout after every one. Applying it once at the end cannot work: each
+    // unguided split halves the room the panes already have, so they shrink
+    // geometrically until a split has nowhere to go. Re-applying spreads what
+    // exists over the whole window each time; tmux drops the cells it has no
+    // pane for yet, and only refuses the reverse.
+    //
+    // -f splits the whole window. Without it tmux splits the active pane, which
+    // the re-applied layout can have put in a one-row cell (a status line under
+    // a pane, say), and a one-row pane cannot be split. -f also always adds the
+    // new pane last, so pane N is created with saved pane N's cwd.
     w.panes.forEach((p, i) => {
       if (i === 0) tmux(['new-window', '-t', tgt, '-n', w.window_name, '-c', p.path]);
-      else tmux(['split-window', '-t', tgt, '-c', p.path]);
+      else tmux(['split-window', '-f', '-t', tgt, '-c', p.path]);
       tmux(['select-layout', '-t', tgt, w.window_layout]);
     });
 
