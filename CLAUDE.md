@@ -117,7 +117,10 @@ this file alone.
   rather than the local branch (a local checkout can be called anything; what lands
   on the remote is what matters): only `docs/ fix/ hotfix/ security/ feature/ epic/ review/`.
   `pre-commit` delegates to the repo's own `.git/hooks/pre-commit` when one
-  exists, so a per-repo hook still runs.
+  exists, so a per-repo hook still runs. `commit-msg` delegates the same way,
+  after adding a `Claude-Session: <id>` trailer to commits made from a Claude Code
+  session, but only where `claude.sessionTrailer = true` is set (per org, in
+  `.gitconfig.d/<org>`).
 - **`[cleanup]` is per org, set beside `user.email`**: `git-cleanup` reads
   `cleanup.subscription`, a subscription in the ADO org's tenant, which is what
   selects the identity to mint an ADO token as. Without it the PR check is skipped
