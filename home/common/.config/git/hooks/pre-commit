@@ -1,7 +1,9 @@
 #!/bin/sh
 
 run_local_hook() {
-  REPO_HOOK="$(git rev-parse --git-dir)/hooks/pre-commit"
+  # The common dir: a linked worktree's git dir has no hooks/. Not --git-path,
+  # which resolves to core.hooksPath, the folder this hook is in.
+  REPO_HOOK="$(git rev-parse --git-common-dir)/hooks/pre-commit"
   if [ -x "$REPO_HOOK" ]; then
     exec "$REPO_HOOK" "$@"
   fi

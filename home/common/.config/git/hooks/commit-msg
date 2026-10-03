@@ -5,12 +5,17 @@
 add_session_trailer() {
   [ -n "$CLAUDE_CODE_SESSION_ID" ] || return 0
   [ "$(git config --type=bool claude.sessionTrailer)" = true ] || return 0
+  # Git aborts on an empty message only after this hook runs, so an empty one
+  # must stay empty. The sed drops what `git commit -v` adds below its scissors.
+  sed "/^. -\{24\} >8 -\{24\}\$/,\$d" "$1" | git stripspace --strip-comments | grep -q . || return 0
   git interpret-trailers --in-place --if-exists doNothing \
     --trailer "Claude-Session: $CLAUDE_CODE_SESSION_ID" "$1"
 }
 
 run_local_hook() {
-  REPO_HOOK="$(git rev-parse --git-dir)/hooks/commit-msg"
+  # The common dir: a linked worktree's git dir has no hooks/. Not --git-path,
+  # which resolves to core.hooksPath, the folder this hook is in.
+  REPO_HOOK="$(git rev-parse --git-common-dir)/hooks/commit-msg"
   if [ -x "$REPO_HOOK" ]; then
     exec "$REPO_HOOK" "$@"
   fi
