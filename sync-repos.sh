@@ -35,6 +35,8 @@ $HOME/repos/@shellicar/tower
 $HOME/repos/shellicar/tower
 $HOME/repos/shellicar/skills
 $HOME/repos/shellicar/skills-v2
+$HOME/repos/shellicar/skills-v2.5
+$HOME/repos/shellicar/skills-v3
 $HOME/repos/fleet/claude-fleet-eagers
 $HOME/repos/shellicar/claude-fleet-eagers
 "
