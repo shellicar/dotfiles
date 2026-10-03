@@ -99,13 +99,16 @@ this file alone.
 - **Global ignore**: `core.excludesfile` → `~/dotfiles/.gitignore_global` — the
   always-never-commit patterns: `.DS_Store`, `*.log`, `CLAUDE.local.md`,
   `**/.claude/.*` (every hidden file inside any `.claude/` — session/runtime
-  state), and `**/.claude/settings.local.json` (Claude Code's local-scope
-  settings — personal, never shared). Other non-dot `.claude/` files such as
+  state), `**/.claude/settings.local.json` (Claude Code's local-scope
+  settings — personal, never shared), and `**/.claude/tasks/` and
+  `**/.claude/docs/` (working files, never committed; anything that needs to be
+  checked in goes in the repo's `docs/`). Other non-dot `.claude/` files such as
   `sdk-config.json`, `agents/`, and `skills/` are committable.
 - **Two `.claude` adoption levels** (chosen per repo, by context):
   1. *Checked in* (e.g. shellicar, eagers): `.claude/` is committed. Only
-     `.claude/.*`, `.claude/settings.local.json`, and `CLAUDE.local.md` are kept
-     out, by the global ignore above.
+     `.claude/.*`, `.claude/settings.local.json`, `.claude/tasks/`,
+     `.claude/docs/`, and `CLAUDE.local.md` are kept out, by the global ignore
+     above.
   2. *Not checked in / not referenced* (hopeventures): the whole `.claude/` is
      kept out per-clone via `.git/info/exclude` (`.claude/`), leaving no trace in
      the repo or its history — not even a `.gitignore` entry naming it.
