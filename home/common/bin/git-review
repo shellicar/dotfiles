@@ -9,7 +9,7 @@
 # cut from, and the branch's own log says "Created from HEAD" or a bare commit
 # id often enough to make a guess wrong.
 #
-# It opens the checkout it is run from, so the files are there to read, or the
+# It opens the main checkout, whichever of its worktrees it is run from, or the
 # repository itself when it is bare and has no checkout.
 #
 # The git work here is the same everywhere. Opening VS Code is not, so that is
