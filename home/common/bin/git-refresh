@@ -562,8 +562,12 @@ readkey() {
     case "$k" in A) KEY=up ;; B) KEY=down ;; *) KEY=other ;; esac
     return 0
   fi
+  # Nothing read is the read timing out, which the picker's terminal settings
+  # make it do several times a second so a resize is noticed between keys.
+  # Enter reads as nothing too, since $() drops the newline, and it does
+  # nothing either way.
   case "$k" in
-    '')  KEY=enter ;;
+    '')  KEY=none ;;
     ' ') KEY=space ;;
     q|Q) KEY=quit ;;
     r|R) KEY=run ;;
@@ -572,6 +576,40 @@ readkey() {
     *)   KEY=other ;;
   esac
   return 0
+}
+
+# Draws, reads a key, acts on it, and draws again, until you run or quit.
+# Leaves VERDICT set to run or quit.
+#
+# A resize redraws at the new size without waiting for a key. The trap only
+# notes it: a trap runs once the command the shell is waiting on returns, and
+# dd ignores the signal, so readkey's read is what has to come back. It does,
+# because the picker's terminal settings make a read with nothing to read time
+# out (stty min 0 time 2). A timeout with no resize redraws nothing.
+picker_loop() {
+  RESIZED=no
+  trap 'RESIZED=yes' WINCH
+  VERDICT=quit
+  while :; do
+    derive
+    [ "$CUR" -gt "$COUNT" ] && CUR=$COUNT
+    [ "$CUR" -lt 1 ] && CUR=1
+    RESIZED=no
+    draw
+    while :; do
+      readkey
+      [ "$KEY" = none ] && [ "$RESIZED" = no ] && continue
+      break
+    done
+    case "$KEY" in
+      up)    [ "$CUR" -gt 1 ] && CUR=$((CUR - 1)) ;;
+      down)  [ "$CUR" -lt "$COUNT" ] && CUR=$((CUR + 1)) ;;
+      space) toggle_current ;;
+      run)   VERDICT=run; break ;;
+      quit)  VERDICT=quit; break ;;
+    esac
+  done
+  trap - WINCH
 }
 
 # What is selected, in the order it will happen. Printed before the countdown as
@@ -734,7 +772,9 @@ trap 'restore; exit 131' QUIT
 trap 'restore; exit 143' TERM
 trap 'restore' EXIT
 
-stty -icanon -echo min 1 time 0
+# min 0 time 2: a read with nothing to read gives up after 0.2s, so picker_loop
+# can notice a resize between keys.
+stty -icanon -echo min 0 time 2
 # Line wrap off while the picker is up, so a line wider than the terminal is cut
 # at the edge instead of taking a second row. draw counts one row per line of
 # the section below the list, which say_noted does not cut to the width.
@@ -745,21 +785,7 @@ stty -icanon -echo min 1 time 0
 # which would cut the copy printed to the normal screen too.
 printf '%b[?1049h%b[?25l%b[?7l' "$E" "$E" "$E"
 
-VERDICT=quit
-while :; do
-  derive
-  [ "$CUR" -gt "$COUNT" ] && CUR=$COUNT
-  [ "$CUR" -lt 1 ] && CUR=1
-  draw
-  readkey
-  case "$KEY" in
-    up)    [ "$CUR" -gt 1 ] && CUR=$((CUR - 1)) ;;
-    down)  [ "$CUR" -lt "$COUNT" ] && CUR=$((CUR + 1)) ;;
-    space) toggle_current ;;
-    run)   VERDICT=run; break ;;
-    quit)  VERDICT=quit; break ;;
-  esac
-done
+picker_loop
 
 restore
 trap - EXIT HUP INT QUIT TERM
