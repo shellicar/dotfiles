@@ -176,10 +176,11 @@ and `cd`, which a subprocess cannot do for its caller.
 worktrees it is run from, or the repository itself when it is bare, and shows `<base>`
 against `<branch>` in GitLens's Search & Compare view. Both refs are checked first, and
 a name git does not know stops it before VS Code opens. The base is always given,
-because git does not record which branch another was cut from. GitLens is handed
-commit ids, the fork point and the branch tip, because it resolves a name whenever it
-evaluates the comparison, and a `main` that is behind or moves later would put its
-commits in the branch's file list.
+because git does not record which branch another was cut from. The base side
+of the comparison is the fork point as a commit id, because GitLens resolves a name
+whenever it evaluates the comparison, and a `main` that is behind or moves later would
+put its commits in the branch's file list. The branch side is its name, so the title
+says which branch it is.
 
 Opening VS Code is per platform: `vscode-open-review` in `home/<os>/bin`. On WSL it
 opens the folder through a `vscode-remote://wsl+…` address and hands the GitLens link

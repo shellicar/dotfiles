@@ -1262,17 +1262,17 @@ review_folder() {
 # than as an empty comparison in VS Code. REVIEW_OPENER is the per-platform
 # launcher (vscode-open-review in home/<os>/bin); a case replaces it.
 #
-# GitLens is handed commit ids, never names. It resolves a name whenever it
-# evaluates the comparison, so a local main that is behind, or that moves later,
-# would put main's commits in the branch's file list. The base side is the fork
-# point, so the comparison is what the branch added, whatever GitLens makes of
-# the separator.
+# The base side is the fork point as a commit id, never the base's name. GitLens
+# resolves a name whenever it evaluates the comparison, so a local main that is
+# behind, or that moves later, would put main's commits in the branch's file
+# list. The fork point also makes the comparison what the branch added, whatever
+# GitLens makes of the separator. The branch side stays a name, so the
+# comparison's title says which branch it is and a refresh picks up new commits.
 review_main() {
   for ref in "$1" "$2"; do
     ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }
   done
-  tip=$(git rev-parse --verify --quiet "$1")
   fork=$(git merge-base "$2" "$1") || { echo "$TOOL: $1 and $2 share no history" >&2; return 1; }
   root=$(review_folder)
-  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$tip")"
+  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$1")"
 }

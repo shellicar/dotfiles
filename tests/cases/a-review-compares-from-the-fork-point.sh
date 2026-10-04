@@ -7,11 +7,11 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../fake-git.sh
 . "$TESTS/fake-git.sh"
 
-describe "a review compares fixed commits from the fork point"
+describe "a review compares from the fork point"
 
-# main has moved on since the branch was cut. The link carries the fork point
-# and the branch tip as commit ids, so main's later commits cannot appear as the
-# branch's own.
+# main has moved on since the branch was cut. The base side of the link is the
+# fork point as a commit id, so main's later commits cannot appear as the
+# branch's own. The branch side is its name.
 commit A
 commit B A
 commit C A
@@ -28,4 +28,4 @@ opener() { printf '%s' "$2" > "$LINK"; }
 REVIEW_OPENER=opener
 
 review_main feature/x main || fail "review_main failed"
-assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/A...C?path=/repo'
+assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/A...feature/x?path=/repo'
