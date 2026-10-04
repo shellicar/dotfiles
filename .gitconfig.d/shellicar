@@ -5,3 +5,5 @@
 [cleanup]
 	subscription = 383d501b-3906-496b-ac90-e336189d628f
 	azconfig = ~/.local/share/azure/shellicar-gmail
+[claude]
+	sessionTrailer = true
