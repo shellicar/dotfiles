@@ -1,7 +1,18 @@
+# macOS Finder metadata, written into any folder it opens.
 .DS_Store
+# Log output from any tool; never source.
 *.log
+# Personal Claude instructions for one clone; never shared.
 CLAUDE.local.md
-**/.claude/.*
+# Claude Code's local-scope settings; personal to this machine.
 **/.claude/settings.local.json
+# Claude Code's staging folder for saving its own config files. It checks
+# this is ignored, and otherwise appends it to whichever excludes file it
+# finds (it misses the include, so that is ~/.config/git/ignore).
+**/.claude/.cc-writes/
+# Claude Code worktrees: each is a separate checkout. Claude Code only
+# excludes these per repo when scheduled tasks run there.
+**/.claude/worktrees/
+# Claude working files; anything worth keeping goes in the repo's docs/.
 **/.claude/tasks/
 **/.claude/docs/

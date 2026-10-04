@@ -3,6 +3,14 @@
 [include]
 	path = ~/dotfiles/home/linux/.gitconfig
 
+[core]
+	; same value as the linux config, repeated here because Claude Code reads it
+	; with `git config --global --get`, which doesn't follow the include above.
+	; Without it, Claude Code appends its ignore rules to ~/.config/git/ignore,
+	; a file git never reads while excludesfile is set. Remove once Claude Code
+	; follows includes.
+	excludesfile = ~/dotfiles/.gitignore_global
+
 [credential]
 	; the Windows-side credential manager, reachable over the /mnt/c mount —
 	; only resolves under WSL, which is why it can't live in the linux config
