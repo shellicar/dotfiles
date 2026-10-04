@@ -7,11 +7,10 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../fake-git.sh
 . "$TESTS/fake-git.sh"
 
-describe "a review compares from the fork point"
+describe "a review uses the local base when origin has none"
 
-# main has moved on since the branch was cut. The base side of the link is the
-# fork point as a commit id, so main's later commits cannot appear as the
-# branch's own. The branch side is its name.
+# No remote copy of the base: no remote at all, or a base never pushed. The
+# local branch is the only copy, so the link names it as given.
 commit A
 commit B A
 commit C A
@@ -28,4 +27,4 @@ opener() { printf '%s' "$2" > "$LINK"; }
 REVIEW_OPENER=opener
 
 review_main feature/x main || fail "review_main failed"
-assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/A...feature/x?path=/repo'
+assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/main...feature/x?path=/repo'

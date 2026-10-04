@@ -177,12 +177,10 @@ worktrees it is run from, or the repository itself when it is bare, and shows `<
 against `<branch>` in GitLens's Search & Compare view. Both refs are checked first, and
 a name git does not know stops it before VS Code opens. The base is always given,
 because git does not record which branch another was cut from. The base side
-of the comparison is the fork point as a commit id, because GitLens resolves a name
-whenever it evaluates the comparison, and a `main` that is behind or moves later would
-put its commits in the branch's file list. The branch side is its name, so the title
-says which branch it is. The fork point is found from origin's copy of the base when
-origin has one, so a local `main` that is behind cannot pull earlier commits in; a base
-with no remote copy is used as it is.
+is origin's copy of the base when origin has one, so a local `main` that is behind
+cannot pull earlier commits in; a base with no remote copy is used as it is. Search &
+Compare lists files from the merge base of the two refs, so the comparison is what the
+branch adds to the base as it is now, the way a pull request shows it.
 
 Opening VS Code is per platform: `vscode-open-review` in `home/<os>/bin`. On WSL it
 opens the folder through a `vscode-remote://wsl+…` address and hands the GitLens link
