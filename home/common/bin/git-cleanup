@@ -37,8 +37,9 @@
 # A DETACHED WORKTREE has no branch to speak for it, so the commit it is parked
 # on is the subject, and five facts about that commit decide it:
 #
-#   uncommitted  the worktree holds changes that exist nowhere else
-#   in main      the commit's work is in the trunk
+#   uncommitted  the worktree holds changes that exist nowhere else, or it is
+#                locked, which git refuses to remove
+#   in main     the commit's work is in the trunk
 #   merged PR    a merged pull request carries the commit
 #   open PR      an open pull request carries the commit
 #   on a ref     a branch, remote branch or tag contains the commit

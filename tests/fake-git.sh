@@ -39,6 +39,20 @@ worktree_for() {
   printf '%s\t%s\n' "$1" "$2" >> "$WORKTREES"
 }
 
+# A worktree's own git dir, the .git/worktrees/<name> git keeps for it. A real
+# directory, because a lock is a file in it and the code under test reads it.
+gitdir_of() {
+  printf '%s/gitdirs/%s' "$WORK" "$(printf '%s' "$1" | tr '/' '_')"
+}
+
+# lock_worktree <path> [reason]: what `git worktree lock --reason` leaves, a
+# file named locked holding the reason and a newline, or empty with no reason.
+lock_worktree() {
+  d=$(gitdir_of "$1")
+  mkdir -p "$d"
+  if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/locked"; else : > "$d/locked"; fi
+}
+
 # commit <id> [parent]
 commit() {
   printf '%s\t%s\n' "$1" "${2:-}" >> "$PARENTS"
@@ -153,8 +167,19 @@ git_says() (
     "worktree list --porcelain")
       while IFS="$TAB" read -r ref path; do
         [ -n "$ref" ] || continue
-        printf 'worktree %s\nbranch %s\n\n' "$path" "$ref"
+        printf 'worktree %s\nbranch %s\n' "$path" "$ref"
+        lock="$(gitdir_of "$path")/locked"
+        if [ -s "$lock" ]; then printf 'locked %s\n' "$(cat "$lock")"
+        elif [ -f "$lock" ]; then printf 'locked\n'; fi
+        printf '\n'
       done < "$WORKTREES" ;;
+    "-C "*" rev-parse --absolute-git-dir")
+      d=$(gitdir_of "$(nth_word 2 "$@")")
+      mkdir -p "$d"
+      printf '%s\n' "$d" ;;
+    # Every worktree is clean: nothing modified, untracked or ignored.
+    "-C "*" status --porcelain"|"-C "*" status --porcelain --ignored"|"-C "*" status --porcelain -z")
+      return 0 ;;
     "switch -q -c "*)
       new=$(head_ref "$(nth_word 4 "$@")")
       start=$(resolve_ref "$(nth_word 5 "$@")") || return 1
@@ -227,8 +252,26 @@ git_says() (
         *.remote) printf 'origin\n' ;;
         *.merge) printf 'refs/heads/%s\n' "$(printf '%s' "$key" | sed 's/^branch\.//; s/\.merge$//')" ;;
       esac ;;
-    "for-each-ref --format=%(refname:short) refs/heads/")
+    "for-each-ref --format=%(refname:short) refs/heads/"|"for-each-ref --format %(refname:short) refs/heads/")
       cut -f1 "$REFS" | sed -n 's@^refs/heads/@@p' ;;
+    # The content of a change, named by its two ends. Two changes are the same
+    # content only when they are the same change, so nothing is found in main
+    # by content that is not in main by ancestry.
+    "diff "*)
+      printf 'change %s %s\n' "$(nth_word 2 "$@")" "$(nth_word 3 "$@")" ;;
+    "log -1 --format=%cr "*)
+      printf '5 days ago\n' ;;
+    # A worktree's HEAD is the branch checked out in it.
+    "-C "*" rev-list --count HEAD.."*)
+      wt=$(nth_word 2 "$@")
+      head=$(awk -F"$TAB" -v p="$wt" '$2 == p { print $1; exit }' "$WORKTREES")
+      spec=$(last_word "$@")
+      range "$head" "${spec#HEAD..}" | awk 'END { print NR }' ;;
+    "-C "*" rev-parse --verify --quiet @{u}")
+      return 1 ;;
+    # No URL for origin, so no pull request host to ask.
+    "config --get remote.origin.url")
+      return 1 ;;
     "merge-base --is-ancestor "*)
       a=$(commit_of "$(nth_word 3 "$@")") || return 1
       b=$(commit_of "$(nth_word 4 "$@")") || return 1

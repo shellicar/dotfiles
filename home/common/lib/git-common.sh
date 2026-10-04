@@ -538,17 +538,58 @@ say_ignored() {
   return 0
 }
 
-# Reason a worktree must not be touched, or empty. Dirty ALWAYS blocks — there is
-# no case where uncommitted work is worth risking.
+# A locked worktree, as "locked: <reason>", or empty when it is not locked. The
+# reason is read from the file git keeps it in, so it is what was given to `git
+# worktree lock --reason`, untouched by the quoting `git worktree list
+# --porcelain` applies.
+#
+# TODO(claude): undecided: how the lock is read. The locked file under the
+# worktree's own git dir for now, which needs the worktree's directory to still
+# exist; a worktree whose directory is gone reads as not locked. The other way
+# is the `locked` line of `git worktree list --porcelain`, which works without
+# the directory but C-quotes a reason holding quotes, backslashes or non-ASCII.
+#
+# TODO(claude): undecided: what a lock with no reason, or a reason over several
+# lines, reads as. Plain "locked" for the first; for the second, tabs and
+# newlines become spaces, because the reason ends up in tab-separated,
+# line-per-record tables.
+worktree_lock_reason() (
+  gd=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 0
+  [ -f "$gd/locked" ] || return 0
+  reason=$(tr '\t\n' '  ' < "$gd/locked" | sed 's/ *$//')
+  if [ -n "$reason" ]; then printf 'locked: %s\n' "$reason"; else echo locked; fi
+)
+
+# Reason a worktree must not be removed, or empty. Dirty ALWAYS blocks — there is
+# no case where uncommitted work is worth risking. A lock blocks too, because
+# git refuses to remove a locked worktree, whether or not whatever locked it is
+# still running.
+#
+# It gates removal only. Nothing that brings the trunk in asks it, so a locked
+# or dirty worktree is still offered its update.
 #
 # Standing in a worktree is NOT a reason. git will remove the one you are in, and
 # the only casualty is a shell whose directory has gone, which a cd fixes. This
 # script runs from the main working tree (see the chdir at the bottom), which git
 # refuses to remove, so its own footing is never what is being deleted.
+#
+# TODO(claude): undecided: a worktree that is both dirty and locked names only
+# its uncommitted changes. The other ways are naming the lock first, or both.
 worktree_block_reason() {
   [ -z "$1" ] && return 0
   worktree_dirty "$1" && { echo "worktree has uncommitted changes"; return 0; }
+  worktree_lock_reason "$1"
   return 0
+}
+
+# Everything git printed for the last removal, one dimmed line each under the
+# line that reported the failure. Written with %s, not say's %b, so a backslash
+# in a path or a lock reason is printed as it is.
+say_removal_output() {
+  [ -s "$CACHE_DIR/remove-output" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '     %b↳ %s%b\n' "$DIM" "$line" "$RESET"
+  done < "$CACHE_DIR/remove-output"
 }
 
 # Remove worktree first, then branch. Always -D, because the caller has already
@@ -557,12 +598,15 @@ worktree_block_reason() {
 # still resolves, and otherwise HEAD. With the remote branch gone it falls back to
 # whichever worktree you happen to be standing in, so it refuses branches that are
 # provably safe.
+#
+# What git printed goes to $CACHE_DIR/remove-output, so a caller reporting a
+# failure can show git's own reason with say_removal_output.
 remove_branch() (
   b=$1 w=$2
   if [ -n "$w" ]; then
-    git worktree remove "$w" >/dev/null 2>&1 || { echo "worktree remove failed"; return 1; }
+    git worktree remove "$w" >"$CACHE_DIR/remove-output" 2>&1 || { echo "worktree remove failed"; return 1; }
   fi
-  git branch -D "$b" >/dev/null 2>&1 || { echo "branch delete failed"; return 1; }
+  git branch -D "$b" >"$CACHE_DIR/remove-output" 2>&1 || { echo "branch delete failed"; return 1; }
   echo removed
   return 0
 )
@@ -685,7 +729,8 @@ detached_reason() {
 }
 
 # A worktree with no branch on it, as: class, then the reason in words.
-#   blocked  uncommitted changes, so nothing is on offer whatever else is true
+#   blocked  uncommitted changes or a lock, so nothing is on offer whatever else
+#            is true
 #   landed   its work is in main, or a merged pull request carries it
 #   live     a branch still holds it, or an open pull request does
 #   unsure   nothing claims it either way
@@ -1174,6 +1219,7 @@ run_rescue() {
     say "     ${GREEN}↳ rescued $n → $dst (onto $base_used); original removed${RESET}"
   else
     say "     ${YELLOW}↳ rescued to $dst, but original $outcome${RESET}"
+    say_removal_output
   fi
 }
 
@@ -1194,14 +1240,16 @@ run_plan() {
           say "  ${GREEN}${OK}${RESET} $branch removed"
         else
           say "  ${YELLOW}${WARN}${RESET}$branch: $outcome, skipped"
+          say_removal_output
         fi
         ;;
       detached)
-        if git worktree remove "$wt" >/dev/null 2>&1; then
+        if git worktree remove "$wt" >"$CACHE_DIR/remove-output" 2>&1; then
           REMOVED_COUNT=$((REMOVED_COUNT + 1))
           say "  ${GREEN}${OK}${RESET} $branch removed"
         else
           say "  ${YELLOW}${WARN}${RESET}$branch: worktree remove failed, skipped"
+          say_removal_output
         fi
         ;;
       rescue)
