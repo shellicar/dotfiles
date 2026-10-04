@@ -1268,11 +1268,19 @@ review_folder() {
 # list. The fork point also makes the comparison what the branch added, whatever
 # GitLens makes of the separator. The branch side stays a name, so the
 # comparison's title says which branch it is and a refresh picks up new commits.
+#
+# The fork point is found from origin's copy of the base when origin has one: a
+# local main that is behind where the branch was cut gives an older fork point,
+# and the comparison would then list commits the branch was cut after. With no
+# remote copy (no remote, or a base never pushed) the local branch is the only
+# copy there is.
 review_main() {
   for ref in "$1" "$2"; do
     ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }
   done
-  fork=$(git merge-base "$2" "$1") || { echo "$TOOL: $1 and $2 share no history" >&2; return 1; }
+  base=$2
+  if ref_exists "refs/remotes/origin/$2"; then base=refs/remotes/origin/$2; fi
+  fork=$(git merge-base "$base" "$1") || { echo "$TOOL: $1 and $2 share no history" >&2; return 1; }
   root=$(review_folder)
   "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$1")"
 }
