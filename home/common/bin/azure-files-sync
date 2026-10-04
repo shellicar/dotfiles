@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Keep local folders and Azure Files shares in step, both ways, with
-# `rclone bisync`. Sign-in is the Azure CLI's (`az login`); no key is stored.
+# `rclone bisync`, signed in through the Azure CLI (`az login`).
 #
 #   azure-files-sync                     show what a sync would change
 #   azure-files-sync --apply             sync every pair
@@ -15,7 +15,8 @@
 #         "$HOME/notes:general/notes")
 #
 # The signed-in user needs the "Storage File Data Privileged Contributor" role
-# on the storage account. bisync keeps its state per machine in rclone's cache
+# on the storage account, and the account's firewall must allow this machine's
+# public IP. bisync keeps its state per machine in rclone's cache
 # folder (~/.cache/rclone/bisync on Linux); if that is lost it asks for
 # --resync.
 set -euo pipefail
