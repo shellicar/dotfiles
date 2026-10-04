@@ -65,6 +65,10 @@ Usage: azure-files-sync [--resync] [--force] [--apply]
        azure-files-sync diff <path>
        azure-files-sync keep-local <path> [--apply]
        azure-files-sync keep-remote <path> [--apply]
+
+Without --apply nothing changes. A sync stops before deleting more than 75%
+of a folder's files; --force lets it go ahead, and is still a dry run without
+--apply.
 EOF
   exit 1
 }

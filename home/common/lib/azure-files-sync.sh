@@ -147,6 +147,7 @@ md5_of() {
 # "<size> bytes, modified <time>, MD5 <hash>", or "missing".
 describe() {
   local line size time
+  # TODO(claude): undecided: a failed listing reads as "missing" (see show_diff).
   line=$(rclone lsf --format st --separator "$(printf '\t')" "$1" 2>/dev/null) || line=
   [ -n "$line" ] || { echo "missing"; return 0; }
   size=${line%%$'\t'*}
@@ -171,6 +172,9 @@ show_diff() {
   tmp=$(mktemp -d)
   copy="$tmp/azure/$(basename "$local_file")"
   mkdir -p "$tmp/azure"
+  # TODO(claude): undecided: whether a failed download (sign-in, firewall,
+  # network) stops the command or reads as Azure having no copy. Built: it
+  # reads as no copy, here and in describe, and keep-local --apply goes ahead.
   rclone copyto "$remote_file" "$copy" 2>/dev/null || copy=/dev/null
   a=$local_file
   [ -e "$a" ] || a=/dev/null
@@ -187,6 +191,8 @@ show_diff() {
 # keep_side local|remote <local file> <remote file> <apply 0|1>
 # Prints the direction and the difference; with apply=1, copies the kept side
 # over the other.
+# TODO(claude): undecided: whether keep-local / keep-remote refuse while
+# bisync's lock for the folder exists. Built: they do not check it.
 keep_side() {
   local side=$1 local_file=$2 remote_file=$3 apply=$4
   if [ "$side" = local ]; then
@@ -298,6 +304,9 @@ resolve_resync_conflicts() {
         mv -- "$local_dir/$path" "$local_dir/$renamed"
         echo "binary file differs: kept both, local version renamed $path → $renamed"
       else
+        # TODO(claude): undecided: the dry run leaves a binary conflict out
+        # of bisync's dry run, so bisync's listing does not show the renamed
+        # copy going up or Azure's coming down that --apply will transfer.
         echo "binary file differs: would rename the local version $path → $renamed and keep both"
         printf '/%s\n' "$(filter_escape "$path")" >> "$excludes"
       fi
