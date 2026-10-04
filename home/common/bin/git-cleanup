@@ -35,20 +35,25 @@
 # same.
 #
 # A DETACHED WORKTREE has no branch to speak for it, so the commit it is parked
-# on is the subject, and five facts about that commit decide it:
+# on is the subject, and five facts about that commit decide it, once a lock has
+# had its say:
 #
-#   uncommitted  the worktree holds changes that exist nowhere else, or it is
-#                locked, which git refuses to remove
-#   in main     the commit's work is in the trunk
+#   locked       the worktree is locked, so git refuses to remove it
+#   uncommitted  the worktree holds changes that exist nowhere else
+#   in main      the commit's work is in the trunk
 #   merged PR    a merged pull request carries the commit
 #   open PR      an open pull request carries the commit
 #   on a ref     a branch, remote branch or tag contains the commit
 #
-# Those collapse to two questions. FINISHED is in main or merged PR: the work it
-# was made for has landed, so the worktree has no future. LIVE is uncommitted,
-# on a ref, or open PR: something there is still going on.
+# A lock blocks the removal whatever else is true, and whether or not whatever
+# took it is still running. It says nothing about the work.
 #
-#   uncommitted → keep      finished → remove
+# The rest collapse to two questions. FINISHED is in main or merged PR: the work
+# it was made for has landed, so the worktree has no future. LIVE is
+# uncommitted, on a ref, or open PR: something there is still going on.
+#
+#   locked      → keep
+#   uncommitted → keep     finished → remove
 #   live        → keep      neither  → unsure, said plainly rather than guessed
 #
 # ON A REF IS A KEEP, NEVER A REMOVE. A branch still holding the commit says the

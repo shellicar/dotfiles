@@ -544,8 +544,7 @@ say_ignored() {
 # Read from the `locked` line of `git worktree list --porcelain`, which answers
 # whether or not the worktree's directory still exists. The reason is shown as
 # git gives it there: C-quoted when it holds quotes, backslashes, control
-# characters or non-ASCII, the same as the paths these commands already read
-# from that listing. The path is matched exactly as the listing prints it, which
+# characters or non-ASCII. The path is matched exactly as the listing prints it, which
 # is where every caller got it from.
 #
 # Tabs and newlines become spaces, because the reason ends up in tab-separated,
