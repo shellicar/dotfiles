@@ -39,18 +39,25 @@ worktree_for() {
   printf '%s\t%s\n' "$1" "$2" >> "$WORKTREES"
 }
 
-# A worktree's own git dir, the .git/worktrees/<name> git keeps for it. A real
-# directory, because a lock is a file in it and the code under test reads it.
-gitdir_of() {
-  printf '%s/gitdirs/%s' "$WORK" "$(printf '%s' "$1" | tr '/' '_')"
+# detached_worktree <commit> <path>: a worktree with no branch on it.
+DETACHED_WORKTREES=$WORK/detached-worktrees
+: > "$DETACHED_WORKTREES"
+detached_worktree() {
+  printf '%s\t%s\n' "$1" "$2" >> "$DETACHED_WORKTREES"
 }
 
-# lock_worktree <path> [reason]: what `git worktree lock --reason` leaves, a
-# file named locked holding the reason and a newline, or empty with no reason.
+# lock_worktree <path> [reason]: `git worktree lock`, with or without --reason.
+# The reason is held as the listing prints it.
+LOCKS=$WORK/locks
+: > "$LOCKS"
 lock_worktree() {
-  d=$(gitdir_of "$1")
-  mkdir -p "$d"
-  if [ -n "${2:-}" ]; then printf '%s\n' "$2" > "$d/locked"; else : > "$d/locked"; fi
+  printf '%s\t%s\n' "$1" "${2:-}" >> "$LOCKS"
+}
+
+# The lines a locked worktree adds to its stanza in the listing: "locked
+# <reason>", or "locked" alone when there is no reason.
+lock_lines() {
+  awk -F"$TAB" -v p="$1" '$1 == p { if ($2 == "") print "locked"; else print "locked " $2; exit }' "$LOCKS"
 }
 
 # commit <id> [parent]
@@ -167,16 +174,16 @@ git_says() (
     "worktree list --porcelain")
       while IFS="$TAB" read -r ref path; do
         [ -n "$ref" ] || continue
-        printf 'worktree %s\nbranch %s\n' "$path" "$ref"
-        lock="$(gitdir_of "$path")/locked"
-        if [ -s "$lock" ]; then printf 'locked %s\n' "$(cat "$lock")"
-        elif [ -f "$lock" ]; then printf 'locked\n'; fi
+        printf 'worktree %s\nHEAD %s\nbranch %s\n' "$path" "$(ref_of "$ref")" "$ref"
+        lock_lines "$path"
         printf '\n'
-      done < "$WORKTREES" ;;
-    "-C "*" rev-parse --absolute-git-dir")
-      d=$(gitdir_of "$(nth_word 2 "$@")")
-      mkdir -p "$d"
-      printf '%s\n' "$d" ;;
+      done < "$WORKTREES"
+      while IFS="$TAB" read -r head path; do
+        [ -n "$head" ] || continue
+        printf 'worktree %s\nHEAD %s\ndetached\n' "$path" "$head"
+        lock_lines "$path"
+        printf '\n'
+      done < "$DETACHED_WORKTREES" ;;
     # Every worktree is clean: nothing modified, untracked or ignored.
     "-C "*" status --porcelain"|"-C "*" status --porcelain --ignored"|"-C "*" status --porcelain -z")
       return 0 ;;

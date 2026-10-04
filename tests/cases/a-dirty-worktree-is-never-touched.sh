@@ -13,6 +13,9 @@ describe "a worktree with uncommitted changes gives a reason not to touch it"
 git_says() {
   case "$*" in
     "-C /some/dirty/worktree status --porcelain") echo " M some-file" ;;
+    # Listed with no locked line, so it is not locked.
+    "worktree list --porcelain")
+      printf 'worktree /some/dirty/worktree\nHEAD some-tip\nbranch refs/heads/some-branch\n\n' ;;
     *) fail "unexpected: git $*" ;;
   esac
 }

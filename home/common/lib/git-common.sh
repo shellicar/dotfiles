@@ -538,26 +538,28 @@ say_ignored() {
   return 0
 }
 
-# A locked worktree, as "locked: <reason>", or empty when it is not locked. The
-# reason is read from the file git keeps it in, so it is what was given to `git
-# worktree lock --reason`, untouched by the quoting `git worktree list
-# --porcelain` applies.
+# A locked worktree, as "locked: <reason>", plain "locked" when it was locked
+# with no reason, or empty when it is not locked.
 #
-# TODO(claude): undecided: how the lock is read. The locked file under the
-# worktree's own git dir for now, which needs the worktree's directory to still
-# exist; a worktree whose directory is gone reads as not locked. The other way
-# is the `locked` line of `git worktree list --porcelain`, which works without
-# the directory but C-quotes a reason holding quotes, backslashes or non-ASCII.
+# Read from the `locked` line of `git worktree list --porcelain`, which answers
+# whether or not the worktree's directory still exists. The reason is shown as
+# git gives it there: C-quoted when it holds quotes, backslashes, control
+# characters or non-ASCII, the same as the paths these commands already read
+# from that listing. The path is matched exactly as the listing prints it, which
+# is where every caller got it from.
 #
-# TODO(claude): undecided: what a lock with no reason, or a reason over several
-# lines, reads as. Plain "locked" for the first; for the second, tabs and
-# newlines become spaces, because the reason ends up in tab-separated,
-# line-per-record tables.
+# Tabs and newlines become spaces, because the reason ends up in tab-separated,
+# one-record-per-line tables. The listing already escapes both inside quotes, so
+# this only guards the tables.
+#
+# The path goes to awk through the environment, not -v, which would read a
+# backslash in it as an escape.
 worktree_lock_reason() (
-  gd=$(git -C "$1" rev-parse --absolute-git-dir 2>/dev/null) || return 0
-  [ -f "$gd/locked" ] || return 0
-  reason=$(tr '\t\n' '  ' < "$gd/locked" | sed 's/ *$//')
-  if [ -n "$reason" ]; then printf 'locked: %s\n' "$reason"; else echo locked; fi
+  git worktree list --porcelain | WT=$1 awk '
+    /^worktree / { here = (substr($0, 10) == ENVIRON["WT"]); next }
+    here && $0 == "locked" { print "locked"; exit }
+    here && /^locked / { print "locked: " substr($0, 8); exit }
+  ' | tr '\t' ' '
 )
 
 # Reason a worktree must not be removed, or empty. Dirty ALWAYS blocks — there is
@@ -573,14 +575,16 @@ worktree_lock_reason() (
 # script runs from the main working tree (see the chdir at the bottom), which git
 # refuses to remove, so its own footing is never what is being deleted.
 #
-# TODO(claude): undecided: a worktree that is both dirty and locked names only
-# its uncommitted changes. The other ways are naming the lock first, or both.
-worktree_block_reason() {
+# Every reason that applies is named, uncommitted changes first, then the lock.
+worktree_block_reason() (
   [ -z "$1" ] && return 0
-  worktree_dirty "$1" && { echo "worktree has uncommitted changes"; return 0; }
-  worktree_lock_reason "$1"
+  reasons=''
+  worktree_dirty "$1" && reasons='worktree has uncommitted changes'
+  lock=$(worktree_lock_reason "$1")
+  [ -n "$lock" ] && reasons="${reasons:+$reasons, }$lock"
+  [ -n "$reasons" ] && printf '%s\n' "$reasons"
   return 0
-}
+)
 
 # Everything git printed for the last removal, one dimmed line each under the
 # line that reported the failure. Written with %s, not say's %b, so a backslash

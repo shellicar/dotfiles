@@ -18,6 +18,7 @@ commit A
 commit B A
 ref_set refs/heads/main B
 ref_set refs/remotes/origin/HEAD B
+detached_worktree A /wt/parked
 lock_worktree /wt/parked 'claude session review (pid 4242 start 1234567)'
 
 guard_path

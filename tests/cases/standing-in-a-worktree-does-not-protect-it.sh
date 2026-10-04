@@ -14,8 +14,9 @@ describe "a clean worktree is removable whether or not you are standing in it"
 git_says() {
   case "$*" in
     "-C /some/clean/worktree status --porcelain") : ;;
-    # Its git dir holds no lock file, so it is not locked.
-    "-C /some/clean/worktree rev-parse --absolute-git-dir") printf '%s\n' "$WORK" ;;
+    # Listed with no locked line, so it is not locked.
+    "worktree list --porcelain")
+      printf 'worktree /some/clean/worktree\nHEAD some-tip\nbranch refs/heads/some-branch\n\n' ;;
     *) fail "unexpected: git $*" ;;
   esac
 }

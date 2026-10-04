@@ -23,3 +23,11 @@ guard_path
 expected='locked: claude session feature/held (pid 4242 start 1234567)'
 actual=$(worktree_block_reason /wt/held)
 assert_eq "$actual" "$expected"
+
+# Locked with no reason, it still blocks, and says only that it is locked.
+worktree_for refs/heads/feature/bare /wt/bare
+lock_worktree /wt/bare
+
+expected='locked'
+actual=$(worktree_block_reason /wt/bare)
+assert_eq "$actual" "$expected"
