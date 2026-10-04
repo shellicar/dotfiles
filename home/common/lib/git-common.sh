@@ -1254,10 +1254,11 @@ main_checkout_root() {
 # than as an empty comparison in VS Code. REVIEW_OPENER is the per-platform
 # launcher (vscode-open-review in home/<os>/bin); a case replaces it.
 #
-# GitLens is handed commit ids, never names. A name moves: a comparison against
-# "main" made while the local main was behind listed commits already merged as
-# the branch's own. The base side is the fork point, so the comparison is what
-# the branch added, whatever GitLens makes of the separator.
+# GitLens is handed commit ids, never names. It resolves a name whenever it
+# evaluates the comparison, so a local main that is behind, or that moves later,
+# would put main's commits in the branch's file list. The base side is the fork
+# point, so the comparison is what the branch added, whatever GitLens makes of
+# the separator.
 review_main() {
   for ref in "$1" "$2"; do
     ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }

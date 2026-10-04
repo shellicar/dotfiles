@@ -8,8 +8,8 @@ REPO=$(cd "$TESTS/.." && pwd)
 describe "the review link encodes names for GitLens"
 
 # Left raw, the + in a Claude Code worktree branch reads as a space and GitLens
-# looks up a branch that does not exist. The shape is the one GitLens opened
-# when tried by hand: base first, then the branch, then the repository path.
+# looks up a branch that does not exist. The shape is one GitLens is known to
+# open: base first, then the branch, then the repository path.
 guard_path
 # shellcheck source=../../home/common/lib/git-common.sh
 . "$REPO/home/common/lib/git-common.sh"

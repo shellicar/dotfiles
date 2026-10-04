@@ -9,9 +9,9 @@ REPO=$(cd "$TESTS/.." && pwd)
 
 describe "a review compares fixed commits from the fork point"
 
-# main has moved on since the branch was cut. Handed the names, GitLens counted
-# main's later commits as the branch's own once main had moved under it. The
-# link has to carry the fork point and the branch tip as commit ids.
+# main has moved on since the branch was cut. The link carries the fork point
+# and the branch tip as commit ids, so main's later commits cannot appear as the
+# branch's own.
 commit A
 commit B A
 commit C A
