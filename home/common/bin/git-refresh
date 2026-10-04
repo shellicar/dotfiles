@@ -493,10 +493,8 @@ draw() {
   budget=$((height - 5))
   avail=$COUNT
   [ "$avail" -gt "$budget" ] && avail=$budget
-  # TODO(claude): undecided: a pane under six lines, too short for the header,
-  # one row and the footer. One row is drawn anyway, so the frame is taller
-  # than the pane. The other way is drawing fewer rows than one, or dropping
-  # the header or the footer.
+  # A pane under six lines is too short for the header, one row and the
+  # footer. One row is drawn anyway, so there the frame is taller than the pane.
   [ "$avail" -lt 1 ] && avail=1
   # The section gets what is left, and say_noted cuts itself to fit.
   room=$((budget - avail))
@@ -664,9 +662,8 @@ $NOTED
 EOF
   fit=$total
   if [ -n "$lines" ] && [ $((total + 2)) -gt "$lines" ]; then
-    # TODO(claude): undecided: too little room for the blank line, the heading
-    # and the count. The section is left out of the picker for now. The other
-    # way is a single line counting what is hidden.
+    # Too little room for the blank line, the heading and the count, so the
+    # section is left out. It is still printed to the normal screen.
     [ "$lines" -lt 3 ] && return 0
     fit=$((lines - 3))
   fi
@@ -778,11 +775,7 @@ stty -icanon -echo min 0 time 2
 # Line wrap off while the picker is up, so a line wider than the terminal is cut
 # at the edge instead of taking a second row. draw counts one row per line of
 # the section below the list, which say_noted does not cut to the width.
-#
-# TODO(claude): undecided: how a section line wider than the terminal is kept
-# to one row. The terminal's line wrap is turned off for now, and restore turns
-# it back on. The other way is cutting each line to the width in say_noted,
-# which would cut the copy printed to the normal screen too.
+# restore turns line wrap back on.
 printf '%b[?1049h%b[?25l%b[?7l' "$E" "$E" "$E"
 
 picker_loop
