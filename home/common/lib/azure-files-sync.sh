@@ -135,24 +135,53 @@ check_lock() {
 
 # ── comparing one file ──────────────────────────────────────────────────────
 
+# Runs rclone, keeping its error output. Returns 0 on success, and 2, quietly,
+# when rclone reports the path does not exist: exit 3 (directory not found) or
+# 4 (file not found). Any other failure (sign-in, firewall, network, a file it
+# cannot read) prints rclone's error and returns 1, so a caller stops rather
+# than reading the file as absent.
+rclone_read() {
+  local err rc=0
+  err=$(mktemp)
+  rclone "$@" 2> "$err" || rc=$?
+  case "$rc" in
+    0) rm -f "$err"; return 0 ;;
+    3|4) rm -f "$err"; return 2 ;;
+  esac
+  cat "$err" >&2
+  rm -f "$err"
+  echo "rclone $1 failed (exit $rc); stopping" >&2
+  return 1
+}
+
 # MD5 of one file: the stored hash where there is one, computed by reading the
-# file where there is not.
+# file where there is not. Fails when rclone cannot read the file.
 md5_of() {
-  local h
-  h=$(rclone md5sum "$1" 2>/dev/null | awk '{ print ($1 ~ /^[0-9a-f]+$/) ? $1 : ""; exit }')
-  [ -n "$h" ] || h=$(rclone md5sum --download "$1" | awk '{ print $1; exit }')
+  local out h rc=0
+  out=$(rclone_read md5sum "$1") || rc=$?
+  [ "$rc" = 2 ] && echo "not found: $1" >&2
+  [ "$rc" = 0 ] || return 1
+  h=$(printf '%s\n' "$out" | awk '{ print ($1 ~ /^[0-9a-f]+$/) ? $1 : ""; exit }')
+  if [ -z "$h" ]; then
+    out=$(rclone_read md5sum --download "$1") || return 1
+    h=$(printf '%s\n' "$out" | awk '{ print $1; exit }')
+  fi
+  [ -n "$h" ] || { echo "no MD5 for $1" >&2; return 1; }
   printf '%s\n' "$h"
 }
 
-# "<size> bytes, modified <time>, MD5 <hash>", or "missing".
+# "<size> bytes, modified <time>, MD5 <hash>", or "missing" when rclone reports
+# the file does not exist. Fails on any other error.
 describe() {
-  local line size time
-  # TODO(claude): undecided: a failed listing reads as "missing" (see show_diff).
-  line=$(rclone lsf --format st --separator "$(printf '\t')" "$1" 2>/dev/null) || line=
-  [ -n "$line" ] || { echo "missing"; return 0; }
+  local line size time hash rc=0
+  line=$(rclone_read lsf --format st --separator "$(printf '\t')" "$1") || rc=$?
+  [ "$rc" = 2 ] && { echo "missing"; return 0; }
+  [ "$rc" = 0 ] || return 1
+  [ -n "$line" ] || { echo "rclone listed nothing for $1" >&2; return 1; }
   size=${line%%$'\t'*}
   time=${line#*$'\t'}
-  printf '%s bytes, modified %s, MD5 %s\n' "$size" "$time" "$(md5_of "$1")"
+  hash=$(md5_of "$1") || return 1
+  printf '%s bytes, modified %s, MD5 %s\n' "$size" "$time" "$hash"
 }
 
 # Binary is what git diff calls binary: --numstat prints "-<tab>-" for it.
@@ -165,27 +194,36 @@ is_binary() {
 
 # Shows how a local file and its remote copy differ: git's diff for text, or
 # "binary" and each side's size, modified time and MD5. The remote copy is
-# downloaded to a temporary folder; a side that does not exist reads as
-# /dev/null to git.
+# downloaded to a temporary folder. A side that rclone reports as not existing
+# reads as /dev/null to git; any other failure to read a side returns 1.
 show_diff() {
-  local local_file=$1 remote_file=$2 tmp copy a
+  local local_file=$1 remote_file=$2 tmp copy a rc=0 ld rd
   tmp=$(mktemp -d)
   copy="$tmp/azure/$(basename "$local_file")"
   mkdir -p "$tmp/azure"
-  # TODO(claude): undecided: whether a failed download (sign-in, firewall,
-  # network) stops the command or reads as Azure having no copy. Built: it
-  # reads as no copy, here and in describe, and keep-local --apply goes ahead.
-  rclone copyto "$remote_file" "$copy" 2>/dev/null || copy=/dev/null
+  rclone_read copyto "$remote_file" "$copy" || rc=$?
+  case "$rc" in
+    0) ;;
+    2) copy=/dev/null ;;
+    *) rm -rf "$tmp"; return 1 ;;
+  esac
   a=$local_file
   [ -e "$a" ] || a=/dev/null
+  rc=0
   if is_binary "$a" "$copy"; then
-    echo "binary"
-    echo "  local: $(describe "$local_file")"
-    echo "  azure: $(describe "$remote_file")"
+    if ld=$(describe "$local_file") && rd=$(describe "$remote_file"); then
+      echo "binary"
+      echo "  local: $ld"
+      echo "  azure: $rd"
+    else
+      rc=1
+    fi
   else
-    git diff --no-index -- "$a" "$copy" || :
+    # git diff exits 1 when the files differ, and above 1 on an error.
+    git diff --no-index -- "$a" "$copy" || [ "$?" = 1 ] || rc=1
   fi
   rm -rf "$tmp"
+  return "$rc"
 }
 
 # keep_side local|remote <local file> <remote file> <apply 0|1>
@@ -202,7 +240,7 @@ keep_side() {
   fi
   echo "  local: $local_file"
   echo "  azure: $remote_file"
-  show_diff "$local_file" "$remote_file"
+  show_diff "$local_file" "$remote_file" || { echo "stopped: nothing copied" >&2; return 1; }
   if [ "$apply" != 1 ]; then
     echo "dry run: re-run with --apply to copy"
     return 0
@@ -224,21 +262,30 @@ keep_side() {
 # or one computed for a side that has none stored. Equal MD5s are the same
 # content, whatever the modified times say.
 differing_files() {
-  local local_dir=$1 remote=$2 tmp t path ls lt lh rs rt rh
+  local local_dir=$1 remote=$2 tmp t path ls lt lh rs rt rh side rc
   t=$(printf '\t')
   tmp=$(mktemp -d)
-  rclone lsf -R --files-only --format psth --hash MD5 --separator "$t" \
-    ${FILTERS[@]+"${FILTERS[@]}"} "$local_dir" > "$tmp/local" || { rm -rf "$tmp"; return 1; }
-  rclone lsf -R --files-only --format psth --hash MD5 --separator "$t" \
-    ${FILTERS[@]+"${FILTERS[@]}"} "$remote" > "$tmp/remote" || { rm -rf "$tmp"; return 1; }
+  # A folder rclone reports as not existing lists as empty, as on a first sync
+  # before the share path exists.
+  for side in local remote; do
+    rc=0
+    if [ "$side" = local ]; then path=$local_dir; else path=$remote; fi
+    rclone_read lsf -R --files-only --format psth --hash MD5 --separator "$t" \
+      ${FILTERS[@]+"${FILTERS[@]}"} "$path" > "$tmp/$side" || rc=$?
+    case "$rc" in
+      0) ;;
+      2) : > "$tmp/$side" ;;
+      *) rm -rf "$tmp"; return 1 ;;
+    esac
+  done
   awk -F "$t" -v OFS="$t" '
     NR == FNR { s[$1] = $2; m[$1] = $3; h[$1] = $4; next }
     ($1 in s) { print $1, s[$1], m[$1], h[$1], $2, $3, $4 }
   ' "$tmp/local" "$tmp/remote" > "$tmp/both"
   while IFS="$t" read -r path ls lt lh rs rt rh; do
     if [ "$ls" = "$rs" ]; then
-      [ -n "$lh" ] || lh=$(md5_of "$local_dir/$path" < /dev/null)
-      [ -n "$rh" ] || rh=$(md5_of "$(remote_join "$remote" "$path")" < /dev/null)
+      [ -n "$lh" ] || lh=$(md5_of "$local_dir/$path" < /dev/null) || { rm -rf "$tmp"; return 1; }
+      [ -n "$rh" ] || rh=$(md5_of "$(remote_join "$remote" "$path")" < /dev/null) || { rm -rf "$tmp"; return 1; }
       [ "$lh" = "$rh" ] && continue
     fi
     printf '%s\t%s\t%s\t%s\t%s\n' "$path" "$ls" "$lt" "$rs" "$rt"
@@ -291,7 +338,7 @@ resolve_resync_conflicts() {
   differing_files "$local_dir" "$remote" > "$tmp/differ" || { rm -rf "$tmp"; return 1; }
   while IFS="$t" read -r path ls lt rs rt; do
     copy="$tmp/remote"
-    rclone copyto "$(remote_join "$remote" "$path")" "$copy" < /dev/null
+    rclone_read copyto "$(remote_join "$remote" "$path")" "$copy" < /dev/null || { rm -rf "$tmp"; return 1; }
     if is_binary "$local_dir/$path" "$copy" < /dev/null; then
       renamed=$(host_name_for "$path" "$host")
       if [ -e "$local_dir/$renamed" ]; then
@@ -333,22 +380,23 @@ list_conflict() {
 
 # When both sides changed a .git/index, bisync keeps both as index.conflict1
 # and index.conflict2 and git sees no index. In each .git folder holding such
-# files, the newest becomes .git/index and the rest are removed; the next sync
-# carries that across.
-# TODO(claude): undecided: a .git/index that already exists beside the
-# conflict copies is replaced by the newest copy, not compared with them.
+# files, the newest of them, and of any .git/index git has written since,
+# becomes .git/index and the rest are removed; the next sync carries that
+# across.
 resolve_git_index_conflicts() {
   local gitdir newest f
   find "$1" -type f -path '*/.git/index.conflict*' 2>/dev/null \
     | sed 's|/index\.conflict[^/]*$||' | sort -u \
     | while IFS= read -r gitdir; do
+        set -- "$gitdir"/index.conflict*
+        [ -e "$gitdir/index" ] && set -- "$gitdir/index" "$@"
         # shellcheck disable=SC2012
-        newest=$(ls -t "$gitdir"/index.conflict* | head -n 1)
-        for f in "$gitdir"/index.conflict*; do
+        newest=$(ls -t -- "$@" | head -n 1)
+        for f in "$@"; do
           [ "$f" = "$newest" ] || rm -f -- "$f"
         done
-        mv -f -- "$newest" "$gitdir/index"
-        echo "$gitdir/index: kept the newest of the conflicting copies"
+        [ "$newest" = "$gitdir/index" ] || mv -f -- "$newest" "$gitdir/index"
+        echo "$gitdir/index: kept the newest of $# copies ($(basename "$newest"))"
       done
 }
 

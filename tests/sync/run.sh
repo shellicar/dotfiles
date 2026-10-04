@@ -145,6 +145,29 @@ keep_remote_with_apply_copies_azure_to_local() {
   expect_content "$R/f.txt" azure
 }
 
+# A copy rclone cannot read stands in for Azure failing (sign-in, firewall,
+# network): rclone exits 1, not with its "not found" codes. Under root the
+# chmod has no effect and this case cannot show anything.
+an_unreadable_azure_copy_stops_keep_instead_of_reading_as_missing() {
+  fresh unreadable
+  printf 'local\n' > "$L/f.txt"
+  printf 'azure\n' > "$R/f.txt"
+  chmod 000 "$R/f.txt"
+  local status=0
+  keep_side local "$L/f.txt" "$R/f.txt" 1 >/dev/null 2>&1 || status=$?
+  chmod 644 "$R/f.txt"
+  [ "$status" != 0 ] || fail "keep-local --apply succeeded although Azure's copy could not be read"
+  expect_content "$R/f.txt" azure
+}
+
+a_missing_azure_copy_reads_as_absent() {
+  fresh absent
+  printf 'local\n' > "$L/f.txt"
+  out=$(keep_side local "$L/f.txt" "$R/f.txt" 1 2>&1) || fail "keep-local --apply failed: $out"
+  expect_output "$out" "+++ /dev/null"
+  expect_content "$R/f.txt" local
+}
+
 # ── runner ──────────────────────────────────────────────────────────────────
 
 ran=0 failed=0
@@ -155,7 +178,9 @@ for t in \
   keep_without_apply_writes_nothing \
   keep_without_apply_says_binary_for_a_binary_file \
   keep_local_with_apply_copies_local_to_azure \
-  keep_remote_with_apply_copies_azure_to_local
+  keep_remote_with_apply_copies_azure_to_local \
+  an_unreadable_azure_copy_stops_keep_instead_of_reading_as_missing \
+  a_missing_azure_copy_reads_as_absent
 do
   ran=$((ran + 1))
   FAILED=0

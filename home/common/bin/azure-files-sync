@@ -22,7 +22,9 @@
 #   - a binary file (what git diff calls binary) keeps both versions: Azure's
 #     keeps the name and the local one is renamed name-<hostname>.ext.
 # keep-local and keep-remote print the direction and the difference, and copy
-# only with --apply.
+# only with --apply. Azure's copy counts as absent only when rclone reports it
+# not found; any other failure to read it (sign-in, firewall, network) stops
+# diff, keep-local, keep-remote and a resync's conflict check with an error.
 #
 # After a sync, where both sides changed a repository's .git/index and bisync
 # kept both as index.conflict1 and index.conflict2, the newest becomes
