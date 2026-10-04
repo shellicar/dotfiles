@@ -43,7 +43,9 @@ done
 export RCLONE_AZUREFILES_ACCOUNT="$ACCOUNT"
 export RCLONE_AZUREFILES_USE_AZ=true
 
-flags=(--resilient --recover --create-empty-src-dirs)
+# macOS writes ._* and .DS_Store metadata beside files; they mean nothing on
+# the other machines.
+flags=(--resilient --recover --create-empty-src-dirs --exclude '._*' --exclude .DS_Store)
 [ "$resync" = 1 ] && flags+=(--resync)
 [ "$apply" = 1 ] || flags+=(--dry-run)
 
