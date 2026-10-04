@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Keep local folders and Azure Files shares in step, both ways, with
+# `rclone bisync`. Sign-in is the Azure CLI's (`az login`); no key is stored.
+#
+#   azure-files-sync                     show what a sync would change
+#   azure-files-sync --apply             sync every pair
+#   azure-files-sync --resync [--apply]  first sync of a pair on this machine,
+#                                        or when bisync asks for it: merges both
+#                                        sides and deletes nothing
+#
+# Settings come from ~/.config/azure-files-sync/config, sourced as bash:
+#
+#   ACCOUNT=mystorageaccount              # <account>.file.core.windows.net
+#   SYNC=("$HOME/docs:docs/docs"          # local folder : share/path
+#         "$HOME/notes:general/notes")
+#
+# The signed-in user needs the "Storage File Data Privileged Contributor" role
+# on the storage account. bisync keeps its state per machine in rclone's cache
+# folder (~/.cache/rclone/bisync on Linux); if that is lost it asks for
+# --resync.
+set -euo pipefail
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/azure-files-sync/config"
+
+command -v rclone >/dev/null || { echo "rclone is not installed" >&2; exit 1; }
+[ -f "$CONFIG" ] || { echo "missing $CONFIG (see the header of $0)" >&2; exit 1; }
+SYNC=()
+# shellcheck source=/dev/null
+. "$CONFIG"
+: "${ACCOUNT:?ACCOUNT is not set in $CONFIG}"
+[ "${#SYNC[@]}" -gt 0 ] || { echo "SYNC is empty in $CONFIG" >&2; exit 1; }
+
+apply=0 resync=0
+for arg in "$@"; do
+  case "$arg" in
+    --apply) apply=1 ;;
+    --resync) resync=1 ;;
+    *) echo "Usage: $0 [--resync] [--apply]" >&2; exit 1 ;;
+  esac
+done
+
+export RCLONE_AZUREFILES_ACCOUNT="$ACCOUNT"
+export RCLONE_AZUREFILES_USE_AZ=true
+
+flags=(--resilient --recover --create-empty-src-dirs)
+[ "$resync" = 1 ] && flags+=(--resync)
+[ "$apply" = 1 ] || flags+=(--dry-run)
+
+status=0
+for pair in "${SYNC[@]}"; do
+  local_dir=${pair%%:*}
+  remote=${pair#*:}
+  share=${remote%%/*}
+  path=${remote#"$share"}
+  echo "=== $local_dir <-> $share$path ==="
+  # share_name is a backend setting, not part of the path, so each pair names
+  # its share in an on-the-fly remote.
+  rclone bisync "$local_dir" ":azurefiles,share_name=$share:${path#/}" "${flags[@]}" || status=$?
+done
+
+[ "$apply" = 1 ] || echo "dry run: re-run with --apply to sync"
+exit "$status"
