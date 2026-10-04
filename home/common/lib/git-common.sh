@@ -1244,18 +1244,12 @@ review_link() {
     "$(uri_encode "$2")" "$(uri_encode "$3")" "$(uri_encode "$1")"
 }
 
-# The folder VS Code opens: the main checkout, whichever of its worktrees git
-# review is run from, or the repository itself when it is bare. From the main
-# checkout, --show-toplevel answers even in a submodule or a repository cloned
-# with --separate-git-dir. From a linked worktree it is the first entry git
-# lists, which is the main checkout or the bare repository; in a submodule or
-# --separate-git-dir repository that entry is git's own data folder instead.
+# The folder VS Code opens: the top of the checkout git review is run from, or
+# the repository itself when it is bare and has no checkout. Finding the main
+# checkout from a linked worktree is not attempted: a repository cloned with
+# --separate-git-dir records no path back to it.
 review_folder() {
-  if [ "$(git rev-parse --absolute-git-dir)" = "$(git rev-parse --path-format=absolute --git-common-dir)" ]; then
-    git rev-parse --show-toplevel 2>/dev/null || git rev-parse --absolute-git-dir
-  else
-    git worktree list --porcelain | sed -n '1s/^worktree //p'
-  fi
+  git rev-parse --show-toplevel 2>/dev/null || git rev-parse --absolute-git-dir
 }
 
 # Checks both refs before anything opens, so a mistyped name fails here rather

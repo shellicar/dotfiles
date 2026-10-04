@@ -172,8 +172,8 @@ and `cd`, which a subprocess cannot do for its caller.
 
 ### git review
 
-`git review <branch> <base>` opens the main checkout in VS Code, whichever of its
-worktrees it is run from, or the repository itself when it is bare, and shows `<base>`
+`git review <branch> <base>` opens the checkout it is run from in VS Code, or the
+repository itself when it is bare, and shows `<base>`
 against `<branch>` in GitLens's Search & Compare view. Both refs are checked first, and
 a name git does not know stops it before VS Code opens. The base is always given,
 because git does not record which branch another was cut from. Both names are

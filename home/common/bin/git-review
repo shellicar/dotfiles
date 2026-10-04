@@ -10,8 +10,8 @@
 # id often enough to make a guess wrong. It is used exactly as given: say
 # origin/main to compare against origin's copy.
 #
-# It opens the main checkout, whichever of its worktrees it is run from, or the
-# repository itself when it is bare and has no checkout.
+# It opens the checkout it is run from, or the repository itself when it is
+# bare and has no checkout. `git -C <dir> review ...` runs it from <dir>.
 #
 # The git work here is the same everywhere. Opening VS Code is not, so that is
 # vscode-open-review, one per platform in home/<os>/bin.
