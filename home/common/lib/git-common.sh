@@ -1218,3 +1218,53 @@ run_plan() {
 $PLAN
 EOF
 }
+
+# ── review (git review) ─────────────────────────────────────────────────────
+
+# Percent-encodes a string for a URI, leaving the unreserved characters and /
+# alone. C locale so awk walks bytes, not characters, and a UTF-8 branch name
+# comes out as its bytes.
+uri_encode() {
+  printf '%s' "$1" | LC_ALL=C awk '
+    BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
+    {
+      for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1)
+        if (c ~ /[A-Za-z0-9._~\/-]/) printf "%s", c
+        else printf "%%%02X", ord[c]
+      }
+    }'
+}
+
+# The GitLens link that opens Search & Compare for <base>...<branch> in the
+# repository at <root>. The repository id segment is "-": GitLens finds the
+# repository from path= and does not check the id.
+review_link() {
+  printf 'vscode://eamodio.gitlens/link/r/-/compare/%s...%s?path=%s' \
+    "$(uri_encode "$2")" "$(uri_encode "$3")" "$(uri_encode "$1")"
+}
+
+# The folder VS Code opens: the top of the checkout git review is run from, or
+# the repository itself when it is bare and has no checkout. Finding the main
+# checkout from a linked worktree is not attempted: a repository cloned with
+# --separate-git-dir records no path back to it.
+review_folder() {
+  git rev-parse --show-toplevel 2>/dev/null || git rev-parse --absolute-git-dir
+}
+
+# Checks both refs before anything opens, so a mistyped name fails here rather
+# than as an empty comparison in VS Code. REVIEW_OPENER is the per-platform
+# launcher (vscode-open-review in home/<os>/bin); a case replaces it.
+#
+# Both names go into the link exactly as given: the caller says origin/main when
+# origin's copy is the base, since a local main can be behind or deleted. Search
+# & Compare lists files from the merge base of the two refs, so the comparison is
+# what the branch adds to the base, the way a pull request shows it.
+review_main() {
+  local ref root
+  for ref in "$1" "$2"; do
+    ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }
+  done
+  root=$(review_folder)
+  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$2" "$1")"
+}

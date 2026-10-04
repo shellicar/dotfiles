@@ -169,3 +169,20 @@ rather than ignored in the others.
 
 Standard output is the path and nothing else, so the `wt` shell function can capture it
 and `cd`, which a subprocess cannot do for its caller.
+
+### git review
+
+`git review <branch> <base>` opens the checkout it is run from in VS Code, or the
+repository itself when it is bare, and shows `<base>`
+against `<branch>` in GitLens's Search & Compare view. Both refs are checked first, and
+a name git does not know stops it before VS Code opens. The base is always given,
+because git does not record which branch another was cut from. Both names are
+used exactly as given, so a review against origin's copy says `origin/main`: a local
+`main` can be behind or deleted. Search & Compare lists files from the merge base of the
+two refs, so the comparison is what the branch adds to the base, the way a pull request
+shows it.
+
+Opening VS Code is per platform: `vscode-open-review` in `home/<os>/bin`. On WSL it
+opens the folder through a `vscode-remote://wsl+…` address and hands the GitLens link
+to Windows with `Start-Process`. The macOS and Linux ones refuse until each has been
+tried on that platform.

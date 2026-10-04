@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# git review: show <base> against <branch> in VS Code, in GitLens's Search &
+# Compare view.
+#
+#   git review <branch> <base>
+#
+# <base> is given, not worked out: git does not record which branch another was
+# cut from, and the branch's own log says "Created from HEAD" or a bare commit
+# id often enough to make a guess wrong. It is used exactly as given: say
+# origin/main to compare against origin's copy.
+#
+# It opens the checkout it is run from, or the repository itself when it is
+# bare and has no checkout. `git -C <dir> review ...` runs it from <dir>.
+#
+# The git work here is the same everywhere. Opening VS Code is not, so that is
+# vscode-open-review, one per platform in home/<os>/bin.
+
+set -eu
+
+DIR=$(cd "$(dirname "$0")" && pwd)
+TOOL='git review'
+VERBOSE=false
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/git-common.sh
+. "$DIR/../lib/git-common.sh"
+
+[ $# -eq 2 ] || { echo "usage: git review <branch> <base>" >&2; exit 64; }
+
+ensure_in_git_repository
+review_main "$1" "$2"
