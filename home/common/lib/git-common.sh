@@ -1246,9 +1246,9 @@ review_link() {
 
 # The folder VS Code opens: the main checkout, or the repository itself when it
 # is bare, also when run from a linked worktree, so every review of a repository
-# lands in the same window. Git lists it first in `worktree list`. The folder
-# above the common git directory is not used: in a submodule, a bare repository
-# or one cloned with --separate-git-dir it is somewhere else entirely.
+# lands in the same window. Git lists it first in `worktree list`. In a
+# submodule or a repository cloned with --separate-git-dir, git lists its own
+# data folder there instead of the checkout, and that is what this opens.
 review_folder() {
   git worktree list --porcelain | sed -n '1s/^worktree //p'
 }
