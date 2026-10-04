@@ -7,11 +7,10 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../fake-git.sh
 . "$TESTS/fake-git.sh"
 
-describe "a review uses origin's copy of the base"
+describe "a review compares against the base as given"
 
-# The local main is behind: the branch was cut from origin/main at B, and the
-# local main is still at A. Compared with the local main, B would be listed as
-# the branch's own, so the link names origin's copy.
+# origin/main exists and is ahead of the local main. The base is the caller's
+# choice: given main, the link names main, not origin's copy.
 commit A
 commit B A
 commit C B
@@ -29,4 +28,4 @@ opener() { printf '%s' "$2" > "$LINK"; }
 REVIEW_OPENER=opener
 
 review_main feature/x main || fail "review_main failed"
-assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/origin/main...feature/x?path=/repo'
+assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/main...feature/x?path=/repo'

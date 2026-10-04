@@ -1262,19 +1262,15 @@ review_folder() {
 # than as an empty comparison in VS Code. REVIEW_OPENER is the per-platform
 # launcher (vscode-open-review in home/<os>/bin); a case replaces it.
 #
-# The base side is origin's copy of the base when origin has one: a local main
-# that is behind where the branch was cut would list commits the branch was cut
-# after. With no remote copy (no remote, or a base never pushed) the local branch
-# is the only copy there is. Search & Compare lists files from the merge base of
-# the two refs, so the comparison is what the branch adds to the base as it is
-# now, the way a pull request shows it.
+# Both names go into the link exactly as given: the caller says origin/main when
+# origin's copy is the base, since a local main can be behind or deleted. Search
+# & Compare lists files from the merge base of the two refs, so the comparison is
+# what the branch adds to the base, the way a pull request shows it.
 review_main() {
-  local ref base root
+  local ref root
   for ref in "$1" "$2"; do
     ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }
   done
-  base=$2
-  if ref_exists "refs/remotes/origin/$2"; then base=origin/$2; fi
   root=$(review_folder)
-  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$base" "$1")"
+  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$2" "$1")"
 }

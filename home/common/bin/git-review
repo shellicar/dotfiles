@@ -7,7 +7,8 @@
 #
 # <base> is given, not worked out: git does not record which branch another was
 # cut from, and the branch's own log says "Created from HEAD" or a bare commit
-# id often enough to make a guess wrong.
+# id often enough to make a guess wrong. It is used exactly as given: say
+# origin/main to compare against origin's copy.
 #
 # It opens the main checkout, whichever of its worktrees it is run from, or the
 # repository itself when it is bare and has no checkout.
