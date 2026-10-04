@@ -183,4 +183,5 @@ commits in the branch's file list.
 
 Opening VS Code is per platform: `vscode-open-review` in `home/<os>/bin`. On WSL it
 opens the folder through a `vscode-remote://wsl+…` address and hands the GitLens link
-to Windows with `Start-Process`. The macOS one refuses until it has been tried on a Mac.
+to Windows with `Start-Process`. The macOS and Linux ones refuse until each has been
+tried on that platform.
