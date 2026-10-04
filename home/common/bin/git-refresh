@@ -486,8 +486,21 @@ draw() {
   width=${size##* }
   case "$height" in ''|*[!0-9]*) height=24 ;; esac
   case "$width" in ''|*[!0-9]*) width=80 ;; esac
-  avail=$((height - 5))
-  [ "$avail" -lt 3 ] && avail=3
+  # The section below the rows stays in view, so the rows get what is left.
+  # say_noted prints a blank line and its heading before its lines.
+  noted=0
+  while IFS= read -r line; do
+    [ -n "$line" ] && noted=$((noted + 1))
+  done <<EOF
+$NOTED
+EOF
+  [ "$noted" -gt 0 ] && noted=$((noted + 2))
+  avail=$((height - 5 - noted))
+  # TODO(claude): undecided: a section taller than the terminal on its own.
+  # One row is still shown, for the cursor, and the section runs past the
+  # bottom of the screen. The other ways are cutting the section to fit, with a
+  # line saying how many are hidden, or scrolling it as well.
+  [ "$avail" -lt 1 ] && avail=1
   text=$((width - 10))
   [ "$text" -lt 20 ] && text=20
 
@@ -520,6 +533,10 @@ draw() {
   done <<EOF
 $ROWS
 EOF
+
+  # What was looked at and has no valid action, which nothing on the list says
+  # otherwise. Not part of the list, so the cursor never reaches it.
+  say_noted
 
   last=$((TOP + avail - 1))
   [ "$last" -gt "$COUNT" ] && last=$COUNT
@@ -681,7 +698,7 @@ say_environment
 say_noted
 
 SAVED=$(stty -g)
-restore() { stty "$SAVED" 2>/dev/null; printf '%b[?2026l%b[?25h%b[?1049l' "$E" "$E" "$E"; }
+restore() { stty "$SAVED" 2>/dev/null; printf '%b[?2026l%b[?7h%b[?25h%b[?1049l' "$E" "$E" "$E" "$E"; }
 # Every signal that would otherwise kill this, because a process killed by one
 # never reaches the shell's exit path and so never runs the EXIT trap. What is
 # left behind is a terminal still in raw mode with the alternate screen up: no
@@ -697,7 +714,15 @@ trap 'restore; exit 143' TERM
 trap 'restore' EXIT
 
 stty -icanon -echo min 1 time 0
-printf '%b[?1049h%b[?25l' "$E" "$E"
+# Line wrap off while the picker is up, so a line wider than the terminal is cut
+# at the edge instead of taking a second row. draw counts one row per line of
+# the section below the list, which say_noted does not cut to the width.
+#
+# TODO(claude): undecided: how a section line wider than the terminal is kept
+# to one row. The terminal's line wrap is turned off for now, and restore turns
+# it back on. The other way is cutting each line to the width in say_noted,
+# which would cut the copy printed to the normal screen too.
+printf '%b[?1049h%b[?25l%b[?7l' "$E" "$E" "$E"
 
 VERDICT=quit
 while :; do
