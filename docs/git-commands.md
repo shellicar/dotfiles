@@ -176,7 +176,7 @@ and `cd`, which a subprocess cannot do for its caller.
 repository itself when it is bare, and shows `<base>`
 against `<branch>` in GitLens's Search & Compare view. Both refs are checked first, and
 a name git does not know stops it before VS Code opens. The base is always given,
-because git does not record which branch another was cut from. Both names are
+because git does not record which branch another was cut from. The base is
 used exactly as given, so a review against origin's copy says `origin/main`: a local
 `main` can be behind or deleted. The link hands GitLens the merge base of the base and
 the branch as a commit id, not the base's name: Search & Compare's file list diffs the
