@@ -324,13 +324,14 @@ filter_escape() {
 #           difference and pick a side;
 #   binary: the local version is renamed name-<host>.ext, so the resync brings
 #           Azure's version down under the original name and sends the renamed
-#           one up, and both reach every machine.
+#           one up, and both reach every machine. When the new name exists on
+#           either side, or the rename fails, it is treated like a text file.
 # Writes an rclone exclude line to <exclude file> for each file the resync must
 # leave alone. Without apply nothing is renamed, and the binary ones are
 # excluded too, so the dry run does not show them being overwritten.
 resolve_resync_conflicts() {
   local local_dir=$1 remote=$2 apply=$3 excludes=$4
-  local t path ls lt rs rt tmp copy host renamed
+  local t path ls lt rs rt tmp copy host renamed taken rc
   t=$(printf '\t')
   host=$(hostname)
   : > "$excludes"
@@ -341,15 +342,32 @@ resolve_resync_conflicts() {
     rclone_read copyto "$(remote_join "$remote" "$path")" "$copy" < /dev/null || { rm -rf "$tmp"; return 1; }
     if is_binary "$local_dir/$path" "$copy" < /dev/null; then
       renamed=$(host_name_for "$path" "$host")
+      # The new name is taken when it exists on either side; Azure's side
+      # counts as free only when rclone reports it not found.
+      taken=0
       if [ -e "$local_dir/$renamed" ]; then
-        # TODO(claude): undecided: what happens when name-<host>.ext already
-        # exists. Built: the file is left alone and listed like a text file.
+        taken=1
+      else
+        rc=0
+        rclone_read lsf "$(remote_join "$remote" "$renamed")" > /dev/null < /dev/null || rc=$?
+        case "$rc" in
+          0) taken=1 ;;
+          2) ;;
+          *) rm -rf "$tmp"; return 1 ;;
+        esac
+      fi
+      if [ "$taken" = 1 ]; then
         echo "binary file differs, and $renamed already exists, so it is left alone:"
         list_conflict "$local_dir" "$path" "$ls" "$lt" "$rs" "$rt"
         printf '/%s\n' "$(filter_escape "$path")" >> "$excludes"
       elif [ "$apply" = 1 ]; then
-        mv -- "$local_dir/$path" "$local_dir/$renamed"
-        echo "binary file differs: kept both, local version renamed $path → $renamed"
+        if mv -- "$local_dir/$path" "$local_dir/$renamed"; then
+          echo "binary file differs: kept both, local version renamed $path → $renamed"
+        else
+          echo "binary file differs, and it could not be renamed, so it is left alone:"
+          list_conflict "$local_dir" "$path" "$ls" "$lt" "$rs" "$rt"
+          printf '/%s\n' "$(filter_escape "$path")" >> "$excludes"
+        fi
       else
         # TODO(claude): undecided: the dry run leaves a binary conflict out
         # of bisync's dry run, so bisync's listing does not show the renamed

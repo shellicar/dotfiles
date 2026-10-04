@@ -96,6 +96,29 @@ an_md5_identical_file_is_not_a_conflict() {
   [ ! -e "$L/same-$HOST.txt" ] || fail "renamed although identical"
 }
 
+a_binary_that_cannot_be_renamed_is_not_overwritten() {
+  fresh norename
+  mkdir -p "$L/sub" "$R/sub"
+  printf 'LOCAL\000\001' > "$L/sub/photo.jpg"
+  printf 'AZURE\000\002' > "$R/sub/photo.jpg"
+  touch -t 202601010000 "$L/sub/photo.jpg"
+  touch -t 202602020000 "$R/sub/photo.jpg"
+  chmod 555 "$L/sub"
+  out=$(sync_folder "$L" "$R" 1 1 0 2>&1)
+  chmod 755 "$L/sub"
+  cmp -s "$R/sub/photo.jpg" <(printf 'AZURE\000\002') || fail "Azure's photo.jpg was overwritten by the local version"
+  case "$out" in *"kept both"*) fail "claims both were kept although the rename failed" ;; esac
+}
+
+a_host_named_copy_already_in_azure_is_not_overwritten() {
+  fresh remotehostcopy
+  printf 'LOCAL\000\001' > "$L/photo.jpg"
+  printf 'AZURE\000\002' > "$R/photo.jpg"
+  printf 'OLDCOPY\000\003' > "$R/photo-$HOST.jpg"
+  sync_folder "$L" "$R" 1 1 0 >/dev/null 2>&1
+  cmp -s "$R/photo-$HOST.jpg" <(printf 'OLDCOPY\000\003') || fail "Azure's photo-$HOST.jpg was overwritten"
+}
+
 # ── keep-local / keep-remote ────────────────────────────────────────────────
 
 keep_without_apply_writes_nothing() {
@@ -175,6 +198,8 @@ for t in \
   a_differing_text_file_is_left_alone_and_listed \
   a_differing_binary_file_keeps_both_versions \
   an_md5_identical_file_is_not_a_conflict \
+  a_binary_that_cannot_be_renamed_is_not_overwritten \
+  a_host_named_copy_already_in_azure_is_not_overwritten \
   keep_without_apply_writes_nothing \
   keep_without_apply_says_binary_for_a_binary_file \
   keep_local_with_apply_copies_local_to_azure \

@@ -15,12 +15,16 @@
 # --max-delete). --force lets it go ahead; without --apply it is still a dry
 # run.
 #
-# A resync never overwrites a file whose content differs on the two sides
-# (different MD5; matching MD5s count as the same file whatever the times say):
+# Before a resync, the files it finds on both sides with different content
+# (different MD5; matching MD5s count as the same file whatever the times say)
+# are taken out of bisync's hands, since its resync would copy the local
+# version over Azure's:
 #   - a text file is left alone on both sides and listed, with the diff,
 #     keep-local and keep-remote commands that resolve it;
 #   - a binary file (what git diff calls binary) keeps both versions: Azure's
-#     keeps the name and the local one is renamed name-<hostname>.ext.
+#     keeps the name and the local one is renamed name-<hostname>.ext. When
+#     that name is taken on either side, or the rename fails, it is left alone
+#     and listed like a text file.
 # keep-local and keep-remote print the direction and the difference, and copy
 # only with --apply. Azure's copy counts as absent only when rclone reports it
 # not found; any other failure to read it (sign-in, firewall, network) stops
