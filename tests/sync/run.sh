@@ -119,6 +119,25 @@ a_host_named_copy_already_in_azure_is_not_overwritten() {
   cmp -s "$R/photo-$HOST.jpg" <(printf 'OLDCOPY\000\003') || fail "Azure's photo-$HOST.jpg was overwritten"
 }
 
+# Azure's photo-<host>.jpg is a folder rclone cannot list, so looking the name
+# up fails with an error rather than "not found". The folder is filtered out
+# of the conflict check's listing, which would otherwise fail on it first and
+# stop the run before the lookup.
+a_failed_host_name_lookup_stops_the_resync() {
+  fresh lookupfails
+  printf 'LOCAL\000\001' > "$L/photo.jpg"
+  printf 'AZURE\000\002' > "$R/photo.jpg"
+  mkdir "$R/photo-$HOST.jpg"
+  chmod 000 "$R/photo-$HOST.jpg"
+  FILTERS+=(--exclude "/photo-$HOST.jpg/**")
+  local status=0
+  sync_folder "$L" "$R" 1 1 0 >/dev/null 2>&1 || status=$?
+  chmod 755 "$R/photo-$HOST.jpg"
+  [ "$status" != 0 ] || fail "the resync went ahead although the lookup failed"
+  cmp -s "$L/photo.jpg" <(printf 'LOCAL\000\001') || fail "the local photo.jpg was renamed or changed"
+  [ ! -e "$L/photo-$HOST.jpg" ] || fail "a local photo-$HOST.jpg was created"
+}
+
 # ── keep-local / keep-remote ────────────────────────────────────────────────
 
 keep_without_apply_writes_nothing() {
@@ -200,6 +219,7 @@ for t in \
   an_md5_identical_file_is_not_a_conflict \
   a_binary_that_cannot_be_renamed_is_not_overwritten \
   a_host_named_copy_already_in_azure_is_not_overwritten \
+  a_failed_host_name_lookup_stops_the_resync \
   keep_without_apply_writes_nothing \
   keep_without_apply_says_binary_for_a_binary_file \
   keep_local_with_apply_copies_local_to_azure \

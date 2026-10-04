@@ -17,8 +17,7 @@
 #
 # Before a resync, the files it finds on both sides with different content
 # (different MD5; matching MD5s count as the same file whatever the times say)
-# are taken out of bisync's hands, since its resync would copy the local
-# version over Azure's:
+# are handled here rather than by bisync:
 #   - a text file is left alone on both sides and listed, with the diff,
 #     keep-local and keep-remote commands that resolve it;
 #   - a binary file (what git diff calls binary) keeps both versions: Azure's
