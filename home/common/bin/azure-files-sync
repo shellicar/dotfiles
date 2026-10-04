@@ -2,17 +2,53 @@
 # Keep local folders and Azure Files shares in step, both ways, with
 # `rclone bisync`, signed in through the Azure CLI (`az login`).
 #
-#   azure-files-sync                     show what a sync would change
-#   azure-files-sync --apply             sync every pair
+#   azure-files-sync [--force]           show what a sync would change
+#   azure-files-sync --apply [--force]   sync every pair
 #   azure-files-sync --resync [--apply]  first sync of a pair on this machine,
 #                                        or when bisync asks for it: merges both
 #                                        sides and deletes nothing
+#   azure-files-sync diff <path>         how a local file differs from Azure's copy
+#   azure-files-sync keep-local <path> [--apply]   copy the local file over Azure's
+#   azure-files-sync keep-remote <path> [--apply]  copy Azure's file over the local one
 #
-# Settings come from ~/.config/azure-files-sync/config, sourced as bash:
+# A sync stops before deleting more than 75% of a folder's files (bisync's
+# --max-delete). --force lets it go ahead; without --apply it is still a dry
+# run.
+#
+# Before a resync, the files it finds on both sides with different content
+# (different MD5; matching MD5s count as the same file whatever the times say)
+# are handled here rather than by bisync:
+#   - a text file is left alone on both sides and listed, with the diff,
+#     keep-local and keep-remote commands that resolve it;
+#   - a binary file (what git diff calls binary) keeps both versions: Azure's
+#     keeps the name and the local one is renamed name-<hostname>.ext. When
+#     that name is taken on either side, or the rename fails, it is left alone
+#     and listed like a text file.
+# keep-local and keep-remote print the direction and the difference, and copy
+# only with --apply. Azure's copy counts as absent only when rclone reports it
+# not found; any other failure to read it (sign-in, firewall, network) stops
+# diff, keep-local, keep-remote and a resync's conflict check with an error.
+#
+# After a sync, where both sides changed a repository's .git/index and bisync
+# kept both as index.conflict1 and index.conflict2, the newest becomes
+# .git/index and the others are removed. Any other file changed on both sides
+# keeps bisync's default: both versions, renamed.
+#
+# A folder is refused while bisync's lock file for it exists: as already
+# running when the process in the lock is alive, otherwise with the command to
+# delete the lock. Locks are never removed or expired by this script.
+#
+# node_modules, macOS's ._* and .DS_Store files are not synced, and symlinks
+# are skipped.
+#
+# Settings come from ${XDG_CONFIG_HOME:-~/.config}/azure-files-sync/config,
+# sourced as bash:
 #
 #   ACCOUNT=mystorageaccount              # <account>.file.core.windows.net
 #   SYNC=("$HOME/docs:docs/docs"          # local folder : share/path
 #         "$HOME/notes:general/notes")
+#
+# Each entry splits at its last colon, so a Windows folder (C:/Users/...) works.
 #
 # The signed-in user needs the "Storage File Data Privileged Contributor" role
 # on the storage account, and the account's firewall must allow this machine's
@@ -21,7 +57,26 @@
 # --resync.
 set -euo pipefail
 
+DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/azure-files-sync.sh
+. "$DIR/../lib/azure-files-sync.sh"
+
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/azure-files-sync/config"
+
+usage() {
+  cat >&2 <<EOF
+Usage: azure-files-sync [--resync] [--force] [--apply]
+       azure-files-sync diff <path>
+       azure-files-sync keep-local <path> [--apply]
+       azure-files-sync keep-remote <path> [--apply]
+
+Without --apply nothing changes. A sync stops before deleting more than 75%
+of a folder's files; --force lets it go ahead, and is still a dry run without
+--apply.
+EOF
+  exit 1
+}
 
 command -v rclone >/dev/null || { echo "rclone is not installed" >&2; exit 1; }
 [ -f "$CONFIG" ] || { echo "missing $CONFIG (see the header of $0)" >&2; exit 1; }
@@ -31,33 +86,72 @@ SYNC=()
 : "${ACCOUNT:?ACCOUNT is not set in $CONFIG}"
 [ "${#SYNC[@]}" -gt 0 ] || { echo "SYNC is empty in $CONFIG" >&2; exit 1; }
 
-apply=0 resync=0
+export RCLONE_AZUREFILES_ACCOUNT="$ACCOUNT"
+export RCLONE_AZUREFILES_USE_AZ=true
+default_filters
+
+# Finds the SYNC entry whose local folder holds <path>, and sets LOCAL_FILE
+# and REMOTE_FILE.
+locate() {
+  local target dir pair rel
+  dir=$(cd "$(dirname "$1")" 2>/dev/null && pwd) || { echo "no such folder: $(dirname "$1")" >&2; exit 1; }
+  target="$dir/$(basename "$1")"
+  for pair in "${SYNC[@]}"; do
+    split_entry "$pair"
+    dir=$(cd "$LOCAL_DIR" 2>/dev/null && pwd) || continue
+    case "$target" in
+      "$dir"/*)
+        rel=${target#"$dir"/}
+        LOCAL_FILE=$target
+        REMOTE_FILE=$(remote_join "$REMOTE" "$rel")
+        return 0 ;;
+    esac
+  done
+  echo "$1 is not inside any synced folder in $CONFIG" >&2
+  exit 1
+}
+
+case "${1:-}" in
+  diff)
+    [ "$#" -eq 2 ] || usage
+    locate "$2"
+    show_diff "$LOCAL_FILE" "$REMOTE_FILE"
+    exit 0 ;;
+  keep-local|keep-remote)
+    side=${1#keep-}
+    shift
+    path='' apply=0
+    for arg in "$@"; do
+      case "$arg" in
+        --apply) apply=1 ;;
+        -*) usage ;;
+        *) [ -z "$path" ] || usage; path=$arg ;;
+      esac
+    done
+    [ -n "$path" ] || usage
+    locate "$path"
+    keep_side "$side" "$LOCAL_FILE" "$REMOTE_FILE" "$apply"
+    exit $? ;;
+esac
+
+apply=0 resync=0 force=0
 for arg in "$@"; do
   case "$arg" in
     --apply) apply=1 ;;
     --resync) resync=1 ;;
-    *) echo "Usage: $0 [--resync] [--apply]" >&2; exit 1 ;;
+    --force) force=1 ;;
+    *) usage ;;
   esac
 done
 
-export RCLONE_AZUREFILES_ACCOUNT="$ACCOUNT"
-export RCLONE_AZUREFILES_USE_AZ=true
-
-flags=(--resilient --recover --create-empty-src-dirs)
-[ "$resync" = 1 ] && flags+=(--resync)
-[ "$apply" = 1 ] || flags+=(--dry-run)
+WORKDIR=$(default_workdir)
 
 status=0
 for pair in "${SYNC[@]}"; do
-  local_dir=${pair%%:*}
-  remote=${pair#*:}
-  share=${remote%%/*}
-  path=${remote#"$share"}
-  echo "=== $local_dir <-> $share$path ==="
-  # share_name is a backend setting, not part of the path, so each pair names
-  # its share in an on-the-fly remote.
-  rclone bisync "$local_dir" ":azurefiles,share_name=$share:${path#/}" "${flags[@]}" || status=$?
+  split_entry "$pair"
+  echo "=== $LOCAL_DIR <-> $SHARE/$SHARE_PATH ==="
+  sync_folder "$LOCAL_DIR" "$REMOTE" "$apply" "$resync" "$force" || status=$?
 done
 
-[ "$apply" = 1 ] || echo "dry run: re-run with --apply to sync"
+[ "$apply" = 1 ] || [ "$status" != 0 ] || echo "dry run: re-run with --apply to sync"
 exit "$status"

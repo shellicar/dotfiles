@@ -78,7 +78,7 @@ logic: extract it here instead.
 - `git-review`: show a branch against its base in VS Code, in GitLens's Search
   & Compare view
 - `azure-files-sync`: keep local folders and Azure Files shares in step, both
-  ways, as set in `~/.config/azure-files-sync/`
+  ways, as set in `${XDG_CONFIG_HOME:-~/.config}/azure-files-sync/`
 - `gitversion` — GitVersion wrapper
 - `tmux-snapshot`, `tmux-snapshot-watch` — capture and rehydrate a tmux server's
   layout
@@ -184,6 +184,14 @@ pure suite can only reach the first; and any claim about what git itself does,
 which is checked by predicting it and then attempting the operation. The
 container is what makes running it safe: it deletes branches and worktrees for
 real, and none of them are yours. It skips with a message when docker is absent.
+
+`tests/sync/run.sh` tests `azure-files-sync`'s library, and is not part of
+`./test.sh` either. It needs rclone and git, and runs the real rclone (bisync
+included) against two local folders it makes, one standing in for the Azure
+Files share, so it never contacts Azure. It covers how a resync treats files
+that differ on the two sides, and `keep-local` / `keep-remote`. Run it after
+changing `azure-files-sync` or `home/common/lib/azure-files-sync.sh`. A missing
+rclone exits 64; it never skips.
 
 A case in `tests/cases/` builds no repository. It sources the library, replaces
 `git` with a shell function backed by a fake commit graph, and asserts on what
