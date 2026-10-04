@@ -1269,6 +1269,7 @@ review_folder() {
 # the two refs, so the comparison is what the branch adds to the base as it is
 # now, the way a pull request shows it.
 review_main() {
+  local ref base root
   for ref in "$1" "$2"; do
     ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }
   done

@@ -21,4 +21,6 @@ DIR=$(cd "$(dirname "$0")" && pwd)
 [ $# -eq 2 ] || { echo "usage: vscode-open-review <folder> <link>" >&2; exit 64; }
 
 code --folder-uri "vscode-remote://wsl+$WSL_DISTRO_NAME$(uri_encode "$1")"
-powershell.exe -NoProfile -Command "Start-Process '$2'"
+# PowerShell writes a ' inside a single-quoted string as ''.
+link=$(printf '%s' "$2" | sed "s/'/''/g")
+powershell.exe -NoProfile -Command "Start-Process '$link'"
