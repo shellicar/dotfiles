@@ -75,6 +75,9 @@ logic: extract it here instead.
 - `git-main` — put the default branch at origin's tip and switch to it
 - `git-wt-create` — create the sibling worktree `<repo>--<leaf>` and print its
   path
+- `git-review`: show a branch against its base in GitLens's Search & Compare
+  view; the VS Code launch is per platform, `vscode-open-review` in
+  `home/<os>/bin`
 - `azure-files-sync`: keep local folders and Azure Files shares in step, both
   ways, as set in `~/.config/azure-files-sync/`
 - `gitversion` — GitVersion wrapper

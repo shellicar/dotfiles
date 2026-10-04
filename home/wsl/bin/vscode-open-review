@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# vscode-open-review <folder> <link>: open <folder> in VS Code on Windows, then
+# hand it <link>. git review calls this; see that command for the link.
+#
+# `code <folder>` is not used: the launcher passes the Linux path to Windows VS
+# Code, which opens it as a new empty file. A vscode-remote folder URI is not
+# translated. `code --open-url` is not used either: inside WSL the launcher
+# reads the link as a file to open. Windows hands the link to the VS Code window
+# focused last, which the folder step has just made this one.
+#
+# The pause is for a window that was not already open: GitLens needs a moment
+# to start before it can take the link. Three seconds is a first guess.
+
+set -eu
+
+DIR=$(cd "$(dirname "$0")" && pwd)
+# ../lib is ~/lib once install.sh has linked home/wsl/bin and home/common/lib
+# into $HOME. Run from the repository path it is missing.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../common/lib/git-common.sh
+. "$DIR/../lib/git-common.sh"
+
+[ $# -eq 2 ] || { echo "usage: vscode-open-review <folder> <link>" >&2; exit 64; }
+
+code --folder-uri "vscode-remote://wsl+$WSL_DISTRO_NAME$(uri_encode "$1")"
+sleep 3
+powershell.exe -NoProfile -Command "Start-Process '$2'"

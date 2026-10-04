@@ -1,0 +1,8 @@
+#!/bin/sh
+#
+# vscode-open-review <folder> <link>: open <folder> in VS Code, then hand it
+# <link>. Not built for macOS yet: the WSL version is the reference, and this
+# one needs trying on a Mac before it can be trusted.
+
+echo "vscode-open-review: not supported on macOS yet" >&2
+exit 1

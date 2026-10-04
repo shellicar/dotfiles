@@ -1218,3 +1218,45 @@ run_plan() {
 $PLAN
 EOF
 }
+
+# ── review (git review) ─────────────────────────────────────────────────────
+
+# Percent-encodes a string for a URI, leaving the unreserved characters and /
+# alone. C locale so awk walks bytes, not characters, and a UTF-8 branch name
+# comes out as its bytes.
+uri_encode() {
+  printf '%s' "$1" | LC_ALL=C awk '
+    BEGIN { for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i }
+    {
+      for (i = 1; i <= length($0); i++) {
+        c = substr($0, i, 1)
+        if (c ~ /[A-Za-z0-9._~\/-]/) printf "%s", c
+        else printf "%%%02X", ord[c]
+      }
+    }'
+}
+
+# The GitLens link that opens Search & Compare for <base>...<branch> in the
+# repository at <root>. The repository id segment is "-": GitLens finds the
+# repository from path= and does not check the id.
+review_link() {
+  printf 'vscode://eamodio.gitlens/link/r/-/compare/%s...%s?path=%s' \
+    "$(uri_encode "$2")" "$(uri_encode "$3")" "$(uri_encode "$1")"
+}
+
+# The main checkout's root, also when run from a linked worktree, so every
+# review of a repository lands in the same VS Code window.
+main_checkout_root() {
+  dirname "$(git rev-parse --path-format=absolute --git-common-dir)"
+}
+
+# Checks both refs before anything opens, so a mistyped name fails here rather
+# than as an empty comparison in VS Code. REVIEW_OPENER is the per-platform
+# launcher (vscode-open-review in home/<os>/bin); a case replaces it.
+review_main() {
+  for ref in "$1" "$2"; do
+    ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }
+  done
+  root=$(main_checkout_root)
+  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$2" "$1")"
+}
