@@ -101,6 +101,16 @@ all, while a fast-forward or a merge refuses only when the incoming commits touc
 you have touched. Whether a stash is needed is worked out before anything is attempted,
 and the operation says so when it is.
 
+**A lock stops a removal, and nothing else.** git refuses to remove, move or prune a
+worktree locked with `git worktree lock`, and Claude Code locks the worktrees it
+creates. Every lock blocks, whether or not whatever took it is still running. The
+removal is shown as unavailable with `locked:` and git's reason beside it, in the same
+place uncommitted changes are named. A lock does not stop an update: `git refresh`
+still offers one and `git spread` still makes it.
+
+**When git refuses a removal, what it said is shown** under the line reporting it,
+every line of it.
+
 **A remote that has moved stops an update.** If the branch's own remote holds commits
 the branch does not, a rebase would replay and force-push over them, and
 `--force-with-lease` does not prevent it: the lease compares against the remote-tracking

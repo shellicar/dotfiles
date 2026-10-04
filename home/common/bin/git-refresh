@@ -197,7 +197,7 @@ EOF
     # No update for a branch whose work is already in the trunk. There is
     # nothing to bring in, and replaying its commits onto a trunk that already
     # has their content duplicates them and pushes them to a branch the merge
-    # deleted. An unclean worktree cannot be updated either, and says so once.
+    # deleted.
     #
     # review is the same case wearing a different number. Its older commits are
     # in main, usually squashed, so a rebase from the fork point replays those
@@ -209,6 +209,10 @@ EOF
     # because that destroys work. An update only has to get past git, which
     # refuses far less than a dirty tree suggests, and update_needs_stash is
     # what decides which.
+    #
+    # Nor is a locked one. git refuses to remove, move or prune a locked
+    # worktree and nothing else, so the lock is in block and stops the removal
+    # row only.
     if [ "$behind" != 0 ] &&
        [ "$class" != merged ] && [ "$class" != review ]; then
       # Asked before the strategy, because the strategy is a rebase and a rebase
@@ -482,8 +486,18 @@ draw() {
   width=${size##* }
   case "$height" in ''|*[!0-9]*) height=24 ;; esac
   case "$width" in ''|*[!0-9]*) width=80 ;; esac
-  avail=$((height - 5))
-  [ "$avail" -lt 3 ] && avail=3
+  # The frame never runs past the bottom of the pane, or the terminal scrolls
+  # and takes the header and the cursor row off the top. The header and the
+  # footer take four lines and one is spare, so the rows and the section share
+  # the rest. The rows come first: they are what you act on.
+  budget=$((height - 5))
+  avail=$COUNT
+  [ "$avail" -gt "$budget" ] && avail=$budget
+  # A pane under six lines is too short for the header, one row and the
+  # footer. One row is drawn anyway, so there the frame is taller than the pane.
+  [ "$avail" -lt 1 ] && avail=1
+  # The section gets what is left, and say_noted cuts itself to fit.
+  room=$((budget - avail))
   text=$((width - 10))
   [ "$text" -lt 20 ] && text=20
 
@@ -517,6 +531,10 @@ draw() {
 $ROWS
 EOF
 
+  # What was looked at and has no valid action, which nothing on the list says
+  # otherwise. Not part of the list, so the cursor never reaches it.
+  say_noted "$room"
+
   last=$((TOP + avail - 1))
   [ "$last" -gt "$COUNT" ] && last=$COUNT
   printf '\n%b%s selected   showing %s-%s of %s%b\n' \
@@ -542,8 +560,12 @@ readkey() {
     case "$k" in A) KEY=up ;; B) KEY=down ;; *) KEY=other ;; esac
     return 0
   fi
+  # Nothing read is the read timing out, which the picker's terminal settings
+  # make it do several times a second so a resize is noticed between keys.
+  # Enter reads as nothing too, since $() drops the newline, and it does
+  # nothing either way.
   case "$k" in
-    '')  KEY=enter ;;
+    '')  KEY=none ;;
     ' ') KEY=space ;;
     q|Q) KEY=quit ;;
     r|R) KEY=run ;;
@@ -552,6 +574,40 @@ readkey() {
     *)   KEY=other ;;
   esac
   return 0
+}
+
+# Draws, reads a key, acts on it, and draws again, until you run or quit.
+# Leaves VERDICT set to run or quit.
+#
+# A resize redraws at the new size without waiting for a key. The trap only
+# notes it: a trap runs once the command the shell is waiting on returns, and
+# dd ignores the signal, so readkey's read is what has to come back. It does,
+# because the picker's terminal settings make a read with nothing to read time
+# out (stty min 0 time 2). A timeout with no resize redraws nothing.
+picker_loop() {
+  RESIZED=no
+  trap 'RESIZED=yes' WINCH
+  VERDICT=quit
+  while :; do
+    derive
+    [ "$CUR" -gt "$COUNT" ] && CUR=$COUNT
+    [ "$CUR" -lt 1 ] && CUR=1
+    RESIZED=no
+    draw
+    while :; do
+      readkey
+      [ "$KEY" = none ] && [ "$RESIZED" = no ] && continue
+      break
+    done
+    case "$KEY" in
+      up)    [ "$CUR" -gt 1 ] && CUR=$((CUR - 1)) ;;
+      down)  [ "$CUR" -lt "$COUNT" ] && CUR=$((CUR + 1)) ;;
+      space) toggle_current ;;
+      run)   VERDICT=run; break ;;
+      quit)  VERDICT=quit; break ;;
+    esac
+  done
+  trap - WINCH
 }
 
 # What is selected, in the order it will happen. Printed before the countdown as
@@ -593,16 +649,37 @@ $ROWS
 EOF
 }
 
+# With a number, the section takes at most that many lines, its blank line and
+# heading included. Entries that do not fit are counted on a last line instead,
+# since the full section is printed again to the normal screen.
 say_noted() {
   [ -z "$NOTED" ] && return 0
+  lines=${1:-}; total=0; shown=0
+  while IFS="$TAB" read -r nm _; do
+    [ -n "$nm" ] && total=$((total + 1))
+  done <<EOF
+$NOTED
+EOF
+  fit=$total
+  if [ -n "$lines" ] && [ $((total + 2)) -gt "$lines" ]; then
+    # Too little room for the blank line, the heading and the count, so the
+    # section is left out. It is still printed to the normal screen.
+    [ "$lines" -lt 3 ] && return 0
+    fit=$((lines - 3))
+  fi
   printf '\n%bLooked at, no valid action%b\n' "$BOLD" "$RESET"
   while IFS="$TAB" read -r nm cls mt w; do
     [ -z "$nm" ] && continue
+    [ "$shown" -ge "$fit" ] && break
+    shown=$((shown + 1))
     class_icon "$cls"
     printf '  %b %b%s%b %b  %b%s%b\n' "$CICON" "$DIM" "$nm" "$RESET" "$mt" "$DIM" "$w" "$RESET"
   done <<EOF
 $NOTED
 EOF
+  [ "$shown" -lt "$total" ] &&
+    printf '  %b+%s more, shown after you quit%b\n' "$DIM" "$((total - shown))" "$RESET"
+  return 0
 }
 
 # ── picking, then doing ─────────────────────────────────────────────────────
@@ -677,7 +754,7 @@ say_environment
 say_noted
 
 SAVED=$(stty -g)
-restore() { stty "$SAVED" 2>/dev/null; printf '%b[?2026l%b[?25h%b[?1049l' "$E" "$E" "$E"; }
+restore() { stty "$SAVED" 2>/dev/null; printf '%b[?2026l%b[?7h%b[?25h%b[?1049l' "$E" "$E" "$E" "$E"; }
 # Every signal that would otherwise kill this, because a process killed by one
 # never reaches the shell's exit path and so never runs the EXIT trap. What is
 # left behind is a terminal still in raw mode with the alternate screen up: no
@@ -692,24 +769,16 @@ trap 'restore; exit 131' QUIT
 trap 'restore; exit 143' TERM
 trap 'restore' EXIT
 
-stty -icanon -echo min 1 time 0
-printf '%b[?1049h%b[?25l' "$E" "$E"
+# min 0 time 2: a read with nothing to read gives up after 0.2s, so picker_loop
+# can notice a resize between keys.
+stty -icanon -echo min 0 time 2
+# Line wrap off while the picker is up, so a line wider than the terminal is cut
+# at the edge instead of taking a second row. draw counts one row per line of
+# the section below the list, which say_noted does not cut to the width.
+# restore turns line wrap back on.
+printf '%b[?1049h%b[?25l%b[?7l' "$E" "$E" "$E"
 
-VERDICT=quit
-while :; do
-  derive
-  [ "$CUR" -gt "$COUNT" ] && CUR=$COUNT
-  [ "$CUR" -lt 1 ] && CUR=1
-  draw
-  readkey
-  case "$KEY" in
-    up)    [ "$CUR" -gt 1 ] && CUR=$((CUR - 1)) ;;
-    down)  [ "$CUR" -lt "$COUNT" ] && CUR=$((CUR + 1)) ;;
-    space) toggle_current ;;
-    run)   VERDICT=run; break ;;
-    quit)  VERDICT=quit; break ;;
-  esac
-done
+picker_loop
 
 restore
 trap - EXIT HUP INT QUIT TERM
