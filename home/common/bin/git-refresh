@@ -486,21 +486,20 @@ draw() {
   width=${size##* }
   case "$height" in ''|*[!0-9]*) height=24 ;; esac
   case "$width" in ''|*[!0-9]*) width=80 ;; esac
-  # The section below the rows stays in view, so the rows get what is left.
-  # say_noted prints a blank line and its heading before its lines.
-  noted=0
-  while IFS= read -r line; do
-    [ -n "$line" ] && noted=$((noted + 1))
-  done <<EOF
-$NOTED
-EOF
-  [ "$noted" -gt 0 ] && noted=$((noted + 2))
-  avail=$((height - 5 - noted))
-  # TODO(claude): undecided: a section taller than the terminal on its own.
-  # One row is still shown, for the cursor, and the section runs past the
-  # bottom of the screen. The other ways are cutting the section to fit, with a
-  # line saying how many are hidden, or scrolling it as well.
+  # The frame never runs past the bottom of the pane, or the terminal scrolls
+  # and takes the header and the cursor row off the top. The header and the
+  # footer take four lines and one is spare, so the rows and the section share
+  # the rest. The rows come first: they are what you act on.
+  budget=$((height - 5))
+  avail=$COUNT
+  [ "$avail" -gt "$budget" ] && avail=$budget
+  # TODO(claude): undecided: a pane under six lines, too short for the header,
+  # one row and the footer. One row is drawn anyway, so the frame is taller
+  # than the pane. The other way is drawing fewer rows than one, or dropping
+  # the header or the footer.
   [ "$avail" -lt 1 ] && avail=1
+  # The section gets what is left, and say_noted cuts itself to fit.
+  room=$((budget - avail))
   text=$((width - 10))
   [ "$text" -lt 20 ] && text=20
 
@@ -536,7 +535,7 @@ EOF
 
   # What was looked at and has no valid action, which nothing on the list says
   # otherwise. Not part of the list, so the cursor never reaches it.
-  say_noted
+  say_noted "$room"
 
   last=$((TOP + avail - 1))
   [ "$last" -gt "$COUNT" ] && last=$COUNT
@@ -614,16 +613,38 @@ $ROWS
 EOF
 }
 
+# With a number, the section takes at most that many lines, its blank line and
+# heading included. Entries that do not fit are counted on a last line instead,
+# since the full section is printed again to the normal screen.
 say_noted() {
   [ -z "$NOTED" ] && return 0
+  lines=${1:-}; total=0; shown=0
+  while IFS="$TAB" read -r nm _; do
+    [ -n "$nm" ] && total=$((total + 1))
+  done <<EOF
+$NOTED
+EOF
+  fit=$total
+  if [ -n "$lines" ] && [ $((total + 2)) -gt "$lines" ]; then
+    # TODO(claude): undecided: too little room for the blank line, the heading
+    # and the count. The section is left out of the picker for now. The other
+    # way is a single line counting what is hidden.
+    [ "$lines" -lt 3 ] && return 0
+    fit=$((lines - 3))
+  fi
   printf '\n%bLooked at, no valid action%b\n' "$BOLD" "$RESET"
   while IFS="$TAB" read -r nm cls mt w; do
     [ -z "$nm" ] && continue
+    [ "$shown" -ge "$fit" ] && break
+    shown=$((shown + 1))
     class_icon "$cls"
     printf '  %b %b%s%b %b  %b%s%b\n' "$CICON" "$DIM" "$nm" "$RESET" "$mt" "$DIM" "$w" "$RESET"
   done <<EOF
 $NOTED
 EOF
+  [ "$shown" -lt "$total" ] &&
+    printf '  %b+%s more, shown after you quit%b\n' "$DIM" "$((total - shown))" "$RESET"
+  return 0
 }
 
 # ── picking, then doing ─────────────────────────────────────────────────────

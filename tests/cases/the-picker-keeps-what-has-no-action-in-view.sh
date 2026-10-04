@@ -5,7 +5,7 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../harness.sh
 . "$TESTS/harness.sh"
 
-describe "the picker draws what has no valid action below its rows, and the rows give way to keep it in view"
+describe "the picker draws what has no valid action below its rows"
 
 # A worktree with no branch that is locked or dirty has no row on the list, so
 # this section is the only place it is said. Printed only before the picker
@@ -19,8 +19,8 @@ guard_path
 # shellcheck source=../../home/common/bin/git-refresh
 . "$REPO/home/common/bin/git-refresh"
 
-# A terminal 12 rows high.
-stty() { [ "$1" = size ] && { echo '12 80'; return 0; }; return 1; }
+# A terminal 15 rows high: enough for the six rows and the whole section.
+stty() { [ "$1" = size ] && { echo '15 80'; return 0; }; return 1; }
 
 # Six branches with an update each, so six rows on the list.
 #
@@ -54,6 +54,5 @@ order=$(printf '%s\n' "$screen" | awk '
   END { print (r && s && f && r < s && s < f) ? "in order" : "out of order" }')
 assert_eq "$order" 'in order'
 
-# 12 rows: header, blank and footer take 4, one is spare, and the section takes
-# 4 (a blank, its heading, two lines), which leaves 3 for the list.
-assert_contains "$screen" 'showing 1-3 of 6'
+assert_contains "$screen" 'showing 1-6 of 6'
+assert_not_contains "$screen" 'more, shown after you quit'
