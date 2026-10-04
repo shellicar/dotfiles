@@ -10,7 +10,8 @@ REPO=$(cd "$TESTS/.." && pwd)
 describe "a review compares against the base as given"
 
 # origin/main exists and is ahead of the local main. The base is the caller's
-# choice: given main, the link names main, not origin's copy.
+# choice: given main, the link starts from where the branch left main (A), not
+# where it left origin's copy (B).
 commit A
 commit B A
 commit C B
@@ -28,4 +29,4 @@ opener() { printf '%s' "$2" > "$LINK"; }
 REVIEW_OPENER=opener
 
 review_main feature/x main || fail "review_main failed"
-assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/main...feature/x?path=/repo'
+assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/A...feature/x?path=/repo'

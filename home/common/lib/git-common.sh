@@ -1256,15 +1256,21 @@ review_folder() {
 # than as an empty comparison in VS Code. REVIEW_OPENER is the per-platform
 # launcher (vscode-open-review in home/<os>/bin); a case replaces it.
 #
-# Both names go into the link exactly as given: the caller says origin/main when
-# origin's copy is the base, since a local main can be behind or deleted. Search
-# & Compare lists files from the merge base of the two refs, so the comparison is
-# what the branch adds to the base, the way a pull request shows it.
+# The base is used exactly as given: the caller says origin/main when origin's
+# copy is the base, since a local main can be behind or deleted. The link's base
+# side is the merge base of that and the branch, as a commit id, not the base's
+# name. Search & Compare's file list diffs the two refs' tips directly (read
+# from GitLens 19.3.0's source), so a base that has moved on since the branch
+# was cut would show what it gained as if the branch had deleted it. From the
+# merge base, the list is what the branch adds, the way a pull request shows it.
 review_main() {
-  local ref root
+  local ref root fork
   for ref in "$1" "$2"; do
     ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }
   done
+  # merge-base fails silently when the refs share no history; git diff says
+  # why ("no merge base"), so its error is the one shown.
+  fork=$(git merge-base "$2" "$1") || { git diff --quiet "$2...$1"; return 1; }
   root=$(review_folder)
-  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$2" "$1")"
+  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$1")"
 }

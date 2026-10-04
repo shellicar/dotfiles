@@ -10,7 +10,7 @@ REPO=$(cd "$TESTS/.." && pwd)
 describe "a review uses the local base when origin has none"
 
 # No remote copy of the base: no remote at all, or a base never pushed. The
-# local branch is the only copy, so the link names it as given.
+# local branch is the only copy, so the merge base is found from it as given.
 commit A
 commit B A
 commit C A
@@ -27,4 +27,4 @@ opener() { printf '%s' "$2" > "$LINK"; }
 REVIEW_OPENER=opener
 
 review_main feature/x main || fail "review_main failed"
-assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/main...feature/x?path=/repo'
+assert_eq "$(cat "$LINK")" 'vscode://eamodio.gitlens/link/r/-/compare/A...feature/x?path=/repo'
