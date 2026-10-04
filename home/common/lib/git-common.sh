@@ -1244,10 +1244,13 @@ review_link() {
     "$(uri_encode "$2")" "$(uri_encode "$3")" "$(uri_encode "$1")"
 }
 
-# The main checkout's root, also when run from a linked worktree, so every
-# review of a repository lands in the same VS Code window.
-main_checkout_root() {
-  dirname "$(git rev-parse --path-format=absolute --git-common-dir)"
+# The folder VS Code opens: the main checkout, or the repository itself when it
+# is bare, also when run from a linked worktree, so every review of a repository
+# lands in the same window. Git lists it first in `worktree list`. The folder
+# above the common git directory is not used: in a submodule, a bare repository
+# or one cloned with --separate-git-dir it is somewhere else entirely.
+review_folder() {
+  git worktree list --porcelain | sed -n '1s/^worktree //p'
 }
 
 # Checks both refs before anything opens, so a mistyped name fails here rather
@@ -1265,6 +1268,6 @@ review_main() {
   done
   tip=$(git rev-parse --verify --quiet "$1")
   fork=$(git merge-base "$2" "$1") || { echo "$TOOL: $1 and $2 share no history" >&2; return 1; }
-  root=$(main_checkout_root)
+  root=$(review_folder)
   "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$tip")"
 }

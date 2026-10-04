@@ -22,7 +22,7 @@ guard_path
 # shellcheck source=../../home/common/lib/git-common.sh
 . "$REPO/home/common/lib/git-common.sh"
 
-main_checkout_root() { printf '/repo'; }
+review_folder() { printf '/repo'; }
 LINK=$WORK/link
 opener() { printf '%s' "$2" > "$LINK"; }
 REVIEW_OPENER=opener

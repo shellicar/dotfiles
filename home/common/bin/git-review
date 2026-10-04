@@ -9,7 +9,8 @@
 # cut from, and the branch's own log says "Created from HEAD" or a bare commit
 # id often enough to make a guess wrong.
 #
-# It opens the main checkout's root, also when run from a worktree. Search &
+# It opens the main checkout, or the repository itself when it is bare, also
+# when run from a worktree. Search &
 # Compare shows the branch's files whichever folder is open, so one window per
 # repository serves every review.
 #
