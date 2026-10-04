@@ -1253,10 +1253,17 @@ main_checkout_root() {
 # Checks both refs before anything opens, so a mistyped name fails here rather
 # than as an empty comparison in VS Code. REVIEW_OPENER is the per-platform
 # launcher (vscode-open-review in home/<os>/bin); a case replaces it.
+#
+# GitLens is handed commit ids, never names. A name moves: a comparison against
+# "main" made while the local main was behind listed commits already merged as
+# the branch's own. The base side is the fork point, so the comparison is what
+# the branch added, whatever GitLens makes of the separator.
 review_main() {
   for ref in "$1" "$2"; do
     ref_exists "$ref" || { echo "$TOOL: no such branch or commit: $ref" >&2; return 1; }
   done
+  tip=$(git rev-parse --verify --quiet "$1")
+  fork=$(git merge-base "$2" "$1") || { echo "$TOOL: $1 and $2 share no history" >&2; return 1; }
   root=$(main_checkout_root)
-  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$2" "$1")"
+  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$tip")"
 }
