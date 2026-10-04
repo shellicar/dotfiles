@@ -53,7 +53,7 @@
 # uncommitted, on a ref, or open PR: something there is still going on.
 #
 #   locked      → keep
-#   uncommitted → keep     finished → remove
+#   uncommitted → keep      finished → remove
 #   live        → keep      neither  → unsure, said plainly rather than guessed
 #
 # ON A REF IS A KEEP, NEVER A REMOVE. A branch still holding the commit says the
