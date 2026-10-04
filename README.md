@@ -58,12 +58,13 @@ Sourced through `load.sh` in two phases:
   in `.gitconfig.d/` selected by `includeIf "hasconfig:remote.*.url:…"`.
 - **Global ignore** is managed: `core.excludesfile` → `~/dotfiles/.gitignore_global`
   — the always-never-commit bits: `.DS_Store`, `*.log`, `CLAUDE.local.md`,
-  `**/.claude/.*` (hidden session files inside any `.claude/`), and
-  `**/.claude/settings.local.json` (Claude Code's personal local settings).
+  `**/.claude/.cc-writes/` (Claude Code's staging folder for its own config saves),
+  `**/.claude/settings.local.json` (Claude Code's personal local settings), and
+  `**/.claude/worktrees/` (Claude Code worktrees).
 - **Two `.claude` adoption levels:**
-  - *Checked in* (shellicar, eagers): `.claude/` is committed; only `.claude/.*`,
+  - *Checked in* (shellicar, eagers): `.claude/` is committed; only `.claude/.cc-writes/`, `.claude/worktrees/`,
     `.claude/settings.local.json`, and `CLAUDE.local.md` are kept out. Other
-    non-dot files like `.claude/sdk-config.json` are committed.
+    files like `.claude/sdk-config.json` are committed.
   - *Not checked in* (hopeventures): the whole `.claude/` is kept out per-clone
     via `.git/info/exclude`, leaving no trace in the repo — not even a `.gitignore`
     entry naming it. (Not centralisable: `core.excludesfile` is single-valued, and
