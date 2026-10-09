@@ -22,11 +22,11 @@ printf '{"panes":[]}\n' > "$dir/previous.json"
 snapshot_find fake >/dev/null 2>&1 && fail "the JSON files counted as a snapshot"
 
 # Only previous.snap.
-printf 'tmux-snapshot 2\n%s\n' "$(snap_pane old 0 a 0)" > "$dir/previous.snap"
+snap_file "$dir/previous.snap" "$(snap_pane old 0 a 0)"
 assert_eq "$(snapshot_find fake)" "$dir/previous.snap"
 
 # Both: current wins.
-printf 'tmux-snapshot 2\n%s\n' "$(snap_pane new 0 a 0)" > "$dir/current.snap"
+snap_file "$dir/current.snap" "$(snap_pane new 0 a 0)"
 assert_eq "$(snapshot_find fake)" "$dir/current.snap"
 
 # current refused: previous, and the refusal is said.

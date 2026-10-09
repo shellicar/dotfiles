@@ -24,7 +24,10 @@ before=$(state)
 run -L "$L" save || fail "save failed"
 [ -f "$SNAP/current.snap" ] || fail "no current.snap"
 [ "$(sed -n 1p "$SNAP/current.snap")" = 'tmux-snapshot 2' ] || fail "the first line is not the version line"
-ok "saved with the version line"
+sed -n 2p "$SNAP/current.snap" | grep -Eqx 'saved [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}' ||
+  fail "the second line is not the save time: $(sed -n 2p "$SNAP/current.snap")"
+[ "$(grep -c '^saved ' "$SNAP/current.snap")" = 1 ] || fail "the save time is written more than once"
+ok "saved with the version line, then the save time once: $(sed -n 2p "$SNAP/current.snap")"
 
 tm kill-server
 run restore-server "$L" --apply || fail "restore failed"

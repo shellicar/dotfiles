@@ -112,26 +112,34 @@ us_line() {
 # to previous.snap, then the temp is renamed over current.snap. current.snap is
 # never absent or half-written once it exists.
 #
-# The format: the first line is SNAP_HEADER, then one pane per line, fields
-# separated by US in the order parse_pane reads them. The last field, the save
-# time, is never empty, so `read` never meets a line ending in a separator.
-# TODO(claude): undecided: where the save time is kept. For now it is the last
-# field of every pane line, as local 'YYYY-MM-DD HH:MM' with no zone, because
-# the format is the version line then panes, and reading a file's mtime, or
-# formatting a stored epoch, takes different flags on GNU and BSD.
+# The format: the first line is SNAP_HEADER; the second is 'saved ' and the
+# save time as local 'YYYY-MM-DD HH:MM' (no zone: reading a file's mtime, or
+# formatting a stored epoch, takes different flags on GNU and BSD); then one
+# pane per line, fields separated by US in the order parse_pane reads them. The
+# last field, the pane's pid at save time, is never empty, so `read` never meets
+# a line ending in a separator. It is recorded, not used.
 # The JSON files an earlier version of this command wrote (current.json,
 # previous.json, .writing.*.json) are never read, written, renamed or deleted.
 
 snapshot_base() { printf '%s/tmux/snapshot' "${XDG_DATA_HOME:-$HOME/.local/share}"; }
 snapshot_dir() { printf '%s/%s' "$(snapshot_base)" "$1"; }
 
-# Whether a file is one this reads. A refusal names the file and what its first
-# line was, and nothing else in the file is read. Pass quiet to say nothing.
+SAVED_PATTERN='saved [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]'
+
+# Whether a file is one this reads: the version line, then a saved line. A
+# refusal names the file and what it found, and nothing else in the file is
+# read. Pass quiet to say nothing.
 snapshot_accepts() { # <file> [quiet]
-  local first
-  first=''
-  IFS= read -r first < "$1" 2>/dev/null
-  [ "$first" = "$SNAP_HEADER" ] && return 0
+  local first second
+  first='' second=''
+  { IFS= read -r first; IFS= read -r second; } < "$1" 2>/dev/null
+  if [ "$first" = "$SNAP_HEADER" ]; then
+    # shellcheck disable=SC2254 # the pattern is the point
+    case $second in $SAVED_PATTERN) return 0 ;; esac
+    [ "${2:-}" = quiet ] && return 1
+    note "refusing $1: its second line is '$(printf '%.40s' "$second")'; expected 'saved YYYY-MM-DD HH:MM'"
+    return 1
+  fi
   [ "${2:-}" = quiet ] && return 1
   case $first in
     'tmux-snapshot '*) note "refusing $1: its version line is '$first'; this reads '$SNAP_HEADER'" ;;
@@ -139,6 +147,11 @@ snapshot_accepts() { # <file> [quiet]
     *) note "refusing $1: no version line (the first line starts '$(printf '%.40s' "$first")')" ;;
   esac
   return 1
+}
+
+# The save time of an accepted snapshot file, as 'YYYY-MM-DD HH:MM'.
+snapshot_saved() { # <file>
+  sed -n '2s/^saved //p' "$1"
 }
 
 # The snapshot file to read for a label: current.snap, or previous.snap when
@@ -157,16 +170,16 @@ snapshot_find() { # <label>
 # pane index. Everything below that reads pane lines expects this order.
 sort_panes() { LC_ALL=C sort -t "$US" -k1,1 -k2,2n -k5,5n; }
 
-# The pane lines of an accepted snapshot file, without its version line.
+# The pane lines of an accepted snapshot file, without its first two lines.
 snapshot_panes() { # <file>
-  sed 1d "$1" | sort_panes
+  sed 1,2d "$1" | sort_panes
 }
 
 # Splits one pane line into P_* variables. Fails for a line with no window
 # index, which no pane has: a blank line, or one that is not a pane.
 parse_pane() { # <line>
   IFS=$US read -r P_SESSION P_WIDX P_WNAME P_LAYOUT P_PIDX P_PATH P_CMD P_LAUNCHER \
-    P_TITLE P_COLOUR P_STATE P_ROLE P_STATUS P_SAVED <<EOF
+    P_TITLE P_COLOUR P_STATE P_ROLE P_STATUS P_PID <<EOF
 $1
 EOF
   [ -n "$P_WIDX" ]
@@ -174,7 +187,7 @@ EOF
 
 # Writes a snapshot. On failure SAVE_ERROR says why and the temp is removed;
 # on success SNAP_FILE is the file written.
-snapshot_write() { # <label> <pane lines>
+snapshot_write() { # <label> <save time> <pane lines>
   local dir front back draw err
   dir=$(snapshot_dir "$1")
   front=$dir/current.snap
@@ -185,7 +198,7 @@ snapshot_write() { # <label> <pane lines>
     SAVE_ERROR="cannot create $dir: $err"
     return 1
   fi
-  if ! err=$( (printf '%s\n%s\n' "$SNAP_HEADER" "$2" > "$draw") 2>&1 ); then
+  if ! err=$( (printf '%s\nsaved %s\n%s\n' "$SNAP_HEADER" "$2" "$3" > "$draw") 2>&1 ); then
     rm -f "$draw"
     SAVE_ERROR="cannot write $draw: $err"
     return 1
@@ -462,13 +475,13 @@ detect_launcher() { # <pane pid>
 # ── save ─────────────────────────────────────────────────────────────────────
 
 # Turns list-panes rows into pane lines, detecting each pane's launcher.
-panes_from_rows() { # <list-panes rows> <save time>
+panes_from_rows() { # <list-panes rows>
   local session widx wname layout pidx path cmd title colour state role status pid launcher
   while IFS=$US read -r session widx wname layout pidx path cmd title colour state role status pid; do
     [ -n "$widx" ] || continue
     launcher=$(detect_launcher "$pid")
     us_line "$session" "$widx" "$wname" "$layout" "$pidx" "$path" "$cmd" "$launcher" \
-      "$title" "$colour" "$state" "$role" "$status" "$2"
+      "$title" "$colour" "$state" "$role" "$status" "$pid"
   done <<EOF
 $1
 EOF
@@ -532,8 +545,8 @@ save_server() {
 
   note "saving server '$TS_LABEL'"
   process_reader
-  panes=$(panes_from_rows "$raw" "$(date '+%Y-%m-%d %H:%M')" | sort_panes)
-  snapshot_write "$TS_LABEL" "$panes" || { save_failed "$SAVE_ERROR"; return 1; }
+  panes=$(panes_from_rows "$raw" | sort_panes)
+  snapshot_write "$TS_LABEL" "$(date '+%Y-%m-%d %H:%M')" "$panes" || { save_failed "$SAVE_ERROR"; return 1; }
   ts_tmux set-option -gu @snapshot-error 2>/dev/null
   summarize "$panes"
   note "wrote $(count_lines "$panes") panes to $SNAP_FILE"
@@ -817,8 +830,7 @@ status_rows() {
     [ "$n" -gt 0 ] && todo=$(plural "$n" session)
     n=$(plan_count create-window)
     [ "$n" -gt 0 ] && todo="${todo:+$todo, }$(plural "$n" window)"
-    saved='?'
-    parse_pane "$(printf '%s\n' "$panes" | sed -n 1p)" && saved=$(when "$P_SAVED")
+    saved=$(when "$(snapshot_saved "$file")")
     us_line "$label" "$saved" "$(count_sessions "$windows")" "$(count_lines "$windows")" \
       "$(count_lines "$panes")" "$running" "${todo:-up to date}"
   done <<EOF

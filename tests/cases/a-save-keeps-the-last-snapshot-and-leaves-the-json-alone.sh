@@ -42,16 +42,21 @@ first=$(cat "$dir/current.snap")
 # The summary names the "" session so it can be seen.
 assert_contains "$out" "\"\"${NL}  0  one  (1 pane)"
 
-# Sorted, the "" session first, and every field where it belongs.
-assert_eq "$(sed 1d "$dir/current.snap" | cut -d "$FUS" -f 1-8)" \
-  "$(snap_line '' 0 one lay 0 /a sh '')
-$(snap_line a:b 2 two lay 0 /b sh '')"
+# The save time once, on its own line; then the panes sorted, the "" session
+# first, every field where it belongs and the pid last.
+case $(sed -n 2p "$dir/current.snap") in
+  'saved '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' '[0-9][0-9]:[0-9][0-9]) ;;
+  *) fail "the second line is not the save time: $(sed -n 2p "$dir/current.snap")" ;;
+esac
+assert_eq "$(sed 1,2d "$dir/current.snap")" \
+  "$(snap_line '' 0 one lay 0 /a sh '' '' '' '' '' '' 101)
+$(snap_line a:b 2 two lay 0 /b sh '' '' '' '' '' '' 102)"
 
 FAKE_PANES="$FAKE_PANES
 \$0${FUS}0${FUS}one${FUS}lay${FUS}1${FUS}/c${FUS}sh${FUS}103"
 save_server >/dev/null 2>&1 || fail "second save failed"
 assert_eq "$(cat "$dir/previous.snap")" "$first"
-assert_eq "$(sed 1d "$dir/current.snap" | wc -l | tr -d ' ')" 3
+assert_eq "$(sed 1,2d "$dir/current.snap" | wc -l | tr -d ' ')" 3
 
 assert_eq "$(cksum "$dir/current.json" "$dir/previous.json" "$dir/.writing.42.json")" "$json_before"
 files=''

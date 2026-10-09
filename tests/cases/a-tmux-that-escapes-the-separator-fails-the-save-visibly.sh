@@ -33,6 +33,6 @@ assert_contains "$(fake_option_value @snapshot-error)" 'tmux 3.5a'
 # Restore stops before planning on rows it cannot read.
 dir=$(snapshot_dir fake)
 mkdir -p "$dir"
-printf 'tmux-snapshot 2\n%s\n' "$(snap_pane work 0 code 0)" > "$dir/current.snap"
+snap_file "$dir/current.snap" "$(snap_pane work 0 code 0)"
 err=$( (cmd_restore) 2>&1) && fail "a restore planned against unreadable rows"
 assert_contains "$err" 'not supported'

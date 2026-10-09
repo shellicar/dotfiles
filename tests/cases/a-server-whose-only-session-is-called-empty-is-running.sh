@@ -31,7 +31,7 @@ server_running down && fail "a server that does not answer read as running"
 # The status view itself: one label with a snapshot and its server up.
 dir=$(snapshot_dir up)
 mkdir -p "$dir"
-printf 'tmux-snapshot 2\n%s\n%s\n' "$(snap_pane '' 0 a 0)" "$(snap_pane '' 1 b 0)" > "$dir/current.snap"
+snap_file "$dir/current.snap" "$(snap_pane '' 0 a 0; snap_pane '' 1 b 0)"
 SERVER_DIR=$WORK/no-sockets
 row=$(status_rows)
 assert_eq "$row" "$(snap_line up "$(when '2026-10-09 12:00')" 1 2 2 running '1 window')"
