@@ -20,9 +20,11 @@ FAKE_SESSIONS=''
 FAKE_WINDOWS=''
 FAKE_PANES=''
 
-# Substitutes each #{name} in a format with its value.
+# Substitutes each #{name} in a format with its value, and each
+# #{s/[<US><RS>]/_/:name} with the value with every US and RS in it replaced by
+# '_', which is what tmux 3.7c does with that one substitution (tests/tmux).
 fake_render() { # <format> [<name> <value>]...
-  local out var val
+  local out var val ref
   out=$1
   shift
   while [ $# -ge 2 ]; do
@@ -32,8 +34,26 @@ fake_render() { # <format> [<name> <value>]...
       case $out in *"#{$var}"*) ;; *) break ;; esac
       out="${out%%"#{$var}"*}$val${out#*"#{$var}"}"
     done
+    ref="#{s/[$FUS$FRS]/_/:$var}"
+    fake_clean "$val"
+    while :; do
+      case $out in *"$ref"*) ;; *) break ;; esac
+      out="${out%%"$ref"*}$FAKE_CLEAN${out#*"$ref"}"
+    done
   done
   printf '%s\n' "$out"
+}
+
+# FAKE_CLEAN becomes the value with each US and RS replaced by '_'.
+fake_clean() { # <value>
+  local rest
+  rest=$1 FAKE_CLEAN=''
+  while :; do
+    case $rest in *["$FUS$FRS"]*) ;; *) break ;; esac
+    FAKE_CLEAN=$FAKE_CLEAN${rest%%["$FUS$FRS"]*}_
+    rest=${rest#*["$FUS$FRS"]}
+  done
+  FAKE_CLEAN=$FAKE_CLEAN$rest
 }
 
 fake_session_name() { # <id>

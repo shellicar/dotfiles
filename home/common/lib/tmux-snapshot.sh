@@ -25,7 +25,7 @@
 # cannot see from inside this file.
 # shellcheck disable=SC2034
 
-US=$(printf '\037') # field separator: cannot appear in tmux values
+US=$(printf '\037') # field separator; a value can hold one (see clean_format)
 RS=$(printf '\036') # ends every pane record, so a value can hold a newline
 NL='
 '
@@ -51,9 +51,19 @@ else
   DIM=''; BOLD=''; RESET=''
 fi
 
+# A format that has tmux print a value with each US or RS in it replaced by
+# '_', the character tmux itself shows for a control character it cannot
+# print. tmux does the replacing, before any separator is added, so a
+# separator in the output is always one of ours. Nothing else in a value is
+# changed. A cwd saved this way names a directory that does not exist, and
+# restore opens that pane in HOME, as for any missing cwd.
+clean_format() { printf '#{s/[%s%s]/_/:%s}' "$US" "$RS" "$1"; }
+
 # The pane fields tmux is asked for on save, in order, as one record ended by
-# RS. pane_pid is for launcher detection and is not written to the snapshot.
-PANE_FORMAT="#{session_name}$US#{window_index}$US#{window_name}$US#{window_layout}$US#{pane_index}$US#{pane_current_path}$US#{pane_current_command}$US#{@title}$US#{@colour}$US#{@state}$US#{@role}$US#{@status}$US#{pane_pid}$RS"
+# RS. Every free-text field goes through clean_format; the indexes, the layout
+# and the pid are tmux's own and cannot hold either character. pane_pid is for
+# launcher detection and is not written to the snapshot.
+PANE_FORMAT="$(clean_format session_name)$US#{window_index}$US$(clean_format window_name)$US#{window_layout}$US#{pane_index}$US$(clean_format pane_current_path)$US$(clean_format pane_current_command)$US$(clean_format @title)$US$(clean_format @colour)$US$(clean_format @state)$US$(clean_format @role)$US$(clean_format @status)$US#{pane_pid}$RS"
 
 note() { printf 'tmux-snapshot: %s\n' "$*" >&2; }
 
@@ -162,7 +172,8 @@ count_records() { # <records>
 # formatting a stored epoch, takes different flags on GNU and BSD); then one
 # record per pane, as above: fields separated by US in the order parse_pane
 # reads them, ended by RS and a newline. Any field may be empty, the last
-# (@status) included, and a cwd or user option may hold newlines. A file whose
+# (@status) included, and a cwd or user option may hold newlines. A US or RS
+# that was in a value is saved as '_' (clean_format). A file whose
 # last record has no RS was cut short and is refused.
 # The JSON files an earlier version of this command wrote (current.json,
 # previous.json, .writing.*.json) are never read, written, renamed or deleted.
