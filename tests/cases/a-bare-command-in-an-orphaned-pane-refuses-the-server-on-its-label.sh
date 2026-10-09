@@ -12,7 +12,7 @@ describe 'run bare from a pane whose server lost its socket, the command refuses
 LIVE_PID=$WORK/live-pid
 tmux_says() {
   case "$*" in
-    "-L my,label display-message -p #{pid}") cat "$LIVE_PID" ;;
+    "-u -L my,label display-message -p #{pid}") cat "$LIVE_PID" ;;
     *) fail "unexpected: tmux $*" ;;
   esac
 }

@@ -14,9 +14,9 @@ describe 'the status view counts a server as running when its only session is ca
 FAKE_SESSIONS="\$0$FUS"
 FAKE_WINDOWS="\$0${FUS}0"
 tmux_says() {
-  case "$1 $2" in
-    "-L up") shift 2; FAKE_SESSIONS="\$0$FUS" fake_listing "$@" ;;
-    "-L down") shift 2; FAKE_SESSIONS='' fake_listing "$@" ;;
+  case "$*" in
+    "-u -L up "*) FAKE_SESSIONS="\$0$FUS" fake_listing "$@" ;;
+    "-u -L down "*) FAKE_SESSIONS='' fake_listing "$@" ;;
     *) fail "unexpected: tmux $*" ;;
   esac
 }

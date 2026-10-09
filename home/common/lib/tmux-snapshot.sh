@@ -62,7 +62,29 @@ die() { note "$*"; exit 1; }
 
 # tmux bound to the server being worked on. stdin is closed so a tmux call
 # inside a `while read` loop cannot consume the loop's input.
-ts_tmux() { tmux -L "$TS_LABEL" "$@" </dev/null; }
+#
+# -u because without it, and without a UTF-8 locale (a server started outside
+# a login shell, say), tmux 3.7 prints US in a format as '_'. tmux 3.5 prints it
+# as '\037' even with -u; has_separator turns that into an error rather than a
+# snapshot of garbage.
+ts_tmux() { tmux -u -L "$TS_LABEL" "$@" </dev/null; }
+
+# Whether the first line of tmux's output holds US, as every line asked for
+# with one must. Empty output passes: it is no server, not a bad one.
+# TODO(claude): undecided: whether a tmux that escapes US (3.5) is supported.
+# For now it is refused: a save fails and marks @snapshot-error, a restore or
+# the status view stops, rather than decoding '\037' back, which a name could
+# hold literally.
+has_separator() { # <tmux output>
+  case ${1%%"$NL"*} in
+    '' | *"$US"*) return 0 ;;
+  esac
+  return 1
+}
+
+separator_error() {
+  printf 'tmux printed the field separator as something else (%s); this tmux is not supported' "$(tmux -V 2>&1)"
+}
 
 # A session name for people to read: "" for the empty name, which otherwise
 # prints as nothing at all.
@@ -93,6 +115,10 @@ us_line() {
 # The format: the first line is SNAP_HEADER, then one pane per line, fields
 # separated by US in the order parse_pane reads them. The last field, the save
 # time, is never empty, so `read` never meets a line ending in a separator.
+# TODO(claude): undecided: where the save time is kept. For now it is the last
+# field of every pane line, as local 'YYYY-MM-DD HH:MM' with no zone, because
+# the format is the version line then panes, and reading a file's mtime, or
+# formatting a stored epoch, takes different flags on GNU and BSD.
 # The JSON files an earlier version of this command wrote (current.json,
 # previous.json, .writing.*.json) are never read, written, renamed or deleted.
 
@@ -277,7 +303,7 @@ EOF
 # nothing: a dead server can leave its socket behind. Session ids are never
 # empty, so a server whose only session is called "" still prints something.
 server_running() { # <label>
-  [ -n "$(tmux -L "$1" list-sessions -F '#{session_id}' 2>/dev/null </dev/null)" ]
+  [ -n "$(tmux -u -L "$1" list-sessions -F '#{session_id}' 2>/dev/null </dev/null)" ]
 }
 
 # The labels of the servers whose sockets exist. A missing directory (no server
@@ -502,6 +528,8 @@ save_server() {
     return 0
   fi
 
+  has_separator "$raw" || { save_failed "$(separator_error)"; return 1; }
+
   note "saving server '$TS_LABEL'"
   process_reader
   panes=$(panes_from_rows "$raw" "$(date '+%Y-%m-%d %H:%M')" | sort_panes)
@@ -568,7 +596,11 @@ EOF
 }
 
 plan_for_server() { # <sorted pane lines>
-  plan_restore "$1" "$(live_sessions)" "$(live_windows)"
+  local sessions windows
+  sessions=$(live_sessions)
+  windows=$(live_windows)
+  { has_separator "$sessions" && has_separator "$windows"; } || die "$(separator_error)"
+  plan_restore "$1" "$sessions" "$windows"
 }
 
 plan_count() { # <step name>

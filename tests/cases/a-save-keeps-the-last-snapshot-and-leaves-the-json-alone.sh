@@ -54,4 +54,6 @@ assert_eq "$(cat "$dir/previous.snap")" "$first"
 assert_eq "$(sed 1d "$dir/current.snap" | wc -l | tr -d ' ')" 3
 
 assert_eq "$(cksum "$dir/current.json" "$dir/previous.json" "$dir/.writing.42.json")" "$json_before"
-assert_eq "$(ls -A "$dir" | tr '\n' ' ')" '.writing.42.json current.json current.snap previous.json previous.snap '
+files=''
+for f in "$dir"/* "$dir"/.[!.]*; do [ -e "$f" ] && files="$files${f##*/} "; done
+assert_eq "$files" 'current.json current.snap previous.json previous.snap .writing.42.json '

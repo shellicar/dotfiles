@@ -47,7 +47,28 @@ EOF
 
 # The answer to list-sessions, list-windows -a or list-panes -a, or 2 when the
 # call is something else, so the case can answer it.
+#
+# US in the output is printed the way tmux 3.7 prints it: as is with -u, as '_'
+# without (no UTF-8 locale here). FAKE_TMUX_35=1 prints it as '\037', as tmux
+# 3.5 does even with -u.
+FAKE_TMUX_35=0
 fake_listing() { # tmux's arguments
+  local out status utf8
+  utf8=0
+  [ "$1" = -u ] && { utf8=1; shift; }
+  out=$(fake_listing_raw "$@")
+  status=$?
+  [ "$status" -eq 0 ] || return "$status"
+  if [ "$FAKE_TMUX_35" = 1 ]; then
+    printf '%s\n' "$out" | sed "s/$FUS/\\\\037/g"
+  elif [ "$utf8" = 1 ]; then
+    printf '%s\n' "$out"
+  else
+    printf '%s\n' "$out" | sed "s/$FUS/_/g"
+  fi
+}
+
+fake_listing_raw() {
   local fmt id name idx wname layout pidx path cmd pid
   [ "$1" = -L ] && shift 2
   case $1 in list-sessions | list-windows | list-panes) ;; *) return 2 ;; esac
@@ -96,6 +117,7 @@ FAKE_OPTIONS=$WORK/tmux-options
 : > "$FAKE_OPTIONS"
 
 fake_option() { # tmux's arguments
+  [ "$1" = -u ] && shift
   [ "$1" = -L ] && shift 2
   case "$1 $2" in
     'set-option -g') [ $# -eq 4 ] || return 2 ;;

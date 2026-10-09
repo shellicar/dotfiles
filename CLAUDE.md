@@ -48,8 +48,9 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
 - `home/common/lib/` — sourced by the commands in `bin/`, linked into `~/lib`.
   `git-common.sh` holds every decision the git commands make: which branches are
   merged, what a detached worktree is, how to bring the trunk in, so a command
-  in `bin/` is argument parsing and a call to `main`. `yubikeys.sh` holds the
-  three serials.
+  in `bin/` is argument parsing and a call to `main`. `tmux-snapshot.sh` is the
+  same for `tmux-snapshot`: saving, the restore plan, the status view.
+  `yubikeys.sh` holds the three serials.
 - `tests/` — behavioural tests for the above. No repository is built: `git` is a
   shell function backed by a fake commit graph, so a case states a situation
   directly instead of committing its way to one.
@@ -192,6 +193,18 @@ Files share, so it never contacts Azure. It covers how a resync treats files
 that differ on the two sides, and `keep-local` / `keep-remote`. Run it after
 changing `azure-files-sync` or `home/common/lib/azure-files-sync.sh`. A missing
 rclone exits 64; it never skips.
+
+`tests/tmux/run.sh` tests `tmux-snapshot` against a real tmux, and is not part
+of `./test.sh` either. It needs docker: each case runs in a fresh container
+built from `tests/tmux/Dockerfile` (alpine with tmux, no Node), with the repo
+mounted read-only, so the servers it starts and kills are never yours. It
+prints the tmux version it ran against. It covers save, kill and restore round
+trips, sessions named `""` and names holding `:` or `.`, the `@snapshot-error`
+mark and the status bar segment, and the old JSON files being left alone. The
+unit cases in `tests/cases/` fake tmux with `tests/fake-tmux.sh`; anything about
+how tmux itself treats an argument belongs here instead. Run it after changing
+`tmux-snapshot` or `home/common/lib/tmux-snapshot.sh`. A missing docker, or an
+image that will not build, exits 64; it never skips.
 
 A case in `tests/cases/` builds no repository. It sources the library, replaces
 `git` with a shell function backed by a fake commit graph, and asserts on what
