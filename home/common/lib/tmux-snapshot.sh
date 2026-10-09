@@ -55,8 +55,10 @@ fi
 # '_', the character tmux itself shows for a control character it cannot
 # print. tmux does the replacing, before any separator is added, so a
 # separator in the output is always one of ours. Nothing else in a value is
-# changed. A cwd saved this way names a directory that does not exist, and
-# restore opens that pane in HOME, as for any missing cwd.
+# changed. A cwd saved this way (/a<US>b as /a_b) usually names a directory
+# that does not exist, and restore opens that pane in HOME, as for any missing
+# cwd. If the '_' name does exist, restore opens the pane there, and runs that
+# pane's saved launcher there.
 clean_format() { printf '#{s/[%s%s]/_/:%s}' "$US" "$RS" "$1"; }
 
 # The pane fields tmux is asked for on save, in order, as one record ended by
