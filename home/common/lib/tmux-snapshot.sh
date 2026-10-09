@@ -50,8 +50,8 @@ else
   DIM=''; BOLD=''; RESET=''
 fi
 
-# The pane fields tmux is asked for on save, in order. pane_pid is last so a
-# row never ends in an empty field.
+# The pane fields tmux is asked for on save, in order. pane_pid is for launcher
+# detection and is not written to the snapshot.
 PANE_FORMAT="#{session_name}$US#{window_index}$US#{window_name}$US#{window_layout}$US#{pane_index}$US#{pane_current_path}$US#{pane_current_command}$US#{@title}$US#{@colour}$US#{@state}$US#{@role}$US#{@status}$US#{pane_pid}"
 
 note() { printf 'tmux-snapshot: %s\n' "$*" >&2; }
@@ -115,9 +115,8 @@ us_line() {
 # The format: the first line is SNAP_HEADER; the second is 'saved ' and the
 # save time as local 'YYYY-MM-DD HH:MM' (no zone: reading a file's mtime, or
 # formatting a stored epoch, takes different flags on GNU and BSD); then one
-# pane per line, fields separated by US in the order parse_pane reads them. The
-# last field, the pane's pid at save time, is never empty, so `read` never meets
-# a line ending in a separator. It is recorded, not used.
+# pane per line, fields separated by US in the order parse_pane reads them. Any
+# field may be empty, the last (@status) included, so a line can end in US.
 # The JSON files an earlier version of this command wrote (current.json,
 # previous.json, .writing.*.json) are never read, written, renamed or deleted.
 
@@ -179,7 +178,7 @@ snapshot_panes() { # <file>
 # index, which no pane has: a blank line, or one that is not a pane.
 parse_pane() { # <line>
   IFS=$US read -r P_SESSION P_WIDX P_WNAME P_LAYOUT P_PIDX P_PATH P_CMD P_LAUNCHER \
-    P_TITLE P_COLOUR P_STATE P_ROLE P_STATUS P_PID <<EOF
+    P_TITLE P_COLOUR P_STATE P_ROLE P_STATUS <<EOF
 $1
 EOF
   [ -n "$P_WIDX" ]
@@ -481,7 +480,7 @@ panes_from_rows() { # <list-panes rows>
     [ -n "$widx" ] || continue
     launcher=$(detect_launcher "$pid")
     us_line "$session" "$widx" "$wname" "$layout" "$pidx" "$path" "$cmd" "$launcher" \
-      "$title" "$colour" "$state" "$role" "$status" "$pid"
+      "$title" "$colour" "$state" "$role" "$status"
   done <<EOF
 $1
 EOF

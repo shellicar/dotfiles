@@ -28,6 +28,13 @@ sed -n 2p "$SNAP/current.snap" | grep -Eqx 'saved [0-9]{4}-[0-9]{2}-[0-9]{2} [0-
   fail "the second line is not the save time: $(sed -n 2p "$SNAP/current.snap")"
 [ "$(grep -c '^saved ' "$SNAP/current.snap")" = 1 ] || fail "the save time is written more than once"
 ok "saved with the version line, then the save time once: $(sed -n 2p "$SNAP/current.snap")"
+# Pane main:3.0 has its window's @title set and an empty @role and @status, so
+# its line ends in empty fields, and the restore below reads it with this
+# container's own sh.
+US=$(printf '\037')
+grep -q "${US}Build logs${US}colour33${US}busy${US}${US}\$" "$SNAP/current.snap" ||
+  fail "no pane line ends in an empty @role and @status"
+ok "a pane line ends in an empty @role and @status"
 
 tm kill-server
 run restore-server "$L" --apply || fail "restore failed"

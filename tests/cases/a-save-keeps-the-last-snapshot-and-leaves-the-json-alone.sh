@@ -43,14 +43,14 @@ first=$(cat "$dir/current.snap")
 assert_contains "$out" "\"\"${NL}  0  one  (1 pane)"
 
 # The save time once, on its own line; then the panes sorted, the "" session
-# first, every field where it belongs and the pid last.
+# first, every field where it belongs, the empty @ fields at the end included.
 case $(sed -n 2p "$dir/current.snap") in
   'saved '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' '[0-9][0-9]:[0-9][0-9]) ;;
   *) fail "the second line is not the save time: $(sed -n 2p "$dir/current.snap")" ;;
 esac
 assert_eq "$(sed 1,2d "$dir/current.snap")" \
-  "$(snap_line '' 0 one lay 0 /a sh '' '' '' '' '' '' 101)
-$(snap_line a:b 2 two lay 0 /b sh '' '' '' '' '' '' 102)"
+  "$(snap_line '' 0 one lay 0 /a sh '' '' '' '' '' '')
+$(snap_line a:b 2 two lay 0 /b sh '' '' '' '' '' '')"
 
 FAKE_PANES="$FAKE_PANES
 \$0${FUS}0${FUS}one${FUS}lay${FUS}1${FUS}/c${FUS}sh${FUS}103"

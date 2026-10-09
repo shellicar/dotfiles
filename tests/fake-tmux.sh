@@ -141,7 +141,7 @@ fake_option_is_set() { # <name>
 
 # A pane line in the snapshot format: session, window index, window name,
 # layout, pane index, cwd, command, launcher, @title, @colour, @state, @role,
-# @status, pane pid.
+# @status.
 snap_line() {
   local IFS
   IFS=$FUS
@@ -150,7 +150,7 @@ snap_line() {
 
 # A pane line with the fields a case does not care about filled in.
 snap_pane() { # <session> <window index> <window name> <pane index> [cwd] [launcher]
-  snap_line "$1" "$2" "$3" "layout-$2" "$4" "${5:-/}" sh "${6:-}" '' '' '' '' '' 4242
+  snap_line "$1" "$2" "$3" "layout-$2" "$4" "${5:-/}" sh "${6:-}" '' '' '' '' ''
 }
 
 # A snapshot file in the format: the version line, the saved line, the panes.
