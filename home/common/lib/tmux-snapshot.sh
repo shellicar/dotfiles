@@ -515,10 +515,11 @@ EOF
 }
 
 # Records a failed save on the server it was for, where the status bar shows it
-# and `tmux show -gv @snapshot-error` prints it.
+# and `tmux show -sv @snapshot-error` prints it. A server option (-s), not a
+# global session option (-g).
 save_failed() { # <message>
   note "save failed: $1"
-  ts_tmux set-option -g @snapshot-error "$1" 2>/dev/null
+  ts_tmux set-option -s @snapshot-error "$1" 2>/dev/null
   return 1
 }
 
@@ -546,7 +547,7 @@ save_server() {
   process_reader
   panes=$(panes_from_rows "$raw" | sort_panes)
   snapshot_write "$TS_LABEL" "$(date '+%Y-%m-%d %H:%M')" "$panes" || { save_failed "$SAVE_ERROR"; return 1; }
-  ts_tmux set-option -gu @snapshot-error 2>/dev/null
+  ts_tmux set-option -su @snapshot-error 2>/dev/null
   summarize "$panes"
   note "wrote $(count_lines "$panes") panes to $SNAP_FILE"
 }
@@ -607,11 +608,16 @@ EOF
   PLAN=$sessions$creates$skips
 }
 
+# Fails, saying why, when tmux's listings cannot be read. It returns rather
+# than dies because the status view calls it inside $(...).
 plan_for_server() { # <sorted pane lines>
   local sessions windows
   sessions=$(live_sessions)
   windows=$(live_windows)
-  { has_separator "$sessions" && has_separator "$windows"; } || die "$(separator_error)"
+  if ! { has_separator "$sessions" && has_separator "$windows"; }; then
+    note "$(separator_error)"
+    return 1
+  fi
   plan_restore "$1" "$sessions" "$windows"
 }
 
@@ -754,7 +760,7 @@ cmd_restore() {
   note "restoring server '$TS_LABEL'"
   file=$(snapshot_find "$TS_LABEL") || die "no snapshot for '$TS_LABEL' in $(snapshot_dir "$TS_LABEL")"
   panes=$(snapshot_panes "$file")
-  plan_for_server "$panes"
+  plan_for_server "$panes" || exit 1
 
   if [ "$APPLY" != 1 ]; then
     printf 'DRY RUN: no changes will be made (pass --apply to commit)\n'
@@ -820,7 +826,7 @@ status_rows() {
     panes=$(snapshot_panes "$file")
     windows=$(snapshot_windows "$panes")
     if [ "$running" = running ]; then
-      plan_for_server "$panes"
+      plan_for_server "$panes" || return 1
     else
       plan_restore "$panes" '' ''
     fi
@@ -873,7 +879,9 @@ usage_lines() {
 
 cmd_status() {
   local rows
-  rows=$(status_rows)
+  # A failed row is said on stderr; nothing is printed as if it were the
+  # whole picture.
+  rows=$(status_rows) || return 1
   if [ -n "$rows" ]; then
     render_table "$rows"
     printf '\n'

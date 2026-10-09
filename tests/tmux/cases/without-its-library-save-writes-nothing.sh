@@ -23,7 +23,7 @@ grep -q 'cannot read its library' /work/out || fail "the message does not say wh
 ok "exits non-zero, saying the library is missing"
 [ "$(files_digest "$SNAP")" = "$before" ] || fail "the snapshot directory changed"
 ok "the snapshot directory is unchanged"
-tm show -gv @snapshot-error | grep -q 'cannot read its library' || fail "@snapshot-error does not say it"
-ok "the server is marked: $(tm show -gv @snapshot-error)"
+tm show -sv @snapshot-error | grep -q 'cannot read its library' || fail "@snapshot-error does not say it"
+ok "the server is marked: $(tm show -sv @snapshot-error)"
 
 echo 'PASS without-its-library-save-writes-nothing'

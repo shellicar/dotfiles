@@ -79,8 +79,11 @@ else
 fi
 
 # A pull can leave this file updated and the library not, or the other way
-# round, for a moment, and the watcher may run in it. Nothing is written unless
-# the library loads and is the one this file expects.
+# round, for a moment, and the watcher may run in it. A library that cannot be
+# read, or does not define tmux_snapshot_main, ends the command before it
+# touches any snapshot. The one thing it may write first is @snapshot-error,
+# when the library cannot be read (below).
+# A library that loads but is out of step with this file is not detected.
 LIB=$DIR/../lib/tmux-snapshot.sh
 if [ ! -r "$LIB" ]; then
   echo "tmux-snapshot: cannot read its library at $LIB" >&2
@@ -88,7 +91,7 @@ if [ ! -r "$LIB" ]; then
   # bar. For now a save named with -L (the watcher's form) sets @snapshot-error
   # on that server; a bare save or -a only says it here.
   if [ "$SUB" = save ] && [ "$LABEL_SET" = 1 ]; then
-    tmux -L "$LABEL" set-option -g @snapshot-error "cannot read its library at $LIB" >/dev/null 2>&1 </dev/null
+    tmux -L "$LABEL" set-option -s @snapshot-error "cannot read its library at $LIB" >/dev/null 2>&1 </dev/null
   fi
   exit 1
 fi

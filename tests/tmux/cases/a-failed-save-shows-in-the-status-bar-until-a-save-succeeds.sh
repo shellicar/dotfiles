@@ -1,5 +1,5 @@
 #!/bin/sh
-# A save that cannot write sets @snapshot-error, which `show -gv` prints and
+# A save that cannot write sets @snapshot-error, which `show -sv` prints and
 # the status-right in .tmux.conf shows; the next save that works unsets it.
 set -u
 # The path exists only inside the container, where run.sh mounts it.
@@ -21,14 +21,16 @@ ok "nothing shown before a save"
 # A data directory under the read-only mount: the save cannot create its
 # directory, whoever runs it.
 XDG_DATA_HOME=/repo/no-such-dir run -L "$L" save && fail "a save that could not write succeeded"
-error=$(tm show -gv @snapshot-error) || fail "@snapshot-error is not set"
+error=$(tm show -sv @snapshot-error) || fail "@snapshot-error is not set"
 case $error in *'cannot create /repo/no-such-dir/tmux/snapshot/t'*) ;; *) fail "unexpected error text: $error" ;; esac
-ok "show -gv @snapshot-error prints: $error"
+ok "show -sv @snapshot-error prints: $error"
+tm show -gv @snapshot-error >/dev/null 2>&1 && fail "@snapshot-error was set as a global session option"
+ok "it is a server option, not a global session option"
 case $(shown) in *' snapshot failed '*) ;; *) fail "the status bar does not show the failure: $(shown)" ;; esac
 ok "the status bar shows it: $(shown)"
 
 run -L "$L" save || fail "the save failed"
-tm show -gv @snapshot-error >/dev/null 2>&1 && fail "a successful save left @snapshot-error set"
+tm show -sv @snapshot-error >/dev/null 2>&1 && fail "a successful save left @snapshot-error set"
 ok "a successful save unset it"
 case $(shown) in *'snapshot failed'*) fail "the status bar still shows the failure" ;; esac
 ok "the status bar no longer shows it: $(shown)"

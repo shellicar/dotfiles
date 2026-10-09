@@ -111,8 +111,9 @@ EOF
   esac
 }
 
-# Global options, kept in a file because the fake answers in a subshell. Answers
-# set-option -g <name> <value> and set-option -gu <name>, or returns 2.
+# Server options, kept in a file because the fake answers in a subshell. Answers
+# set-option -s <name> <value> and set-option -su <name>, or returns 2. A global
+# session option (-g) is a different table in tmux, and is not answered.
 FAKE_OPTIONS=$WORK/tmux-options
 : > "$FAKE_OPTIONS"
 
@@ -120,17 +121,17 @@ fake_option() { # tmux's arguments
   [ "$1" = -u ] && shift
   [ "$1" = -L ] && shift 2
   case "$1 $2" in
-    'set-option -g') [ $# -eq 4 ] || return 2 ;;
-    'set-option -gu') [ $# -eq 3 ] || return 2 ;;
+    'set-option -s') [ $# -eq 4 ] || return 2 ;;
+    'set-option -su') [ $# -eq 3 ] || return 2 ;;
     *) return 2 ;;
   esac
   [ -n "$FAKE_SESSIONS" ] || { echo "no server running on /tmp/tmux-1000/fake" >&2; return 1; }
   grep -v "^$3$FUS" "$FAKE_OPTIONS" > "$FAKE_OPTIONS.new"
-  [ "$2" = -g ] && printf '%s\n' "$3$FUS$4" >> "$FAKE_OPTIONS.new"
+  [ "$2" = -s ] && printf '%s\n' "$3$FUS$4" >> "$FAKE_OPTIONS.new"
   mv "$FAKE_OPTIONS.new" "$FAKE_OPTIONS"
 }
 
-# The value of a global option, or nothing when it is unset.
+# The value of a server option, or nothing when it is unset.
 fake_option_value() { # <name>
   grep "^$1$FUS" "$FAKE_OPTIONS" | cut -d "$FUS" -f 2-
 }
