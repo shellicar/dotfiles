@@ -96,6 +96,7 @@
   "git.openRepositoryInParentFolders": "never",
   "git.suggestSmartCommit": false,
   "gitlens.telemetry.enabled": false,
+  "gitlens.views.formats.commits.label": "${message}",
   "gitlens.views.scm.grouped.views": {
     "branches": false,
     "commits": true,
@@ -103,7 +104,7 @@
     "launchpad": false,
     "remotes": true,
     "repositories": false,
-    "searchAndCompare": false,
+    "searchAndCompare": true,
     "stashes": true,
     "tags": true,
     "worktrees": true
