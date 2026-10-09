@@ -32,7 +32,8 @@ ok "saved with the version line, then the save time once: $(sed -n 2p "$SNAP/cur
 # its line ends in empty fields, and the restore below reads it with this
 # container's own sh.
 US=$(printf '\037')
-grep -q "${US}Build logs${US}colour33${US}busy${US}${US}\$" "$SNAP/current.snap" ||
+RS=$(printf '\036')
+grep -q "${US}Build logs${US}colour33${US}busy${US}${US}${RS}\$" "$SNAP/current.snap" ||
   fail "no pane line ends in an empty @role and @status"
 ok "a pane line ends in an empty @role and @status"
 

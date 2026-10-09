@@ -26,6 +26,7 @@
 # shellcheck disable=SC2034
 
 US=$(printf '\037') # field separator: cannot appear in tmux values
+RS=$(printf '\036') # ends every pane record, so a value can hold a newline
 NL='
 '
 SNAP_HEADER='tmux-snapshot 2'
@@ -50,9 +51,9 @@ else
   DIM=''; BOLD=''; RESET=''
 fi
 
-# The pane fields tmux is asked for on save, in order. pane_pid is for launcher
-# detection and is not written to the snapshot.
-PANE_FORMAT="#{session_name}$US#{window_index}$US#{window_name}$US#{window_layout}$US#{pane_index}$US#{pane_current_path}$US#{pane_current_command}$US#{@title}$US#{@colour}$US#{@state}$US#{@role}$US#{@status}$US#{pane_pid}"
+# The pane fields tmux is asked for on save, in order, as one record ended by
+# RS. pane_pid is for launcher detection and is not written to the snapshot.
+PANE_FORMAT="#{session_name}$US#{window_index}$US#{window_name}$US#{window_layout}$US#{pane_index}$US#{pane_current_path}$US#{pane_current_command}$US#{@title}$US#{@colour}$US#{@state}$US#{@role}$US#{@status}$US#{pane_pid}$RS"
 
 note() { printf 'tmux-snapshot: %s\n' "$*" >&2; }
 
@@ -105,6 +106,50 @@ us_line() {
   printf '%s\n' "$*"
 }
 
+# ── pane records ─────────────────────────────────────────────────────────────
+#
+# A pane's cwd and its user options can hold newlines (session and window names
+# cannot: tmux refuses them), so pane data is never read line by line. Each pane
+# is a record: its fields separated by US, ended by RS and a newline. Values are
+# kept exactly as tmux gives them, nothing escaped.
+
+# One record of fields separated by US.
+us_record() {
+  local IFS
+  IFS=$US
+  printf '%s%s\n' "$*" "$RS"
+}
+
+# Whether text holding records ends with a whole one. $(...) has already taken
+# the newline after the last RS. Empty text holds no records and passes.
+records_complete() { # <records>
+  case $1 in '' | *"$RS") return 0 ;; esac
+  return 1
+}
+
+# Calls <function> <record> [args...] for each record, in order. Text after the
+# last RS is not a record; the readers that take records in refuse it first.
+each_record() { # <records> <function> [args...]
+  local _rest _fn _rec
+  _rest=$1 _fn=$2
+  shift 2
+  while :; do
+    case $_rest in *"$RS"*) ;; *) break ;; esac
+    _rec=${_rest%%"$RS"*}
+    _rest=${_rest#*"$RS"}
+    _rest=${_rest#"$NL"}
+    "$_fn" "$_rec" "$@"
+  done
+}
+
+count_one() { _count=$((_count + 1)); }
+count_records() { # <records>
+  local _count
+  _count=0
+  each_record "$1" count_one
+  printf '%s' "$_count"
+}
+
 # ── snapshot files ───────────────────────────────────────────────────────────
 #
 # Each server label has its own directory. Inside it, a double buffer: the new
@@ -115,8 +160,10 @@ us_line() {
 # The format: the first line is SNAP_HEADER; the second is 'saved ' and the
 # save time as local 'YYYY-MM-DD HH:MM' (no zone: reading a file's mtime, or
 # formatting a stored epoch, takes different flags on GNU and BSD); then one
-# pane per line, fields separated by US in the order parse_pane reads them. Any
-# field may be empty, the last (@status) included, so a line can end in US.
+# record per pane, as above: fields separated by US in the order parse_pane
+# reads them, ended by RS and a newline. Any field may be empty, the last
+# (@status) included, and a cwd or user option may hold newlines. A file whose
+# last record has no RS was cut short and is refused.
 # The JSON files an earlier version of this command wrote (current.json,
 # previous.json, .writing.*.json) are never read, written, renamed or deleted.
 
@@ -125,16 +172,22 @@ snapshot_dir() { printf '%s/%s' "$(snapshot_base)" "$1"; }
 
 SAVED_PATTERN='saved [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]'
 
-# Whether a file is one this reads: the version line, then a saved line. A
-# refusal names the file and what it found, and nothing else in the file is
-# read. Pass quiet to say nothing.
+# Whether a file is one this reads: the version line, a saved line, then whole
+# records. A refusal names the file and what it found, and nothing else in the
+# file is read. Pass quiet to say nothing.
 snapshot_accepts() { # <file> [quiet]
   local first second
   first='' second=''
   { IFS= read -r first; IFS= read -r second; } < "$1" 2>/dev/null
   if [ "$first" = "$SNAP_HEADER" ]; then
     # shellcheck disable=SC2254 # the pattern is the point
-    case $second in $SAVED_PATTERN) return 0 ;; esac
+    case $second in
+      $SAVED_PATTERN)
+        records_complete "$(sed 1,2d "$1")" && return 0
+        [ "${2:-}" = quiet ] && return 1
+        note "refusing $1: its last pane record does not end with the record separator (the file is cut short)"
+        return 1 ;;
+    esac
     [ "${2:-}" = quiet ] && return 1
     note "refusing $1: its second line is '$(printf '%.40s' "$second")'; expected 'saved YYYY-MM-DD HH:MM'"
     return 1
@@ -165,28 +218,56 @@ snapshot_find() { # <label>
   return 1
 }
 
-# Pane lines ordered by session name, then numeric window index, then numeric
-# pane index. Everything below that reads pane lines expects this order.
-sort_panes() { LC_ALL=C sort -t "$US" -k1,1 -k2,2n -k5,5n; }
+# Pane records ordered by session name, then numeric window index, then numeric
+# pane index. Everything below that reads pane records expects this order.
+# sort(1) is line-based, so this is awk with RS as its record separator, which
+# POSIX awk allows when it is one character. Stable, so equal keys keep their
+# order. The session name is compared as a string even when it looks like a
+# number.
+sort_panes() {
+  LC_ALL=C awk '
+    function before(a, b) {
+      if (s[a] != s[b]) return s[a] < s[b]
+      if (w[a] != w[b]) return w[a] < w[b]
+      return p[a] < p[b]
+    }
+    BEGIN { RS = "\036"; FS = "\037" }
+    NR > 1 { sub(/^\n/, "") }
+    $0 != "" { n++; rec[n] = $0; s[n] = $1 ""; w[n] = $2 + 0; p[n] = $5 + 0; o[n] = n }
+    END {
+      for (i = 2; i <= n; i++) {
+        k = o[i]
+        for (j = i - 1; j > 0 && before(k, o[j]); j--) o[j + 1] = o[j]
+        o[j + 1] = k
+      }
+      for (i = 1; i <= n; i++) printf "%s\036\n", rec[o[i]]
+    }'
+}
 
-# The pane lines of an accepted snapshot file, without its first two lines.
+# The pane records of an accepted snapshot file, after its first two lines.
 snapshot_panes() { # <file>
   sed 1,2d "$1" | sort_panes
 }
 
-# Splits one pane line into P_* variables. Fails for a line with no window
-# index, which no pane has: a blank line, or one that is not a pane.
-parse_pane() { # <line>
-  IFS=$US read -r P_SESSION P_WIDX P_WNAME P_LAYOUT P_PIDX P_PATH P_CMD P_LAUNCHER \
-    P_TITLE P_COLOUR P_STATE P_ROLE P_STATUS <<EOF
-$1
-EOF
+# Splits one pane record into P_* variables. A record ending in US (an empty
+# @status) splits one field short, so a missing field reads as empty.
+# Fails for a record with no window index, which no pane has.
+parse_pane() { # <record>
+  local IFS
+  IFS=$US
+  set -f
+  # shellcheck disable=SC2086 # split on US, on purpose
+  set -- $1
+  set +f
+  P_SESSION=${1-} P_WIDX=${2-} P_WNAME=${3-} P_LAYOUT=${4-} P_PIDX=${5-} P_PATH=${6-}
+  P_CMD=${7-} P_LAUNCHER=${8-} P_TITLE=${9-} P_COLOUR=${10-} P_STATE=${11-}
+  P_ROLE=${12-} P_STATUS=${13-}
   [ -n "$P_WIDX" ]
 }
 
 # Writes a snapshot. On failure SAVE_ERROR says why and the temp is removed;
 # on success SNAP_FILE is the file written.
-snapshot_write() { # <label> <save time> <pane lines>
+snapshot_write() { # <label> <save time> <pane records>
   local dir front back draw err
   dir=$(snapshot_dir "$1")
   front=$dir/current.snap
@@ -223,35 +304,35 @@ snapshot_write() { # <label> <save time> <pane lines>
 # ── reading a snapshot ───────────────────────────────────────────────────────
 
 # One line per window: session, window index, window name, pane count, in the
-# order of the pane lines given. The name is the first pane's.
-snapshot_windows() { # <sorted pane lines>
-  local line key prev have n ws wi wn
+# order of the pane records given. The name is the first pane's. Lines, not
+# records: tmux refuses a newline in a session or window name.
+snapshot_windows() { # <sorted pane records>
+  local key prev have n ws wi wn
   prev='' have=0 n=0
-  while IFS= read -r line; do
-    parse_pane "$line" || continue
-    key=$P_SESSION$US$P_WIDX
-    if [ "$have" = 1 ] && [ "$key" = "$prev" ]; then
-      n=$((n + 1))
-      continue
-    fi
-    [ "$have" = 1 ] && us_line "$ws" "$wi" "$wn" "$n"
-    have=1 prev=$key n=1 ws=$P_SESSION wi=$P_WIDX wn=$P_WNAME
-  done <<EOF
-$1
-EOF
+  each_record "$1" window_of_pane
   [ "$have" = 1 ] && us_line "$ws" "$wi" "$wn" "$n"
   return 0
 }
 
-# Prints the pane lines of one window.
-window_panes() { # <sorted pane lines> <session> <window index>
-  local line
-  while IFS= read -r line; do
-    parse_pane "$line" || continue
-    [ "$P_SESSION" = "$2" ] && [ "$P_WIDX" = "$3" ] && printf '%s\n' "$line"
-  done <<EOF
-$1
-EOF
+window_of_pane() { # <record>, for snapshot_windows
+  parse_pane "$1" || return 0
+  key=$P_SESSION$US$P_WIDX
+  if [ "$have" = 1 ] && [ "$key" = "$prev" ]; then
+    n=$((n + 1))
+    return 0
+  fi
+  [ "$have" = 1 ] && us_line "$ws" "$wi" "$wn" "$n"
+  have=1 prev=$key n=1 ws=$P_SESSION wi=$P_WIDX wn=$P_WNAME
+}
+
+# Prints the pane records of one window.
+window_panes() { # <sorted pane records> <session> <window index>
+  each_record "$1" pane_in_window "$2" "$3"
+}
+
+pane_in_window() { # <record> <session> <window index>, for window_panes
+  parse_pane "$1" || return 0
+  [ "$P_SESSION" = "$2" ] && [ "$P_WIDX" = "$3" ] && printf '%s%s\n' "$1" "$RS"
   return 0
 }
 
@@ -473,23 +554,30 @@ detect_launcher() { # <pane pid>
 
 # ── save ─────────────────────────────────────────────────────────────────────
 
-# Turns list-panes rows into pane lines, detecting each pane's launcher.
-panes_from_rows() { # <list-panes rows>
-  local session widx wname layout pidx path cmd title colour state role status pid launcher
-  while IFS=$US read -r session widx wname layout pidx path cmd title colour state role status pid; do
-    [ -n "$widx" ] || continue
-    launcher=$(detect_launcher "$pid")
-    us_line "$session" "$widx" "$wname" "$layout" "$pidx" "$path" "$cmd" "$launcher" \
-      "$title" "$colour" "$state" "$role" "$status"
-  done <<EOF
-$1
-EOF
+# Turns list-panes records into pane records, detecting each pane's launcher.
+panes_from_rows() { # <list-panes records>
+  each_record "$1" pane_from_row
+}
+
+pane_from_row() { # <list-panes record>, for panes_from_rows
+  local IFS launcher
+  IFS=$US
+  set -f
+  # shellcheck disable=SC2086 # split on US, on purpose
+  set -- $1
+  set +f
+  unset IFS
+  [ -n "${2-}" ] || return 0
+  # Fields 1-12 as in PANE_FORMAT, then the pid.
+  launcher=$(detect_launcher "${13-}")
+  us_record "${1-}" "$2" "${3-}" "${4-}" "${5-}" "${6-}" "${7-}" "$launcher" \
+    "${8-}" "${9-}" "${10-}" "${11-}" "${12-}"
 }
 
 # A readable tree of what was captured: session, window, panes, each pane with
 # its process and cwd.
-summarize() { # <sorted pane lines>
-  local windows ws wi wn wc prev started line
+summarize() { # <sorted pane records>
+  local windows ws wi wn wc prev started
   windows=$(snapshot_windows "$1")
   started=0 prev=''
   while IFS=$US read -r ws wi wn wc; do
@@ -499,19 +587,19 @@ summarize() { # <sorted pane lines>
       printf '%s\n' "$(show_name "$ws")"
     fi
     printf '  %s  %s  (%s)\n' "$wi" "$wn" "$(plural "$wc" pane)"
-    while IFS= read -r line; do
-      parse_pane "$line" || continue
-      if [ -n "$P_LAUNCHER" ]; then
-        printf '       %s  %-15s %s  (launcher: %s)\n' "$P_PIDX" "$P_CMD" "$P_PATH" "$P_LAUNCHER"
-      else
-        printf '       %s  %-15s %s\n' "$P_PIDX" "$P_CMD" "$P_PATH"
-      fi
-    done <<EOF
-$(window_panes "$1" "$ws" "$wi")
-EOF
+    each_record "$(window_panes "$1" "$ws" "$wi")" summarize_pane
   done <<EOF
 $windows
 EOF
+}
+
+summarize_pane() { # <record>, for summarize
+  parse_pane "$1" || return 0
+  if [ -n "$P_LAUNCHER" ]; then
+    printf '       %s  %-15s %s  (launcher: %s)\n' "$P_PIDX" "$P_CMD" "$P_PATH" "$P_LAUNCHER"
+  else
+    printf '       %s  %-15s %s\n' "$P_PIDX" "$P_CMD" "$P_PATH"
+  fi
 }
 
 # Records a failed save on the server it was for, where the status bar shows it
@@ -533,15 +621,16 @@ save_server() {
     return 0
   fi
 
+  has_separator "$raw" || { save_failed "$(separator_error)"; return 1; }
+  records_complete "$raw" || { save_failed "tmux's pane listing ended inside a pane record"; return 1; }
+
   # A lone pane is an empty server just started, or a crash that left nothing.
   # Saving it would overwrite the last good snapshot with nothing worth
   # restoring. Not a failure: @snapshot-error is left as it is.
-  if [ "$(count_lines "$raw")" -eq 1 ]; then
+  if [ "$(count_records "$raw")" -eq 1 ]; then
     note "server '$TS_LABEL' has a single pane (fresh/empty), not saving"
     return 0
   fi
-
-  has_separator "$raw" || { save_failed "$(separator_error)"; return 1; }
 
   note "saving server '$TS_LABEL'"
   process_reader
@@ -549,7 +638,7 @@ save_server() {
   snapshot_write "$TS_LABEL" "$(date '+%Y-%m-%d %H:%M')" "$panes" || { save_failed "$SAVE_ERROR"; return 1; }
   ts_tmux set-option -su @snapshot-error 2>/dev/null
   summarize "$panes"
-  note "wrote $(count_lines "$panes") panes to $SNAP_FILE"
+  note "wrote $(count_records "$panes") panes to $SNAP_FILE"
 }
 
 cmd_save() {
@@ -586,7 +675,7 @@ EOF
 # session in the snapshot that exists on the server is not created; a window
 # whose session exists and has that index is skipped.
 
-plan_restore() { # <sorted pane lines> <live sessions> <live windows>
+plan_restore() { # <sorted pane records> <live sessions> <live windows>
   local windows ws wi wn wc prev started sid sessions creates skips
   windows=$(snapshot_windows "$1")
   started=0 prev='' sid='' sessions='' creates='' skips=''
@@ -610,7 +699,7 @@ EOF
 
 # Fails, saying why, when tmux's listings cannot be read. It returns rather
 # than dies because the status view calls it inside $(...).
-plan_for_server() { # <sorted pane lines>
+plan_for_server() { # <sorted pane records>
   local sessions windows
   sessions=$(live_sessions)
   windows=$(live_windows)
@@ -632,26 +721,27 @@ EOF
   printf '%s' "$n"
 }
 
-describe_plan() { # <sorted pane lines>
-  local action a b c d line
+describe_pane() { # <record>, for describe_plan
+  parse_pane "$1" || return 0
+  if [ -e "$P_PATH" ]; then
+    printf '    pane %s: cwd=%s\n' "$P_PIDX" "$P_PATH"
+    [ -n "$P_LAUNCHER" ] && printf '      %srun:%s %s%s%s\n' "$DIM" "$RESET" "$BOLD" "$P_LAUNCHER" "$RESET"
+  else
+    printf '    pane %s: cwd=%s%s (missing, opens in ~)%s\n' "$P_PIDX" "$P_PATH" "$DIM" "$RESET"
+    [ -n "$P_LAUNCHER" ] && printf '      %sskip %s: dir missing%s\n' "$DIM" "$P_LAUNCHER" "$RESET"
+  fi
+  return 0
+}
+
+describe_plan() { # <sorted pane records>
+  local action a b c d
   while IFS=$US read -r action a b c d; do
     case $action in
       create-session)
         printf 'create session: %s\n' "$(show_name "$a")" ;;
       create-window)
         printf 'create window: %s%s:%s%s "%s" (%s)\n' "$BOLD" "$(show_name "$a")" "$b" "$RESET" "$c" "$(plural "$d" pane)"
-        while IFS= read -r line; do
-          parse_pane "$line" || continue
-          if [ -e "$P_PATH" ]; then
-            printf '    pane %s: cwd=%s\n' "$P_PIDX" "$P_PATH"
-            [ -n "$P_LAUNCHER" ] && printf '      %srun:%s %s%s%s\n' "$DIM" "$RESET" "$BOLD" "$P_LAUNCHER" "$RESET"
-          else
-            printf '    pane %s: cwd=%s%s (missing, opens in ~)%s\n' "$P_PIDX" "$P_PATH" "$DIM" "$RESET"
-            [ -n "$P_LAUNCHER" ] && printf '      %sskip %s: dir missing%s\n' "$DIM" "$P_LAUNCHER" "$RESET"
-          fi
-        done <<EOF
-$(window_panes "$1" "$a" "$b")
-EOF
+        each_record "$(window_panes "$1" "$a" "$b")" describe_pane
         ;;
       skip-window)
         printf '%sskip window: %s:%s (exists)%s\n' "$DIM" "$(show_name "$a")" "$b" "$RESET" ;;
@@ -668,8 +758,46 @@ must() {
   die "restore stopped: tmux $1 failed"
 }
 
-execute_plan() { # <sorted pane lines>
-  local live action a b c d out sid park parks wid pane first line launches path launcher
+# One pane of a window being created, for execute_plan, whose sid, wid, pane,
+# first and launches it reads and sets.
+build_pane() { # <record>
+  parse_pane "$1" || return 0
+  if [ "$first" = 1 ]; then
+    out=$(ts_tmux new-window -t "$sid:$b" -n "$c" -c "$P_PATH" -P -F "#{window_id}$US#{pane_id}") ||
+      die "restore stopped: cannot create window $(show_name "$a"):$b"
+    wid=${out%%"$US"*}
+    pane=${out#*"$US"}
+    # Window-scope labels, shared by the window's panes, from the first.
+    [ -n "$P_TITLE" ] && must set-option -w -t "$wid" @title "$P_TITLE"
+    [ -n "$P_COLOUR" ] && must set-option -w -t "$wid" @colour "$P_COLOUR"
+    [ -n "$P_STATE" ] && must set-option -w -t "$wid" @state "$P_STATE"
+    first=0
+  else
+    pane=$(ts_tmux split-window -f -t "$wid" -c "$P_PATH" -P -F '#{pane_id}') ||
+      die "restore stopped: cannot add pane $P_PIDX to window $(show_name "$a"):$b"
+  fi
+  must select-layout -t "$wid" "$P_LAYOUT"
+  [ -n "$P_ROLE" ] && must set-option -p -t "$pane" @role "$P_ROLE"
+  [ -n "$P_STATUS" ] && must set-option -p -t "$pane" @status "$P_STATUS"
+  [ -n "$P_LAUNCHER" ] && launches="$launches$(us_record "$pane" "$P_PATH" "$P_LAUNCHER")$NL"
+  return 0
+}
+
+# Only where the saved cwd still exists: a missing one put the pane in HOME,
+# and starting the launcher there is worse than leaving a plain shell.
+run_launcher() { # <pane id <US> cwd <US> launcher>
+  local pane path launcher
+  pane=${1%%"$US"*}
+  launcher=${1##*"$US"}
+  path=${1#*"$US"}
+  path=${path%"$US"*}
+  [ -e "$path" ] || return 0
+  must send-keys -t "$pane" -l "$launcher"
+  must send-keys -t "$pane" Enter
+}
+
+execute_plan() { # <sorted pane records>
+  local live action a b c d out sid park parks wid pane first launches
   live=$(live_sessions)
   parks='' launches=''
 
@@ -706,46 +834,16 @@ execute_plan() { # <sorted pane lines>
         # so pane N is created with saved pane N's cwd. Panes are created even
         # when their cwd is gone (tmux falls back to HOME), so the pane count
         # matches the layout.
-        while IFS= read -r line; do
-          parse_pane "$line" || continue
-          if [ "$first" = 1 ]; then
-            out=$(ts_tmux new-window -t "$sid:$b" -n "$c" -c "$P_PATH" -P -F "#{window_id}$US#{pane_id}") ||
-              die "restore stopped: cannot create window $(show_name "$a"):$b"
-            wid=${out%%"$US"*}
-            pane=${out#*"$US"}
-            # Window-scope labels, shared by the window's panes, from the first.
-            [ -n "$P_TITLE" ] && must set-option -w -t "$wid" @title "$P_TITLE"
-            [ -n "$P_COLOUR" ] && must set-option -w -t "$wid" @colour "$P_COLOUR"
-            [ -n "$P_STATE" ] && must set-option -w -t "$wid" @state "$P_STATE"
-            first=0
-          else
-            pane=$(ts_tmux split-window -f -t "$wid" -c "$P_PATH" -P -F '#{pane_id}') ||
-              die "restore stopped: cannot add pane $P_PIDX to window $(show_name "$a"):$b"
-          fi
-          must select-layout -t "$wid" "$P_LAYOUT"
-          [ -n "$P_ROLE" ] && must set-option -p -t "$pane" @role "$P_ROLE"
-          [ -n "$P_STATUS" ] && must set-option -p -t "$pane" @status "$P_STATUS"
-          [ -n "$P_LAUNCHER" ] && launches="$launches$pane$US$P_PATH$US$P_LAUNCHER$NL"
-        done <<EOF
-$(window_panes "$1" "$a" "$b")
-EOF
+        each_record "$(window_panes "$1" "$a" "$b")" build_pane
         ;;
     esac
   done <<EOF
 $PLAN
 EOF
 
-  # Launchers run once the layout is built, and only where the saved cwd still
-  # exists: a missing one put the pane in HOME, and starting the launcher there
-  # is worse than leaving a plain shell.
-  while IFS=$US read -r pane path launcher; do
-    [ -n "$pane" ] || continue
-    [ -e "$path" ] || continue
-    must send-keys -t "$pane" -l "$launcher"
-    must send-keys -t "$pane" Enter
-  done <<EOF
-$launches
-EOF
+  # Launchers run once the layout is built. Records, since a cwd can hold a
+  # newline.
+  each_record "$launches" run_launcher
 
   for park in $parks; do
     ts_tmux kill-window -t "$park" 2>/dev/null
@@ -837,7 +935,7 @@ status_rows() {
     [ "$n" -gt 0 ] && todo="${todo:+$todo, }$(plural "$n" window)"
     saved=$(when "$(snapshot_saved "$file")")
     us_line "$label" "$saved" "$(count_sessions "$windows")" "$(count_lines "$windows")" \
-      "$(count_lines "$panes")" "$running" "${todo:-up to date}"
+      "$(count_records "$panes")" "$running" "${todo:-up to date}"
   done <<EOF
 $labels
 EOF

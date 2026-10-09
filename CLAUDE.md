@@ -199,7 +199,9 @@ of `./test.sh` either. It needs docker: each case runs in a fresh container
 built from `tests/tmux/Dockerfile` (alpine with tmux, no Node), with the repo
 mounted read-only, so the servers it starts and kills are never yours. It
 prints the tmux version it ran against. It covers save, kill and restore round
-trips, sessions named `""` and names holding `:` or `.`, the `@snapshot-error`
+trips, sessions named `""`, names holding `:` or `.`, a newline in a pane's
+cwd or `@status` (pane records end with the ASCII record separator, not a
+newline), the `@snapshot-error`
 mark and the status bar segment, and the old JSON files being left alone. The
 unit cases in `tests/cases/` fake tmux with `tests/fake-tmux.sh`; anything about
 how tmux itself treats an argument belongs here instead. Run it after changing

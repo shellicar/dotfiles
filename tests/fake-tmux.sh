@@ -15,6 +15,7 @@
 # No sessions means no server, and the listings fail as tmux's do.
 
 FUS=$(printf '\037')
+FRS=$(printf '\036')
 FAKE_SESSIONS=''
 FAKE_WINDOWS=''
 FAKE_PANES=''
@@ -50,7 +51,8 @@ EOF
 #
 # US in the output is printed the way tmux 3.7 prints it: as is with -u, as '_'
 # without (no UTF-8 locale here). FAKE_TMUX_35=1 prints it as '\037', as tmux
-# 3.5 does even with -u.
+# 3.5 does even with -u. RS is treated the same way (as '\036' for 3.5), which
+# was seen only for US; with -u, tmux 3.7c prints RS as is (tests/tmux).
 FAKE_TMUX_35=0
 fake_listing() { # tmux's arguments
   local out status utf8
@@ -60,11 +62,11 @@ fake_listing() { # tmux's arguments
   status=$?
   [ "$status" -eq 0 ] || return "$status"
   if [ "$FAKE_TMUX_35" = 1 ]; then
-    printf '%s\n' "$out" | sed "s/$FUS/\\\\037/g"
+    printf '%s\n' "$out" | sed "s/$FUS/\\\\037/g; s/$FRS/\\\\036/g"
   elif [ "$utf8" = 1 ]; then
     printf '%s\n' "$out"
   else
-    printf '%s\n' "$out" | sed "s/$FUS/_/g"
+    printf '%s\n' "$out" | sed "s/$FUS/_/g; s/$FRS/_/g"
   fi
 }
 
@@ -140,22 +142,29 @@ fake_option_is_set() { # <name>
   grep -q "^$1$FUS" "$FAKE_OPTIONS"
 }
 
-# A pane line in the snapshot format: session, window index, window name,
-# layout, pane index, cwd, command, launcher, @title, @colour, @state, @role,
-# @status.
+# Fields separated by US, one line: what a plan step or a status row is.
 snap_line() {
   local IFS
   IFS=$FUS
   printf '%s\n' "$*"
 }
 
-# A pane line with the fields a case does not care about filled in.
+# A pane record in the snapshot format, ended by RS and a newline: session,
+# window index, window name, layout, pane index, cwd, command, launcher,
+# @title, @colour, @state, @role, @status.
+snap_record() {
+  local IFS
+  IFS=$FUS
+  printf '%s%s\n' "$*" "$FRS"
+}
+
+# A pane record with the fields a case does not care about filled in.
 snap_pane() { # <session> <window index> <window name> <pane index> [cwd] [launcher]
-  snap_line "$1" "$2" "$3" "layout-$2" "$4" "${5:-/}" sh "${6:-}" '' '' '' '' ''
+  snap_record "$1" "$2" "$3" "layout-$2" "$4" "${5:-/}" sh "${6:-}" '' '' '' '' ''
 }
 
 # A snapshot file in the format: the version line, the saved line, the panes.
-snap_file() { # <file> <pane lines>
+snap_file() { # <file> <pane records>
   printf 'tmux-snapshot 2\nsaved 2026-10-09 12:00\n%s\n' "$2" > "$1"
 }
 

@@ -49,8 +49,8 @@ case $(sed -n 2p "$dir/current.snap") in
   *) fail "the second line is not the save time: $(sed -n 2p "$dir/current.snap")" ;;
 esac
 assert_eq "$(sed 1,2d "$dir/current.snap")" \
-  "$(snap_line '' 0 one lay 0 /a sh '' '' '' '' '' '')
-$(snap_line a:b 2 two lay 0 /b sh '' '' '' '' '' '')"
+  "$(snap_record '' 0 one lay 0 /a sh '' '' '' '' '' '')
+$(snap_record a:b 2 two lay 0 /b sh '' '' '' '' '' '')"
 
 FAKE_PANES="$FAKE_PANES
 \$0${FUS}0${FUS}one${FUS}lay${FUS}1${FUS}/c${FUS}sh${FUS}103"
