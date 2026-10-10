@@ -1,0 +1,37 @@
+#!/bin/sh
+set -u
+TESTS=$(cd "$(dirname "$0")/.." && pwd)
+REPO=$(cd "$TESTS/.." && pwd)
+# shellcheck source=../harness.sh
+. "$TESTS/harness.sh"
+# shellcheck source=../fake-tmux.sh
+. "$TESTS/fake-tmux.sh"
+
+describe 'the status view counts a server as running when its only session is called ""'
+
+# Asked for session names alone, this server prints one empty line, which a
+# check that counts non-empty lines reads as no server.
+FAKE_SESSIONS="\$0$FUS"
+FAKE_WINDOWS="\$0${FUS}0"
+tmux_says() {
+  case "$*" in
+    "-u -L up "*) FAKE_SESSIONS="\$0$FUS" fake_listing "$@" ;;
+    "-u -L down "*) FAKE_SESSIONS='' fake_listing "$@" ;;
+    *) fail "unexpected: tmux $*" ;;
+  esac
+}
+
+guard_path
+# shellcheck source=../../home/common/lib/tmux-snapshot.sh
+. "$REPO/home/common/lib/tmux-snapshot.sh"
+
+server_running up || fail "a server with a \"\" session read as not running"
+server_running down && fail "a server that does not answer read as running"
+
+# The status view itself: one label with a snapshot and its server up.
+dir=$(snapshot_dir up)
+mkdir -p "$dir"
+snap_file "$dir/current.snap" "$(snap_pane '' 0 a 0; snap_pane '' 1 b 0)"
+SERVER_DIR=$WORK/no-sockets
+row=$(status_rows)
+assert_eq "$row" "$(snap_line up "$(when '2026-10-09 12:00')" 1 2 2 running '1 window')"
