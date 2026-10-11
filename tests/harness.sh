@@ -51,8 +51,29 @@ git_says() {
   fail "the case did not say what git answers for: git $*"
 }
 
-# Nothing in a child process should reach the real git. The rest of PATH stays,
-# because the library uses awk, sed and friends for real.
+# tmux is faked the same way: a function every caller in the sourced library
+# gets, answered by tmux_says in a subshell, and logged one call per line.
+# A case answers only what real tmux could answer: a server with a session
+# called "" lists it as an empty name, not as nothing. A claim about how tmux
+# itself treats an argument belongs in tests/tmux, which runs the real one.
+TMUX_LOG=$WORK/tmux.log
+: > "$TMUX_LOG"
+
+tmux() {
+  printf '%s\n' "$*" >> "$TMUX_LOG"
+  ( tmux_says "$@" )
+}
+
+tmux_says() {
+  fail "the case did not say what tmux answers for: tmux $*"
+}
+
+tmux_asked() {
+  grep -qxF "$1" "$TMUX_LOG"
+}
+
+# Nothing in a child process should reach the real git, or the real tmux. The
+# rest of PATH stays, because the library uses awk, sed and friends for real.
 guard_path() {
   mkdir -p "$WORK/nogit"
   cat > "$WORK/nogit/git" <<'SHIM'
@@ -60,7 +81,12 @@ guard_path() {
 printf 'test harness: real git reached from a child process: git %s\n' "$*" >&2
 exit 97
 SHIM
-  chmod +x "$WORK/nogit/git"
+  cat > "$WORK/nogit/tmux" <<'SHIM'
+#!/bin/sh
+printf 'test harness: real tmux reached from a child process: tmux %s\n' "$*" >&2
+exit 97
+SHIM
+  chmod +x "$WORK/nogit/git" "$WORK/nogit/tmux"
   PATH=$WORK/nogit:$PATH
   export PATH
 }
