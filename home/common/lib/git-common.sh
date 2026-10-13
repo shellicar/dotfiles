@@ -266,6 +266,7 @@ resolve_main() {
   fi
   git rev-parse --verify --quiet "$MAIN_REF" >/dev/null || {
     echo "Error: $MAIN_REF does not exist (fetch origin, or pass --base <branch>)" >&2; exit 1; }
+  prune_in_main_cache
 }
 
 # The line a command opens with: which trunk, how many branches, and what cap is
@@ -312,17 +313,29 @@ fetch_origin() {
 # it. --write-tree needs git 2.38 or newer.
 #
 # The answer depends only on the trunk's tip and the commit, so it is cached
-# under both. Repo-local, under .git/, so it survives across runs but never
-# leaks between repos.
+# as in-main/<trunk tip>/<commit>, holding yes or no. Repo-local, under .git/,
+# so it survives across runs but never leaks between repos.
+# prune_in_main_cache removes the directories of other tips.
+#
+# Another command in the same repository can prune this tip's directory while
+# this one reads or writes it, after a fetch that moved the trunk for one of
+# them. So an entry that cannot be read as yes or no is asked again rather
+# than taken as no, and an entry is written whole under a temporary name and
+# renamed into place, so a reader never sees half of one. A write that fails
+# because the directory went is not reported: the answer is still returned,
+# just not kept.
 in_main_by_content() (
   c=$1
   trunk=$(git rev-parse --verify --quiet "$MAIN_REF^{commit}") || return 1
-  file="$CACHE_DIR/in-main/$trunk-$c"
-  if [ -f "$file" ]; then
-    [ "$(cat "$file")" = yes ]
-    return
-  fi
-  out=$(git merge-tree --write-tree "$trunk" "$c" 2>"$CACHE_DIR/merge-tree-error")
+  dir="$CACHE_DIR/in-main/$trunk"
+  file="$dir/$c"
+  case "$(cat "$file" 2>/dev/null)" in
+    yes) return 0 ;;
+    no) return 1 ;;
+  esac
+  # Named for this command's shell, so two commands do not share it.
+  err="$CACHE_DIR/merge-tree-error.$$"
+  out=$(git merge-tree --write-tree "$trunk" "$c" 2>"$err")
   rc=$?
   tree=$(printf '%s\n' "$out" | head -1)
   # 0 is a clean merge and 1 a conflict, both answers, and both print the
@@ -340,15 +353,39 @@ in_main_by_content() (
     *[!0-9a-f]*|'') rc=2 ;;
   esac
   if [ "$rc" -gt 1 ]; then
-    { printf '%s: git merge-tree failed on %s:\n' "$TOOL" "$c"; cat "$CACHE_DIR/merge-tree-error"; } >&2
+    { printf '%s: git merge-tree failed on %s:\n' "$TOOL" "$c"; cat "$err"; } >&2
+    rm -f "$err"
     kill "$$" 2>/dev/null
     return 2
   fi
+  rm -f "$err"
   ans=no
   [ "$rc" = 0 ] && [ "$tree" = "$(git rev-parse --verify --quiet "$trunk^{tree}")" ] && ans=yes
-  mkdir -p "$CACHE_DIR/in-main" && printf '%s\n' "$ans" > "$file"
+  { mkdir -p "$dir" && printf '%s\n' "$ans" > "$file.$$" && mv -f "$file.$$" "$file"; } 2>/dev/null ||
+    rm -f "$file.$$" 2>/dev/null
   [ "$ans" = yes ]
 )
+
+# Removes the cached answers for every trunk tip but the current one. They are
+# keyed by the tip, so once the trunk moves they are never read again. Leaves
+# the rest of cleanup-cache alone.
+#
+# Called from resolve_main, which every command that reads the cache goes
+# through, once it has set CACHE_DIR. A command that fetches after that, as git
+# refresh and git cleanup do, keeps the tip from before its fetch until its
+# next run. Racing with another command is covered at in_main_by_content: an
+# entry this removes from under it is asked again.
+prune_in_main_cache() {
+  local tip d
+  [ -n "${CACHE_DIR:-}" ] && [ -d "$CACHE_DIR/in-main" ] || return 0
+  tip=$(git rev-parse --verify --quiet "$MAIN_REF^{commit}") || return 0
+  for d in "$CACHE_DIR/in-main"/*; do
+    [ -e "$d" ] || continue
+    [ "${d##*/}" = "$tip" ] && continue
+    rm -rf "$d"
+  done
+  return 0
+}
 
 # The branch's landed commit: walking down from the tip, the first commit
 # in_main_by_content passes. Everything from it down counts as in the trunk,

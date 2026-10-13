@@ -432,7 +432,7 @@ MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10)
 [ -n "$MAIN_WT" ] || { echo "Error: cannot find the main working tree" >&2; exit 1; }
 cd "$MAIN_WT" || exit 1
 
-CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
+CACHE_DIR="$(git rev-parse --git-common-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
 NOW=$(date +%s)
 resolve_main

@@ -54,7 +54,8 @@ and on output it cannot read, before doing anything else. A git error from
 `merge-tree` stops the command with git's message rather than reading as "not in the
 trunk". `merge-tree` writes the merged tree into the object store, where nothing refers
 to it and `git gc` removes it. Each answer is cached under
-`cleanup-cache/in-main/` in the git directory, keyed by the trunk's tip and the commit.
+`cleanup-cache/in-main/<trunk tip>/` in the repository's common git directory, which
+every worktree shares, and each run removes the answers for every other tip.
 
 A deleted remote branch is never the verdict. It is a cross-check, and it earns a
 mention only when it disagrees with the content: merged with the remote still there, or

@@ -42,15 +42,17 @@ branch=$(git symbolic-ref --quiet --short HEAD) || { echo "detached HEAD" >&2; e
 
 git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
 
-resolve_main
-main=$MAIN
 # Where the library caches which commits are already in main, and how many
-# commits down from the tip it looks for one: see landed_commit.
-# The common directory, not this worktree's own, so the cache is the one git
-# refresh uses, which runs from the main working tree.
+# commits down from the tip it looks for one: see landed_commit. Set before
+# resolve_main, which prunes the cache.
+# The common directory, not this worktree's own, so the cache is the one the
+# other commands use.
 CACHE_DIR="$(git rev-parse --git-common-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
 WALK_DEPTH=50
+
+resolve_main
+main=$MAIN
 target=$(git rev-parse --verify --quiet "$MAIN_REF")
 
 say_environment

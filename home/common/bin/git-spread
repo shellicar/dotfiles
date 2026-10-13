@@ -53,7 +53,7 @@ setup() {
 ensure_in_git_repository
 # run_update writes git's own failure message here so it can report the real
 # reason rather than calling everything a conflict.
-CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
+CACHE_DIR="$(git rev-parse --git-common-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
 
 echo "fetching origin (prune)..."
