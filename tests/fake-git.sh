@@ -70,6 +70,14 @@ lands() {
   printf '%s\n' "$1" >> "$LANDS"
 }
 
+# branch_created <ref> <epoch>: the time of the oldest entry in the branch's
+# reflog. A branch given none has no reflog.
+CREATED=$WORK/created
+: > "$CREATED"
+branch_created() {
+  printf '%s\t%s\n' "$1" "$2" >> "$CREATED"
+}
+
 TIMES=$WORK/times
 : > "$TIMES"
 
@@ -347,6 +355,14 @@ git_says() (
       esac ;;
     "for-each-ref --format=%(refname:short) refs/heads/"|"for-each-ref --format %(refname:short) refs/heads/")
       cut -f1 "$REFS" | sed -n 's@^refs/heads/@@p' ;;
+    # The oldest entry only, printed as git prints a selector under
+    # --date=unix: the short name, then the entry's time. No reflog fails the
+    # way git does.
+    "reflog --no-show-signature --date=unix --format=%gd refs/heads/"*)
+      ref=$(last_word "$@")
+      at=$(awk -F"$TAB" -v r="$ref" '$1 == r { print $2; exit }' "$CREATED")
+      [ -n "$at" ] || return 128
+      printf '%s@{%s}\n' "${ref#refs/heads/}" "$at" ;;
     # The tip's time, and how long before the fake's clock that was.
     "rev-list --no-commit-header -1 --format=%cr "*)
       c=$(commit_of "$(last_word "$@")") || return 128
