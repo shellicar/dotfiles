@@ -52,16 +52,37 @@ TOOL=${TOOL:-git}
 # plan did not show, or skip something its plan relies on. docs/git-commands.md
 # lists both sides and why.
 #
-# TODO(claude): undecided: whether non-git processes the commands start (pnpm in
-# git wt-create, az, gh, the VS Code opener in git review) should inherit these.
-# They do for now, so any git they start is pinned too.
+# Programs the commands start inherit the pins: pnpm in git wt-create, az, gh.
+# They run and exit, so any git they start is pinned for that one call. VS Code
+# is the exception, see unpin_git_config.
+#
+# PINS_FROM is the entry count the environment had before pinning, or empty
+# when GIT_CONFIG_COUNT was unset, so unpin_git_config can put it back.
 pin_git_config() {
   local n="${GIT_CONFIG_COUNT:-0}" kv
+  PINS_FROM=${GIT_CONFIG_COUNT-}
   for kv in "$@"; do
     export "GIT_CONFIG_KEY_$n=${kv%%=*}" "GIT_CONFIG_VALUE_$n=${kv#*=}"
     n=$((n + 1))
   done
   export GIT_CONFIG_COUNT="$n"
+}
+
+# Removes the entries pin_git_config added and leaves the ones that were there
+# before. Called before launching VS Code: if `code` starts a new VS Code rather
+# than handing off to a running one, that process keeps its environment for as
+# long as it runs, and every terminal opened in it would have git pinned.
+unpin_git_config() {
+  local n="${PINS_FROM:-0}"
+  while [ "$n" -lt "${GIT_CONFIG_COUNT:-0}" ]; do
+    unset "GIT_CONFIG_KEY_$n" "GIT_CONFIG_VALUE_$n"
+    n=$((n + 1))
+  done
+  if [ -n "${PINS_FROM-}" ]; then
+    export GIT_CONFIG_COUNT="$PINS_FROM"
+  else
+    unset GIT_CONFIG_COUNT
+  fi
 }
 
 # rebase: replay only the named range, onto the named base, and nothing else.
@@ -1407,5 +1428,7 @@ review_main() {
   # why ("no merge base"), so its error is the one shown.
   fork=$(git merge-base "$2" "$1") || { git diff --quiet "$2...$1"; return 1; }
   root=$(review_folder)
-  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$1")"
+  # Without the pins: the opener may start the VS Code process itself.
+  ( unpin_git_config
+    "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$1")" )
 }

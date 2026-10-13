@@ -140,6 +140,13 @@ read after the environment, so it overrides a pin for that one run. A new git ca
 command is pinned without doing anything; a new setting that changes behaviour goes in
 the list in `git-common.sh`.
 
+Programs a command starts inherit the pins too: pnpm in `git wt-create`, `az`, `gh`.
+They run and exit, so the pins last for that one call. VS Code is the exception: `git
+review` removes the entries it added, and only those, before it launches VS Code. If
+`code` starts a new VS Code instead of handing off to a running one, that process keeps
+its environment for as long as it runs, and every terminal opened in it would have the
+pins on git you run by hand.
+
 The variables need git 2.31 or newer, and the commands also use `rev-list
 --no-commit-header`, from 2.33. Older git ignores the variables, so the pins would
 silently not apply.
