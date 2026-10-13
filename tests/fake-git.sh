@@ -316,9 +316,12 @@ git_says() (
     "merge-base "*)
       a=$(commit_of "$(nth_word 2 "$@")") || return 1
       b=$(commit_of "$(nth_word 3 "$@")") || return 1
-      ancestry "$a" | while read -r c; do
+      # No common commit fails, as git does for unrelated histories.
+      base=$(ancestry "$a" | while read -r c; do
         reaches "$b" "$c" && { printf '%s\n' "$c"; break; }
-      done ;;
+      done)
+      [ -n "$base" ] || return 1
+      printf '%s\n' "$base" ;;
     "-C "*" config user.email")
       printf '%s\n' "$ME" ;;
     "rev-list --no-commit-header --format=%ae "*)

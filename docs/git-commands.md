@@ -39,6 +39,10 @@ The walk stops at the first pass and never tests below it. A commit lower down c
 fail after the trunk has changed the same lines again, even though its work landed,
 so a failure there says nothing.
 
+The merge is git's, so it uses the repository's merge drivers. A driver that keeps one
+side, such as `CHANGELOG merge=ours`, can make a branch that only changed that file read
+as merged.
+
 It tests at most 50 commits, or `--depth N`. A branch with more commits than that and
 no pass among them is reported as not checked, rather than as unmerged.
 
@@ -49,8 +53,8 @@ checks `git --version` when it is loaded, so every command refuses on an older g
 and on output it cannot read, before doing anything else. A git error from
 `merge-tree` stops the command with git's message rather than reading as "not in the
 trunk". `merge-tree` writes the merged tree into the object store, where nothing refers
-to it and `git gc` removes it. Each answer is cached
-under `.git/cleanup-cache/in-main/`, keyed by the trunk's tip and the commit.
+to it and `git gc` removes it. Each answer is cached under
+`cleanup-cache/in-main/` in the git directory, keyed by the trunk's tip and the commit.
 
 A deleted remote branch is never the verdict. It is a cross-check, and it earns a
 mention only when it disagrees with the content: merged with the remote still there, or
@@ -69,16 +73,20 @@ That produces seven answers:
 | `unmerged` | work of its own, not in the trunk |
 
 **Rescue or rebase.** A `review` branch gets one of two things. When one of its own
-pull requests merged, meaning the last commit of a merged pull request is among the
-branch's commits the trunk does not have, the commits above the landed commit were
-added after that merge, and it is offered the rescue: those commits move to
-`rescue/<branch>` and the original goes. Otherwise its landed commit reached the trunk
-some other way, for instance as commits on a local trunk that were squash-merged
-upstream from other branches, and it is rebased from the landed commit, keeping the
-branch and its worktree. That includes a branch with no pull request information at
-all, and a branch squash-merged by hand. Both hosts answer the question the same way:
-GitHub's `headRefOid` and Azure DevOps's `lastMergeSourceCommit` are each pull
-request's last commit.
+pull requests merged, meaning a merged pull request's source branch has this branch's
+name and its last commit is among the branch's commits the trunk does not have, the
+commits above the landed commit were added after that merge, and it is offered the
+rescue: those commits move to `rescue/<branch>` and the original goes. The name is
+required as well as the commit: a branch cut from another branch whose pull request
+merged holds that pull request's last commit too, and is not the branch the pull
+request was for. Otherwise its landed commit reached the trunk some other way, for
+instance as commits on a local trunk that were squash-merged upstream from other
+branches, and the branch is kept; once it is checked out in a worktree, `git refresh`
+rebases it from the landed commit and keeps the worktree. That includes a branch with
+no pull request information at all, a branch squash-merged by hand, and a branch
+renamed after its pull request merged. Both hosts answer the question the same way:
+GitHub's `headRefName` and `headRefOid`, and Azure DevOps's `sourceRefName` and
+`lastMergeSourceCommit`, are each pull request's source branch and last commit.
 
 `inconclusive` needs both halves of a cap: more than a hundred commits behind the trunk
 *and* untouched for thirty days. A recent branch on a busy repository is far behind and
@@ -102,8 +110,10 @@ A rebase replays only the commits that are not merges, so a merge that carries e
 its own, a resolved conflict or a change made while the merge was open, loses them.
 `git show --remerge-diff <merge>` shows exactly those edits. When a merge above where
 the rebase starts has any, the rebase is still offered, unticked, and its row names the
-merge and the files. A rebase with nothing to drop is ticked as usual. Merging the trunk
-in again is not the safer alternative: it can stop on a conflict of its own.
+merge and the files. A rebase with nothing to drop is ticked as usual. This replaced
+merging the trunk in again for a branch that had merged it before, in `git refresh`:
+the rebase is offered with a warning rather than refused, and `git refresh` no longer
+offers that merge to your own branches.
 
 `git spread` and `git catchup` still merge again into a branch that has merged the
 trunk, since neither can leave a rebase unticked behind a warning. For any other

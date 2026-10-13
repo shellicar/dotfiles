@@ -15,7 +15,7 @@
 #   0 commits not in main  → fully merged     → delete (and its worktree)
 #   N commits not in main  → in main + N on top:
 #       a merged PR of its own → rescue the N with --rescue
-#       none                   → keep; git refresh rebases it
+#       none                   → keep; git refresh rebases it in its worktree
 #   no landed commit       → not merged        → keep
 #   none in --depth tested → not checked       → keep, say so
 #
@@ -123,11 +123,14 @@ EOF
   if [ "$class" = review ] && [ "$pr" = no ]; then
     # In main up to its landed commit, with commits on top, and no merged pull
     # request of its own: the work under it reached main some other way. Not
-    # rescued; git refresh offers the rebase that carries it forward.
+    # rescued; git refresh offers the rebase that carries it forward, and only
+    # to a branch checked out in a worktree.
     ONTOP_COUNT=$((ONTOP_COUNT + 1))
-    note=$desc
-    [ -n "$wt" ] && note="$note, worktree"
-    say "  $icon $branch $meta ${DIM}($note, keeping: git refresh rebases it)${RESET}"
+    if [ -n "$wt" ]; then
+      say "  $icon $branch $meta ${DIM}($desc, worktree, keeping: git refresh rebases it)${RESET}"
+    else
+      say "  $icon $branch $meta ${DIM}($desc, keeping: git refresh rebases it once it is checked out in a worktree)${RESET}"
+    fi
     return 0
   fi
 
@@ -338,7 +341,7 @@ is a reason to keep it, never a reason to remove it, and its age is not used.
   merged + N commits on top  → rescued (stray commits moved off), then deleted, by
                                --rescue, when a pull request of its own merged
   in main + N commits on top → kept, when no pull request of its own merged;
-                               git refresh rebases it
+                               git refresh rebases it once checked out in a worktree
   no landed commit in --depth → not checked, reported and kept
   gone but content not found → warned; deleted by --gone if you trust it
   unmerged                   → kept
@@ -512,7 +515,7 @@ printf '\n'
 say "${GREEN}${OK} merged, ready to delete: $MERGED_COUNT${RESET}  ${DIM}→ --apply${RESET}"
 say "${BLUE}${EMPTYICON} never diverged from main: $EMPTY_COUNT${RESET}  ${DIM}→ --empty${RESET}"
 say "${DIM}${KEEP} merged with commits on top: $REVIEW_COUNT${RESET}  ${DIM}→ --rescue${RESET}"
-say "${DIM}${KEEP} in main with commits on top, no merged PR of its own: $ONTOP_COUNT${RESET}  ${DIM}→ git refresh rebases${RESET}"
+say "${DIM}${KEEP} in main with commits on top, no merged PR of its own: $ONTOP_COUNT${RESET}  ${DIM}→ git refresh rebases those checked out in a worktree${RESET}"
 say "${RED}${WARN}gone but content not found: $SUSPECT_COUNT${RESET}  ${DIM}→ --gone to trust${RESET}"
 say "${YELLOW}${UNKNOWN}${RESET} inconclusive, too far behind: $INCONCLUSIVE_COUNT${RESET}  ${DIM}→ --old${RESET}"
 say "${YELLOW}${UNKNOWN}${RESET} not checked past $WALK_DEPTH commits: $UNCHECKED_COUNT${RESET}  ${DIM}→ --depth${RESET}"

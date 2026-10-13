@@ -333,14 +333,16 @@ in_main_by_content() (
   #
   # This runs in a subshell inside a command substitution, where exit would end
   # only the subshell, so the command's own shell is signalled instead: $$ is
-  # that shell's id even here. Nothing is cached.
+  # that shell's id even here. Nothing is cached. The subshells between here
+  # and that shell keep running until they return, so this returns 2 and each
+  # caller stops on it rather than asking merge-tree again.
   case "$tree" in
     *[!0-9a-f]*|'') rc=2 ;;
   esac
   if [ "$rc" -gt 1 ]; then
     { printf '%s: git merge-tree failed on %s:\n' "$TOOL" "$c"; cat "$CACHE_DIR/merge-tree-error"; } >&2
-    kill "$$"
-    exit 1
+    kill "$$" 2>/dev/null
+    return 2
   fi
   ans=no
   [ "$rc" = 0 ] && [ "$tree" = "$(git rev-parse --verify --quiet "$trunk^{tree}")" ] && ans=yes
@@ -352,9 +354,14 @@ in_main_by_content() (
 # in_main_by_content passes. Everything from it down counts as in the trunk,
 # and everything above it is the branch's own work. As one of:
 #   found <commit>   tab separated
-#   none             every commit the trunk lacks was tested, and none passed
+#   none             every commit the trunk lacks was tested, and none passed,
+#                    or the branch shares no history with main at all
 #   unchecked        WALK_DEPTH commits were tested without a pass, and the
 #                    branch has more than that
+# Returns 2, having said nothing, when git failed (see in_main_by_content).
+#
+# A branch with no merge base is "none" without testing anything: merge-tree
+# refuses unrelated histories, and that refusal is not a git failure.
 #
 # --topo-order, so no commit is tested before a commit built on it. The walk has
 # to meet the highest pass first, and on a branch that merged something in, the
@@ -362,8 +369,16 @@ in_main_by_content() (
 # walk never goes.
 landed_commit() (
   rev=$1
+  git merge-base "$rev" "$MAIN_REF" >/dev/null 2>&1 || { echo none; return 0; }
   for c in $(git rev-list --topo-order -n "$WALK_DEPTH" "$MAIN_REF..$rev" 2>/dev/null); do
-    in_main_by_content "$c" && { printf 'found\t%s\n' "$c"; return 0; }
+    # Status taken with ||, so a "no" (1) does not end the walk under set -e,
+    # which git catchup runs with.
+    r=0
+    in_main_by_content "$c" || r=$?
+    case $r in
+      0) printf 'found\t%s\n' "$c"; return 0 ;;
+      2) return 2 ;;
+    esac
   done
   total=$(git rev-list --count "$MAIN_REF..$rev" 2>/dev/null) || total=0
   if [ "$total" -gt "$WALK_DEPTH" ]; then echo unchecked; else echo none; fi
@@ -499,17 +514,23 @@ pr_covers_branch() (
   [ "$tip" = "$head" ]
 )
 
-# Was a pull request of this branch's merged? Asked as: is the last commit of
-# any merged pull request among the commits this branch has and the trunk does
-# not. Then the commits above the landed commit were added after that merge,
-# and a rescue is what moves them off. Without it, the commits under the landed
-# commit reached the trunk some other way, and the branch is rebased instead.
+# Was a pull request of this branch's merged? Asked as: is there a merged pull
+# request whose source branch has this branch's name, and whose last commit is
+# among the commits this branch has and the trunk does not. Then the commits
+# above the landed commit were added after that merge, and a rescue is what
+# moves them off. Without it, the commits under the landed commit reached the
+# trunk some other way, and the branch is rebased instead.
 #
-# The table's second column is that last commit on both hosts: GitHub's
-# headRefOid and Azure DevOps's lastMergeSourceCommit. One rev-list per branch
-# compared against the whole column, not a merge-base per pull request, which
-# would be a thousand calls per branch. A commit the object store does not hold
-# simply matches nothing.
+# Both halves are needed. The last commit alone also matches a branch cut from
+# another branch whose pull request merged, and the rescue would then remove
+# that branch. The name alone matches an old pull request from a branch name
+# used again. A branch renamed after its pull request merged matches neither,
+# and is rebased.
+#
+# The table's first column is the source branch name, and its second that last
+# commit, on both hosts: GitHub's headRefOid and Azure DevOps's
+# lastMergeSourceCommit. One rev-list per branch, not a merge-base per pull
+# request. A commit the object store does not hold simply matches nothing.
 #
 # With no table, because there is no host, no CLI or no sign-in, the answer is
 # no, and the branch is rebased.
@@ -520,7 +541,10 @@ pr_covers_branch() (
 # from its fork point.
 branch_has_merged_pr() (
   [ -n "$PR_MERGE_TABLE" ] || return 1
-  printf '%s\n' "$PR_MERGE_TABLE" | cut -f2 | sort -u > "$CACHE_DIR/pr-heads"
+  # The name goes to awk through the environment, not -v, which would read a
+  # backslash in it as an escape.
+  printf '%s\n' "$PR_MERGE_TABLE" | B=$1 awk -F'\t' '$1 == ENVIRON["B"] { print $2 }' |
+    sort -u > "$CACHE_DIR/pr-heads"
   git rev-list "$MAIN_REF..refs/heads/$1" 2>/dev/null | sort -u > "$CACHE_DIR/branch-commits"
   [ -n "$(comm -12 "$CACHE_DIR/branch-commits" "$CACHE_DIR/pr-heads")" ]
 )
@@ -639,7 +663,7 @@ commits_not_in_main() (
   # Cheap checks done and unresolved; only the expensive one is left.
   branch_beyond_cap "$rev" && { echo -2; return; }
 
-  l=$(landed_commit "$rev")
+  l=$(landed_commit "$rev") || return 2
   case "$l" in
     found"$TAB"*) git rev-list --count "$(landed_sha "$l")..$rev" ;;
     unchecked) echo -3 ;;
@@ -823,7 +847,7 @@ branch_verdict() (
   # by it: the pull request table and the worktree map.
   ref="refs/heads/$b"
   ahead=$(git rev-list --count "$MAIN_REF..$ref" 2>/dev/null || echo '?')
-  n=$(commits_not_in_main "$ref" "$b")
+  n=$(commits_not_in_main "$ref" "$b") || return 2
   gone=false; branch_upstream_gone "$b" && gone=true
   wt=$(worktree_of "$b")
   if [ "$n" = 0 ] && [ "$ahead" = 0 ]; then
@@ -891,6 +915,10 @@ branch_reason() {
       # The remote still existing is the one disagreement worth raising. The
       # content is in main, so something merged it, yet the branch was not
       # deleted the way a merged pull request deletes it.
+      #
+      # A branch with no upstream set has no remote to disagree with, whether it
+      # was never pushed or was pushed without tracking.
+      if ! branch_has_upstream "$b"; then REASON='merged, tracks no remote branch'; return 0; fi
       [ "$gone" = true ] && REASON='merged' || REASON='merged, but remote not gone — check the PR'
       ;;
     review)
@@ -1211,7 +1239,7 @@ update_verdict() (
 # times, so it gives the same answer.
 rebase_from() (
   b=$1
-  l=$(landed_commit "refs/heads/$b")
+  l=$(landed_commit "refs/heads/$b") || return 2
   landed=$(landed_sha "$l")
   # A branch tested WALK_DEPTH deep without a landed commit is not rebased: a
   # landed commit further down would be replayed onto main a second time.
@@ -1271,7 +1299,7 @@ merge_edits() (
 # unticked, git spread skips the branch.
 owned_update_verdict() (
   wt=$1 b=$2
-  uv=$(update_verdict "$wt" "$b" "${3:-merge}")
+  uv=$(update_verdict "$wt" "$b" "${3:-merge}") || return 2
   act=${uv%%"$TAB"*}; detail=${uv#*"$TAB"}
   owner=''
   case "$act" in
@@ -1349,8 +1377,14 @@ why_it_failed() {
 # needed was decided when the plan was built, by update_needs_stash; this only
 # carries it out. A pop that conflicts leaves the entry in the stash list and
 # says so, because resolving it is yours.
+#
+# Where a rebase starts is worked out before the stash, not after it: working it
+# out can stop the whole command on a git error (in_main_by_content), and a stop
+# between the stash and the pop would leave your work in the stash list with
+# nothing said about it.
 run_update() {
-  local act=$1 b=$2 wt=$3 stash=${4:-no} stashed=no
+  local act=$1 b=$2 wt=$3 stash=${4:-no} stashed=no rf=''
+  [ "$act" = rebase ] && rf=$(rebase_from "$b")
   if [ "$stash" = yes ]; then
     if git -C "$wt" stash push --quiet --include-untracked; then
       stashed=yes
@@ -1363,7 +1397,7 @@ run_update() {
   # Unguarded, the pop below is skipped when a caller runs under set -e and the
   # update returns non-zero, which leaves the work in the stash list with
   # nothing said about it.
-  carry_out_update "$act" "$b" "$wt" || :
+  carry_out_update "$act" "$b" "$wt" "$rf" || :
 
   [ "$stashed" = yes ] || return 0
   if git -C "$wt" stash pop --quiet; then
@@ -1401,8 +1435,10 @@ merge_without_branch_options() {
 #
 # The branch name is named to git, not the sha behind it: git builds a merge
 # message from what it is given, and a raw sha writes "Merge commit '<sha>'".
+#
+# The fourth argument is rebase_from's answer, when the caller has it already.
 carry_out_update() {
-  local act=$1 b=$2 wt=$3 base rf push=no
+  local act=$1 b=$2 wt=$3 rf=${4:-} base push=no
   git -C "$wt" rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 && push=yes
 
   case "$act" in
@@ -1436,7 +1472,7 @@ carry_out_update() {
       ;;
   esac
 
-  rf=$(rebase_from "$b")
+  [ -n "$rf" ] || rf=$(rebase_from "$b")
   case "$rf" in
     rebase"$TAB"*) base=${rf#rebase"$TAB"} ;;
     *) say "  ${YELLOW}${WARN}${RESET}$b: ${rf#*"$TAB"}, skipped"; return 0 ;;

@@ -46,7 +46,9 @@ resolve_main
 main=$MAIN
 # Where the library caches which commits are already in main, and how many
 # commits down from the tip it looks for one: see landed_commit.
-CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
+# The common directory, not this worktree's own, so the cache is the one git
+# refresh uses, which runs from the main working tree.
+CACHE_DIR="$(git rev-parse --git-common-dir)/cleanup-cache"
 mkdir -p "$CACHE_DIR"
 WALK_DEPTH=50
 target=$(git rev-parse --verify --quiet "$MAIN_REF")
@@ -145,8 +147,10 @@ echo "plan: rebase $branch onto origin/$main and force-push it"
 echo "  branch      $branch at $local_head"
 echo "  onto        origin/$main at $target"
 echo "  replay from $base"
-echo "  commits     $(git rev-list --count "$base..HEAD") to replay"
-git log --oneline --no-decorate "$base..HEAD"
+# Counted and listed the way the rebase replays them, and the way git refresh
+# counts them: merges and the trunk's own commits left out.
+echo "  commits     $(rebase_count "$base" "$branch") to replay"
+git log --oneline --no-decorate --no-merges HEAD "^$base" "^$MAIN_REF"
 # A rebase replays only the commits that are not merges, so a merge's own edits
 # go with it. Said in the plan, which --apply then carries out as printed,
 # rather than refused.
