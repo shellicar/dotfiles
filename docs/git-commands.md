@@ -181,11 +181,13 @@ One setting cannot go in the list, because its key names a branch:
 `branch.<name>.mergeOptions`. Options such as `-Xtheirs` in it would settle a conflict
 silently; `--autostash` in it carries a fast-forward over a dirty tree despite the
 `merge.autoStash` pin, and `--squash` makes a fast-forward stage the trunk's changes and
-leave the branch where it was. So every merge the commands run clears it for the branch
-it merges, with `-c "branch.<name>.mergeOptions="`: four calls, the merge and the
-fast-forward in `carry_out_update` (`git refresh`, `git spread`) and the same two in
-`git catchup`. That is the one per-call exception to keeping the pins in one list. A
-rebase does not read it (checked on git 2.55).
+leave the branch where it was. So every merge the commands run goes through one helper
+in `git-common.sh`, `merge_without_branch_options`, which clears it for the branch it
+merges: the merge and the fast-forward in `carry_out_update` (`git refresh`, `git
+spread`) and the same two in `git catchup`. That helper is the one exception to keeping
+the pins in one list. It clears the setting with `--config-env`, not `-c`: `-c` splits
+at the first `=`, so for a branch named `a=b` it would set a different key and leave
+the real one in force. A rebase does not read the setting (checked on git 2.55).
 
 `rebase.autoSquash` is not pinned: it only affects an interactive rebase, and none of
 the commands runs one (checked on git 2.55). None of them runs `git pull`, so

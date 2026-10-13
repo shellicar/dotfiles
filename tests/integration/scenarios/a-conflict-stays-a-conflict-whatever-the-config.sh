@@ -44,6 +44,16 @@ printf 'merger\n' > f.txt
 git commit -qam 'merger edits f'
 git push -q
 
+# a=b: the same as merger, under a name holding "=". `-c key=value` splits at
+# the first "=", so clearing this branch's mergeOptions that way would set a
+# different key and leave -Xtheirs in force.
+git switch -q -c 'a=b' main~1
+commit AB1 ab.txt
+git merge -q --no-edit main
+printf 'a=b\n' > f.txt
+git commit -qam 'a=b edits f'
+git push -q -u origin 'a=b'
+
 # The other three are rebased.
 git switch -q -c dirmove main
 printf 'new\n' > dir/new.txt
@@ -76,13 +86,15 @@ git commit -qm 'trunk: f, dir renamed, line endings, old.txt renamed'
 git push -q origin main
 git fetch -q origin
 
-for b in merger dirmove crlf renamed behind; do worktree_for "$b"; done
+for b in merger 'a=b' dirmove crlf renamed behind; do worktree_for "$b"; done
 merger_before=$(git rev-parse refs/heads/merger)
+ab_before=$(git rev-parse 'refs/heads/a=b')
 dirmove_before=$(git rev-parse refs/heads/dirmove)
 crlf_before=$(git rev-parse refs/heads/crlf)
 renamed_before=$(git rev-parse refs/heads/renamed)
 
 git config branch.merger.mergeOptions -Xtheirs
+git config 'branch.a=b.mergeOptions' -Xtheirs
 git config branch.behind.mergeOptions --squash
 git config merge.directoryRenames true
 git config merge.renormalize true
@@ -94,6 +106,9 @@ echo '--- outcome: git spread ---'
 [ "$(git rev-parse refs/heads/merger)" = "$merger_before" ] ||
   fail "merger was merged; f.txt is now: $(git show refs/heads/merger:f.txt)"
 printf '  ok   merger stopped on the conflict and is untouched\n'
+[ "$(git rev-parse 'refs/heads/a=b')" = "$ab_before" ] ||
+  fail "a=b was merged; f.txt is now: $(git show 'refs/heads/a=b:f.txt')"
+printf '  ok   a=b stopped on the conflict and is untouched\n'
 [ "$(git rev-parse refs/heads/dirmove)" = "$dirmove_before" ] ||
   fail "dirmove was rebased; its files: $(git ls-tree -r --name-only refs/heads/dirmove | tr '\n' ' ')"
 printf '  ok   dirmove stopped on the directory rename and is untouched\n'

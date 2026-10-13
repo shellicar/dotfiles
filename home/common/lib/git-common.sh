@@ -100,9 +100,8 @@ unpin_git_config() {
 #   switches directory rename detection off, so a file added under a renamed
 #   directory goes in at the old path without a conflict.
 #   branch.<name>.mergeOptions cannot go in this list, because the key names
-#   the branch: all four merges the commands run clear it with -c instead,
-#   the merge and the fast-forward in carry_out_update and the same two in
-#   git catchup.
+#   the branch: every merge the commands run clears it instead, through
+#   merge_without_branch_options.
 # rerere: a conflict is reported and aborted, never resolved from a recording.
 #   Unlike leaving it unset: unset turns rerere on when .git/rr-cache exists.
 # fetch, remote.origin: pruneTags would delete local tags origin lacks on every
@@ -1221,6 +1220,26 @@ run_update() {
   return 0
 }
 
+# `git merge <args>` in worktree <wt>, with branch <b>'s mergeOptions cleared.
+# Every merge the commands run goes through here: the merge and the
+# fast-forward below, and the same two in git catchup.
+#
+# mergeOptions cannot be pinned in pin_git_config, because its key names the
+# branch. Left in place, -Xtheirs or -Xours in it would settle a conflict
+# silently, --autostash would carry a fast-forward over a dirty tree despite
+# the merge.autoStash pin, and --squash would stage the trunk's changes and
+# leave the branch where it was.
+#
+# --config-env, not -c: -c splits key=value at the first "=", so for a branch
+# named a=b it would set "branch.a" to "b.mergeOptions=" and leave the real
+# setting alone. --config-env takes the value from the variable named after
+# the last "=", and a variable name cannot contain one.
+merge_without_branch_options() {
+  local wt=$1 b=$2
+  shift 2
+  GIT_COMMON_EMPTY='' git -C "$wt" --config-env="branch.$b.mergeOptions=GIT_COMMON_EMPTY" merge "$@"
+}
+
 # A failure is aborted and reported, never left half done. A merge rewrites
 # nothing, so its push is an ordinary one; a rebase rewrote history, so its push
 # needs the lease, which is only sound because the caller fetched once at the
@@ -1234,10 +1253,7 @@ carry_out_update() {
 
   case "$act" in
     ff)
-      # branch.<name>.mergeOptions cleared, as at the merge below: --autostash
-      # in it would carry the fast-forward over a dirty tree, and --squash
-      # would stage the trunk's changes and leave the branch where it was.
-      if git -C "$wt" -c "branch.$b.mergeOptions=" merge --ff-only --quiet "$MAIN_REF" 2>/dev/null; then
+      if merge_without_branch_options "$wt" "$b" --ff-only --quiet "$MAIN_REF" 2>/dev/null; then
         say "  ${GREEN}${OK}${RESET} $b fast-forwarded"
       else
         say "  ${YELLOW}${WARN}${RESET}$b: cannot fast-forward (local commits?), skipped"
@@ -1247,11 +1263,7 @@ carry_out_update() {
     merge)
       # The pre-merge tip, so a failed push can say which commit undoes the merge.
       before=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
-      # branch.<name>.mergeOptions cleared here and at the fast-forward above
-      # rather than in pin_git_config, whose fixed list cannot name the branch.
-      # -Xtheirs or -Xours in it would settle a conflict silently. git
-      # catchup's two merges clear it the same way.
-      if ! git -C "$wt" -c "branch.$b.mergeOptions=" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
+      if ! merge_without_branch_options "$wt" "$b" --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
         say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
