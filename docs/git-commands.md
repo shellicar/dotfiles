@@ -179,11 +179,13 @@ from leaving the setting unset.
 
 One setting cannot go in the list, because its key names a branch:
 `branch.<name>.mergeOptions`. Options such as `-Xtheirs` in it would settle a conflict
-silently, so the merge of the trunk into a branch (in `git refresh`, `git spread` and
-`git catchup`) clears it for that branch with `-c "branch.<name>.mergeOptions="`. That
-is the one per-call exception to keeping the pins in one list. A rebase does not read
-it, and the fast-forward-only merges are left as they are: there, `--ff-only` won over
-`--no-ff` in it (both checked on git 2.55).
+silently; `--autostash` in it carries a fast-forward over a dirty tree despite the
+`merge.autoStash` pin, and `--squash` makes a fast-forward stage the trunk's changes and
+leave the branch where it was. So every merge the commands run clears it for the branch
+it merges, with `-c "branch.<name>.mergeOptions="`: four calls, the merge and the
+fast-forward in `carry_out_update` (`git refresh`, `git spread`) and the same two in
+`git catchup`. That is the one per-call exception to keeping the pins in one list. A
+rebase does not read it (checked on git 2.55).
 
 `rebase.autoSquash` is not pinned: it only affects an interactive rebase, and none of
 the commands runs one (checked on git 2.55). None of them runs `git pull`, so

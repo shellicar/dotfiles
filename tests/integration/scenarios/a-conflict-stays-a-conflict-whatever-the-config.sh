@@ -8,6 +8,8 @@
 #                                        renamed is moved into the new name
 #   merge.renormalize=true               an edit to a file the trunk converted
 #                                        to LF line endings goes through
+#   branch.<name>.mergeOptions=--squash  a fast-forward stages the trunk's
+#                                        changes and leaves the branch behind
 #   merge.renames=false                  the opposite direction: a rename on the
 #                                        trunk and an edit on the branch becomes
 #                                        a conflict where git would carry it over
@@ -59,7 +61,10 @@ sed 's/^5$/five/' old.txt > old.tmp && mv old.tmp old.txt
 git commit -qam 'renamed edits line five'
 git push -q -u origin renamed
 
-# The trunk moves under all four.
+# behind: nothing of its own, so it is fast-forwarded.
+git branch -q behind main
+
+# The trunk moves under all five.
 git switch -q main
 printf 'main\n' > f.txt
 git mv dir b
@@ -71,13 +76,14 @@ git commit -qm 'trunk: f, dir renamed, line endings, old.txt renamed'
 git push -q origin main
 git fetch -q origin
 
-for b in merger dirmove crlf renamed; do worktree_for "$b"; done
+for b in merger dirmove crlf renamed behind; do worktree_for "$b"; done
 merger_before=$(git rev-parse refs/heads/merger)
 dirmove_before=$(git rev-parse refs/heads/dirmove)
 crlf_before=$(git rev-parse refs/heads/crlf)
 renamed_before=$(git rev-parse refs/heads/renamed)
 
 git config branch.merger.mergeOptions -Xtheirs
+git config branch.behind.mergeOptions --squash
 git config merge.directoryRenames true
 git config merge.renormalize true
 git config merge.renames false
@@ -99,6 +105,11 @@ printf '  ok   crlf stopped on the line-ending conflict and is untouched\n'
 [ "$(git show refs/heads/renamed:new.txt | sed -n 5p)" = five ] ||
   fail 'renamed does not carry its edit into new.txt'
 printf '  ok   renamed was rebased and its edit follows the rename\n'
+[ "$(git rev-parse refs/heads/behind)" = "$(git rev-parse refs/remotes/origin/main)" ] ||
+  fail 'behind was not fast-forwarded to the trunk'
+[ -z "$(git -C "$ROOT/wt-behind" status --porcelain)" ] ||
+  fail 'the fast-forward left changes staged in behind'
+printf '  ok   behind was fast-forwarded and left clean\n'
 
 # git catchup merges with its own call, so it is checked on its own.
 cd "$ROOT/wt-merger"

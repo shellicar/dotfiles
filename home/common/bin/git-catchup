@@ -72,7 +72,11 @@ if [ "$branch" = "$main" ]; then
 
   # No message of our own: git names the exact reason a fast-forward is refused,
   # whether that is local commits or a modified file the incoming commits touch.
-  git merge --ff-only "$target" || exit 1
+  #
+  # branch.<name>.mergeOptions is cleared, as at every merge the commands run
+  # (see the merge below): --autostash in it would carry the fast-forward over
+  # a dirty tree, and --squash would stage the trunk's changes and not move.
+  git -c "branch.$branch.mergeOptions=" merge --ff-only "$target" || exit 1
   echo "$main fast-forwarded to origin/$main"
   exit 0
 fi
@@ -125,9 +129,10 @@ case "$action" in
     # local and only moves on fetch, and this run fetched once above, so naming
     # it cannot pick up a commit the plan did not print.
     #
-    # branch.<name>.mergeOptions is cleared here, not pinned with the rest in
-    # git-common.sh, because that fixed list cannot name the branch. -Xtheirs
-    # or -Xours in it would settle a conflict silently.
+    # branch.<name>.mergeOptions is cleared here, and at the fast-forward
+    # above, not pinned with the rest in git-common.sh, because that fixed list
+    # cannot name the branch. -Xtheirs or -Xours in it would settle a conflict
+    # silently. git-common.sh's carry_out_update clears it the same way.
     git -c "branch.$branch.mergeOptions=" merge --no-edit "$MAIN_REF" || exit 1
 
     # Nothing was rewritten, so the remote is still an ancestor: an ordinary push.

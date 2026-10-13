@@ -100,7 +100,9 @@ unpin_git_config() {
 #   switches directory rename detection off, so a file added under a renamed
 #   directory goes in at the old path without a conflict.
 #   branch.<name>.mergeOptions cannot go in this list, because the key names
-#   the branch: each `git merge` of the trunk clears it with -c instead.
+#   the branch: all four merges the commands run clear it with -c instead,
+#   the merge and the fast-forward in carry_out_update and the same two in
+#   git catchup.
 # rerere: a conflict is reported and aborted, never resolved from a recording.
 #   Unlike leaving it unset: unset turns rerere on when .git/rr-cache exists.
 # fetch, remote.origin: pruneTags would delete local tags origin lacks on every
@@ -1232,7 +1234,10 @@ carry_out_update() {
 
   case "$act" in
     ff)
-      if git -C "$wt" merge --ff-only --quiet "$MAIN_REF" 2>/dev/null; then
+      # branch.<name>.mergeOptions cleared, as at the merge below: --autostash
+      # in it would carry the fast-forward over a dirty tree, and --squash
+      # would stage the trunk's changes and leave the branch where it was.
+      if git -C "$wt" -c "branch.$b.mergeOptions=" merge --ff-only --quiet "$MAIN_REF" 2>/dev/null; then
         say "  ${GREEN}${OK}${RESET} $b fast-forwarded"
       else
         say "  ${YELLOW}${WARN}${RESET}$b: cannot fast-forward (local commits?), skipped"
@@ -1242,9 +1247,10 @@ carry_out_update() {
     merge)
       # The pre-merge tip, so a failed push can say which commit undoes the merge.
       before=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
-      # branch.<name>.mergeOptions cleared here rather than in pin_git_config,
-      # whose fixed list cannot name the branch. -Xtheirs or -Xours in it would
-      # settle a conflict silently.
+      # branch.<name>.mergeOptions cleared here and at the fast-forward above
+      # rather than in pin_git_config, whose fixed list cannot name the branch.
+      # -Xtheirs or -Xours in it would settle a conflict silently. git
+      # catchup's two merges clear it the same way.
       if ! git -C "$wt" -c "branch.$b.mergeOptions=" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
         say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"

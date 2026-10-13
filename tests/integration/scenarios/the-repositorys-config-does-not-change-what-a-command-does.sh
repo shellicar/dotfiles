@@ -8,6 +8,9 @@
 #   rebase.autoStash   the same for a rebase. Set, but no command reaches a
 #                      rebase with tracked changes (each refuses or stashes
 #                      first), so nothing here can show it being overridden.
+#   branch.main.mergeOptions=--autostash
+#                      the same as merge.autoStash, but read as a command-line
+#                      option, so the pin alone does not stop it
 #
 # Set in the repository rather than globally because that is the config the
 # pins have to beat that a container has: there is no global file here.
@@ -21,6 +24,7 @@ new_repo
 git config rebase.updateRefs true
 git config rebase.autoStash true
 git config merge.autoStash true
+git config branch.main.mergeOptions --autostash
 
 # feat: two commits of its own, published, checked out in a worktree.
 # other: a local branch on feat's first commit, unpublished and checked out
