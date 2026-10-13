@@ -11,8 +11,9 @@
 # matters: BSD readlink has no -f, and the portable resolver is exactly the kind
 # of thing this repo keeps having to avoid.
 #
-# WHAT THE CALLER OWES IT. This file defines functions and the colour variables
-# and nothing else runs at source time. Everything the functions read is the
+# WHAT THE CALLER OWES IT. This file defines functions and the colour variables,
+# and pins git's behaviour settings in the environment (see "pinned settings"
+# below); nothing else runs at source time. Everything the functions read is the
 # caller's: MAIN, CACHE_DIR, TAB, NOW, VERBOSE, WALK_DEPTH, EVALUATE_OLD,
 # ONLY_BRANCHES, DETACHED, PLAN, and the counters run_plan increments. Under
 # `set -u` that is safe because a function only runs once the caller has set up.
@@ -27,6 +28,77 @@
 # shellcheck disable=SC2034
 
 TOOL=${TOOL:-git}
+
+# ── pinned settings ─────────────────────────────────────────────────────────
+#
+# Settings that change what a command does, fixed for every git process this
+# one starts, including the ones git starts itself (a rebase's own merges and
+# ref updates). Each is appended through GIT_CONFIG_COUNT / GIT_CONFIG_KEY_<n> /
+# GIT_CONFIG_VALUE_<n>, which git reads after the system, global and repository
+# files, so a pin wins over all three. Needs git 2.31 or newer; older git
+# ignores the variables and the pins silently do nothing.
+#
+# Appended, never reset: the environment can already carry entries (a sandbox
+# sets safe.directory this way), and those keep applying. `git -c` on the
+# command line (`git -c rebase.updateRefs=true refresh`) is read after these, so
+# it still overrides a pin for that one run.
+#
+# Everything not listed comes from your config: identity, signing, hooks,
+# credentials, the [cleanup] and [claude] keys, and display settings. A setting
+# belongs here when a different value would make a command do something its
+# plan did not show, or skip something its plan relies on. docs/git-commands.md
+# lists both sides and why.
+#
+# TODO(claude): undecided: whether non-git processes the commands start (pnpm in
+# git wt-create, az, gh, the VS Code opener in git review) should inherit these.
+# They do for now, so any git they start is pinned too.
+pin_git_config() {
+  local n="${GIT_CONFIG_COUNT:-0}" kv
+  for kv in "$@"; do
+    export "GIT_CONFIG_KEY_$n=${kv%%=*}" "GIT_CONFIG_VALUE_$n=${kv#*=}"
+    n=$((n + 1))
+  done
+  export GIT_CONFIG_COUNT="$n"
+}
+
+# rebase: replay only the named range, onto the named base, and nothing else.
+#   updateRefs    would also move every other local branch pointing into the
+#                 replayed range, which no plan shows.
+#   autoStash     the commands decide stashing themselves (update_needs_stash),
+#                 and rely on git refusing a dirty tree otherwise.
+#   rebaseMerges  would recreate merges instead of replaying a flat range.
+#   backend       the apply backend handles empties and hooks differently.
+# merge: autoStash as above; ff=true is git's default, so the merge of main
+#   into a branch is not refused by merge.ff=only or forced into a merge commit.
+# rerere: a conflict is reported and aborted, never resolved from a recording.
+# fetch, remote.origin: pruneTags would delete local tags origin lacks on every
+#   --prune fetch, git main's git-main/* tags among them.
+# push: default=simple is git's default: the branch to its upstream, never
+#   every matching branch. followTags would push tags along with the branch.
+# submodule.recurse: switch, merge and rebase stay in this repository.
+# status.showUntrackedFiles: dirty checks read `status --porcelain`, which
+#   leaves untracked files out under "no".
+#
+# TODO(claude): undecided: whether branch.autoSetupMerge is pinned. Left to your
+# config for now; it decides whether rescue/<branch> and a main recreated by git
+# main get an upstream.
+# TODO(claude): undecided: whether checks that can only refuse
+# (merge.verifySignatures, push.useForceIfIncludes, push.recurseSubmodules=check)
+# are pinned off. Left to your config for now.
+pin_git_config \
+  rebase.updateRefs=false \
+  rebase.autoStash=false \
+  rebase.rebaseMerges=false \
+  rebase.backend=merge \
+  merge.autoStash=false \
+  merge.ff=true \
+  rerere.enabled=false \
+  fetch.pruneTags=false \
+  remote.origin.pruneTags=false \
+  push.default=simple \
+  push.followTags=false \
+  submodule.recurse=false \
+  status.showUntrackedFiles=normal
 
 # ── presentation ────────────────────────────────────────────────────────────
 
@@ -362,7 +434,7 @@ branch_beyond_cap() (
   [ -n "$ONLY_BRANCHES" ] && return 1
   dist=$(git rev-list --count "$MAIN_REF" "^$1" 2>/dev/null) || return 1
   [ "$dist" -gt "$MAX_DISTANCE" ] || return 1
-  last=$(git log -1 --format=%ct "$1" 2>/dev/null) || return 1
+  last=$(git rev-list --no-commit-header -1 --format=%ct "$1" 2>/dev/null) || return 1
   [ $(( NOW - last )) -gt $(( MAX_AGE_DAYS * 86400 )) ]
 )
 
@@ -940,7 +1012,7 @@ branch_diverged_from_remote() (
 # repository with no user.email nothing is yours.
 branch_foreign_authors() (
   b=$1 me=$2
-  all=$(git log --format=%ae "$MAIN_REF..refs/heads/$b" 2>/dev/null)
+  all=$(git rev-list --no-commit-header --format=%ae "$MAIN_REF..refs/heads/$b" 2>/dev/null)
   [ -n "$all" ] || return 0
   # An unset identity matches nobody. Handled here rather than by grep, because
   # -x with an empty pattern is an edge case GNU and BSD may not agree on.
@@ -1039,7 +1111,12 @@ update_needs_stash() (
   # --porcelain` quotes a path containing a space and `diff --name-only` does
   # not, so no such path can ever match. -z turns quoting off in both, which is
   # the only way to compare them.
-  git -C "$wt" diff --name-only -z "$from" "$MAIN_REF" 2>/dev/null |
+  #
+  # diff-tree rather than diff: it reads none of the diff.* settings. Under
+  # `git diff`, rename detection (on by default, or via diff.renames) lists only
+  # a renamed file's new path, and the old path the operation deletes is just as
+  # much in the way. --no-renames lists both.
+  git -C "$wt" diff-tree -r --name-only -z --no-renames "$from" "$MAIN_REF" 2>/dev/null |
     tr '\0' '\n' | sort -u > "$CACHE_DIR/incoming"
   [ -s "$CACHE_DIR/incoming" ] || return 1
   # Untracked entries included, not just modified ones: a file the incoming

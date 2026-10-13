@@ -25,7 +25,7 @@ git_says() {
     "rev-parse --verify --quiet refs/heads/near"|"rev-parse --verify --quiet refs/heads/far") return 1 ;;
     "rev-list --count refs/remotes/origin/HEAD ^refs/heads/near") echo 5 ;;
     "rev-list --count refs/remotes/origin/HEAD ^refs/heads/far") echo 50 ;;
-    "log -1 --format=%ct refs/heads/near"|"log -1 --format=%ct refs/heads/far") echo 999999999 ;;
+    "rev-list --no-commit-header -1 --format=%ct refs/heads/near"|"rev-list --no-commit-header -1 --format=%ct refs/heads/far") echo 999999999 ;;
     *) fail "unexpected: git $*" ;;
   esac
 }

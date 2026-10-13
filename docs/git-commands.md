@@ -123,6 +123,70 @@ cleanup reads, and it replays commits onto branches that were about to be delete
 two commands that order is something to remember. As one it cannot be expressed
 wrongly.
 
+## Your git config
+
+The commands run under whatever config the repository, your global file and the
+system file set, and some settings would make them do what their plan does not show.
+`rebase.updateRefs` is the one that started this: under it, a rebase also moves every
+other local branch pointing into the replayed range. So the settings that change what
+a command does are pinned, and everything else is yours.
+
+**How.** `git-common.sh` appends the pins to `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`
+and `GIT_CONFIG_VALUE_<n>` when it is sourced, and every command sources it. Git reads
+those after the system, global and repository files, so a pin wins over all three, and
+the environment reaches every git a command starts, including the ones git starts
+itself. Entries already in the environment are kept. `git -c key=value <command>` is
+read after the environment, so it overrides a pin for that one run. A new git call in a
+command is pinned without doing anything; a new setting that changes behaviour goes in
+the list in `git-common.sh`.
+
+The variables need git 2.31 or newer, and the commands also use `rev-list
+--no-commit-header`, from 2.33. Older git ignores the variables, so the pins would
+silently not apply.
+
+**Pinned**, each to git's own default except where noted:
+
+| Setting | Value | What a different value would do |
+|---|---|---|
+| `rebase.updateRefs` | `false` | move other local branches along with a rebase |
+| `rebase.autoStash` | `false` | set a dirty tree aside and carry on, where the commands rely on git refusing |
+| `merge.autoStash` | `false` | the same for a merge or fast-forward |
+| `rebase.rebaseMerges` | `false` | recreate merges instead of replaying a flat range |
+| `rebase.backend` | `merge` | the apply backend treats empty commits and hooks differently |
+| `merge.ff` | `true` | `only` refuses the merge of the trunk into a branch |
+| `rerere.enabled` | `false` | resolve a conflict from an old recording instead of stopping on it |
+| `fetch.pruneTags`, `remote.origin.pruneTags` | `false` | delete local tags origin lacks on every fetch, `git main`'s tags among them |
+| `push.default` | `simple` | `matching` pushes every branch with a remote counterpart |
+| `push.followTags` | `false` | push tags along with the branch |
+| `submodule.recurse` | `false` | carry switch, merge and rebase into submodules |
+| `status.showUntrackedFiles` | `normal` | `no` hides untracked files from the dirty checks |
+
+`rebase.autoSquash` is not pinned: it only affects an interactive rebase, and none of
+the commands runs one (checked on git 2.55). None of them runs `git pull`, so
+`pull.rebase` and `pull.ff` do not reach them.
+
+**Yours**, read from your config as they always were:
+
+- *Who you are and how you sign*: `user.*`, the `includeIf` files that set them,
+  `commit.gpgsign`, `tag.gpgSign`, `gpg.*`. A command's commits are yours.
+- *Hooks*: `core.hooksPath`, so the push gate and the commit-message hook run.
+- *Credentials and transport*: `credential.*`, `http.*`, remote URLs, `remote.pushDefault`
+  and `branch.<name>.pushRemote`.
+- *Settings the commands read on purpose*: `cleanup.subscription`, `cleanup.azconfig`,
+  `claude.sessionTrailer`.
+- *Checks that can only refuse*: `merge.verifySignatures`, `push.useForceIfIncludes`,
+  `push.recurseSubmodules=check`. Under them an operation fails and is reported; nothing
+  extra happens.
+- *What content is*: line endings, filters, ignore rules.
+- *Display*: colour, diff and log formatting, `advice.*`. What git prints straight to
+  you follows them. What a command parses is read with plumbing and explicit formats
+  (`rev-list --format`, `for-each-ref --format`, `diff-tree`, `status --porcelain`), which
+  these settings do not change.
+
+One exception: the content walk's `git diff` (`content_hash`) is porcelain and reads
+`diff.algorithm`, `diff.renames`, `diff.noprefix`, `color.ui=always` and similar, so a
+change to one of them can change its hashes.
+
 ## The commands
 
 ### git refresh

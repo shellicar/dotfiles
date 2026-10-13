@@ -180,7 +180,7 @@ EOF
   branch_reason "$b" "$class" "$n" "$gone"
   why=$REASON
 
-  meta=$(target_meta "$ahead" "$(git log -1 --format=%cr "refs/heads/$b" 2>/dev/null)")
+  meta=$(target_meta "$ahead" "$(git rev-list --no-commit-header -1 --format=%cr "refs/heads/$b" 2>/dev/null)")
 
   # Commits the branch's own remote does not have, which is work that exists
   # nowhere else. Not asked of the trunk: say_environment reports that case in
@@ -250,7 +250,7 @@ while IFS="$TAB" read -r head p; do
   refs=$(refs_containing "$head")
   ign=$(worktree_ignored "$p")
   meta=$(target_meta "$(git rev-list --count "$MAIN_REF..$head" 2>/dev/null || echo '?')" \
-    "$(git log -1 --format=%cr "$head" 2>/dev/null)" "$(git rev-parse --short "$head" 2>/dev/null)")
+    "$(git rev-list --no-commit-header -1 --format=%cr "$head" 2>/dev/null)" "$(git rev-parse --short "$head" 2>/dev/null)")
   DFACTS="$DFACTS$(basename "$p")$TAB$p$TAB$head$TAB$inmain$TAB${mpr:--}$TAB${opr:--}$TAB${cpr:--}$TAB${b_reason:--}$TAB${refs:--}$TAB${ign:--}$TAB$meta$NL"
 done <<EOF
 $DETACHED_TARGETS

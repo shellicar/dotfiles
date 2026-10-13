@@ -18,7 +18,7 @@ MAX_AGE_DAYS=30
 git_says() {
   case "$*" in
     "rev-list --count refs/remotes/origin/HEAD ^refs/heads/ancient") echo 500 ;;
-    "log -1 --format=%ct refs/heads/ancient") echo 968464000 ;;
+    "rev-list --no-commit-header -1 --format=%ct refs/heads/ancient") echo 968464000 ;;
     *) fail "unexpected: git $*" ;;
   esac
 }

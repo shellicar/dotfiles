@@ -266,7 +266,7 @@ git_says() (
     # by content that is not in main by ancestry.
     "diff "*)
       printf 'change %s %s\n' "$(nth_word 2 "$@")" "$(nth_word 3 "$@")" ;;
-    "log -1 --format=%cr "*)
+    "rev-list --no-commit-header -1 --format=%cr "*)
       printf '5 days ago\n' ;;
     # A worktree's HEAD is the branch checked out in it.
     "-C "*" rev-list --count HEAD.."*)
@@ -291,7 +291,7 @@ git_says() (
       done ;;
     "-C "*" config user.email")
       printf '%s\n' "$ME" ;;
-    "log --format=%ae "*)
+    "rev-list --no-commit-header --format=%ae "*)
       spec=$(last_word "$@")
       range "${spec%%..*}" "${spec##*..}" | while read -r c; do author_of "$c"; done ;;
     "rev-list --count "*)

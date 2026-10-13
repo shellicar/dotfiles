@@ -100,7 +100,7 @@ EOF
   class_icon "$class"
   icon=$CICON
 
-  last=$(git log -1 --format=%cr "refs/heads/$branch" 2>/dev/null)
+  last=$(git rev-list --no-commit-header -1 --format=%cr "refs/heads/$branch" 2>/dev/null)
   meta=$(target_meta "$ahead" "$last")
 
   if [ "$class" = empty ]; then
@@ -172,7 +172,7 @@ process_detached() {
   name=$(basename "$wt")
   short=$(git rev-parse --short "$head" 2>/dev/null)
   ahead=$(git rev-list --count "$MAIN_REF..$head" 2>/dev/null || echo '?')
-  last=$(git log -1 --format=%cr "$head" 2>/dev/null)
+  last=$(git rev-list --no-commit-header -1 --format=%cr "$head" 2>/dev/null)
   meta=$(target_meta "$ahead" "$last" "$short")
 
   # Before the read, for the reason in process_branch.

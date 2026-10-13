@@ -20,7 +20,7 @@ git_says() {
     # Far past the distance cap.
     "rev-list --count refs/remotes/origin/HEAD ^refs/heads/ancient") echo 500 ;;
     # And last touched a year before now.
-    "log -1 --format=%ct refs/heads/ancient") echo 968464000 ;;
+    "rev-list --no-commit-header -1 --format=%ct refs/heads/ancient") echo 968464000 ;;
     *) fail "unexpected: git $*" ;;
   esac
 }
