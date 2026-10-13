@@ -185,7 +185,7 @@ git_says() (
         printf '\n'
       done < "$DETACHED_WORKTREES" ;;
     # Every worktree is clean: nothing modified, untracked or ignored.
-    "-C "*" status --porcelain"|"-C "*" status --porcelain --ignored"|"-C "*" status --porcelain -z")
+    "-C "*" status --porcelain"|"-C "*" status --porcelain --ignored"|"-C "*" status --porcelain -z --untracked-files=all")
       return 0 ;;
     "switch -q -c "*)
       new=$(head_ref "$(nth_word 4 "$@")")

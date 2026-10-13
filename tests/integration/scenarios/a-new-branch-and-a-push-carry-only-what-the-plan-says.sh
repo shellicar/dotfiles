@@ -13,6 +13,9 @@
 #                                  submodule.recurse=false, which push reads as
 #                                  the same switch, last one read winning. Only
 #                                  with both removed does this part fail.
+#
+# And the other way: the submodule.recurse pin must not stop a fetch bringing
+# in the submodule commits the trunk now points to, which git does by default.
 set -eu
 
 # The path exists only inside the container, where run.sh mounts it.
@@ -95,5 +98,31 @@ printf '  ok   bump was rebased and pushed\n'
 git -C "$ROOT/sub.git" cat-file -e "$sub_commit^{commit}" 2>/dev/null &&
   fail "the push also pushed the submodule commit $sub_commit"
 printf '  ok   the submodule commit was not pushed\n'
+
+# Fetching keeps git's default for submodules: the commits that new
+# superproject commits point to are fetched into the submodule too. Pinning
+# submodule.recurse=false switches that off unless fetch.recurseSubmodules
+# puts it back. Someone else moves the submodule on the trunk.
+( cd "$ROOT/sub-seed"
+  commit S2 s2.txt
+  git push -q "$ROOT/sub.git" main )
+sub_next=$(git -C "$ROOT/sub-seed" rev-parse HEAD)
+git clone -q "$ROOT/upstream.git" "$ROOT/other"
+( cd "$ROOT/other"
+  git config user.email test@test; git config user.name test; git config commit.gpgsign false
+  git update-index --cacheinfo "160000,$sub_next,sub"
+  git commit -qm 'move sub to S2'
+  git push -q origin main )
+# The submodule's own fetch is a local path, which git allows a submodule only
+# when told to.
+git -C sub config protocol.file.allow always
+
+# git wt-create fetches before it creates the worktree.
+run_command git-wt-create fetch-probe
+
+echo '--- outcome: the submodule fetch ---'
+git -C sub cat-file -e "$sub_next^{commit}" 2>/dev/null ||
+  fail 'the fetch did not bring in the submodule commit the trunk now points to'
+printf '  ok   the submodule commit the trunk points to was fetched\n'
 
 echo 'PASS a-new-branch-and-a-push-carry-only-what-the-plan-says'

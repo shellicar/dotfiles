@@ -124,7 +124,11 @@ case "$action" in
     # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
     # local and only moves on fetch, and this run fetched once above, so naming
     # it cannot pick up a commit the plan did not print.
-    git merge --no-edit "$MAIN_REF" || exit 1
+    #
+    # branch.<name>.mergeOptions is cleared here, not pinned with the rest in
+    # git-common.sh, because that fixed list cannot name the branch. -Xtheirs
+    # or -Xours in it would settle a conflict silently.
+    git -c "branch.$branch.mergeOptions=" merge --no-edit "$MAIN_REF" || exit 1
 
     # Nothing was rewritten, so the remote is still an ancestor: an ordinary push.
     git push --quiet

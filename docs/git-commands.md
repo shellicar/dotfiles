@@ -152,7 +152,9 @@ The variables need git 2.31 or newer, and the commands also use `rev-list
 --no-commit-header`, from 2.33. Older git ignores the variables, so the pins would
 silently not apply.
 
-**Pinned**, each to git's own default except where noted:
+**Pinned.** Each value is the one git uses when nothing is set, with two exceptions,
+noted in their rows: `rerere.enabled` and `submodule.recurse`, where pinning differs
+from leaving the setting unset.
 
 | Setting | Value | What a different value would do |
 |---|---|---|
@@ -162,14 +164,26 @@ silently not apply.
 | `rebase.rebaseMerges` | `false` | recreate merges instead of replaying a flat range |
 | `rebase.backend` | `merge` | the apply backend treats empty commits and hooks differently |
 | `merge.ff` | `true` | `only` refuses the merge of the trunk into a branch |
-| `rerere.enabled` | `false` | resolve a conflict from an old recording instead of stopping on it |
+| `merge.directoryRenames` | `conflict` | `true` moves a file added in a directory the other side renamed, where git would stop |
+| `merge.renormalize` | `false` | `true` lets an edit through a line-ending conversion on the other side, where git would stop |
+| `merge.renames` | `true` | `false`, or `diff.renames=false` when it is unset, turns a rename against an edit into a conflict, and adds a file under a renamed directory at the old path without one |
+| `rerere.enabled` | `false` | resolve a conflict from an old recording instead of stopping on it. When unset, git turns rerere on if `.git/rr-cache` exists; pinning `false` keeps it off even then, which is the difference wanted |
 | `fetch.pruneTags`, `remote.origin.pruneTags` | `false` | delete local tags origin lacks on every fetch, `git main`'s tags among them |
 | `push.default` | `simple` | `matching` pushes every branch with a remote counterpart |
 | `push.followTags` | `false` | push tags along with the branch |
 | `push.recurseSubmodules` | `no` | `on-demand` pushes the submodules' commits as well, which no plan shows |
 | `branch.autoSetupMerge` | `true` | `always` makes `rescue/<branch>` track the local branch about to be deleted; `false` leaves the main `git main` recreates with no upstream |
-| `submodule.recurse` | `false` | carry switch, merge and rebase into submodules; push reads it as `push.recurseSubmodules`, whichever is read last winning |
+| `submodule.recurse` | `false` | carry switch, merge and rebase into submodules. Unlike leaving it unset, `false` also switches off fetch's default of fetching the submodule commits new superproject commits point to; the next row puts that back. Push and fetch each read it as the same switch as their own setting, whichever is read last winning |
+| `fetch.recurseSubmodules` | `on-demand` | git's default fetch behaviour, restored after the `submodule.recurse` pin. It comes after that pin in the list for the reason above |
 | `status.showUntrackedFiles` | `normal` | `no` hides untracked files from the dirty checks |
+
+One setting cannot go in the list, because its key names a branch:
+`branch.<name>.mergeOptions`. Options such as `-Xtheirs` in it would settle a conflict
+silently, so the merge of the trunk into a branch (in `git refresh`, `git spread` and
+`git catchup`) clears it for that branch with `-c "branch.<name>.mergeOptions="`. That
+is the one per-call exception to keeping the pins in one list. A rebase does not read
+it, and the fast-forward-only merges are left as they are: there, `--ff-only` won over
+`--no-ff` in it (both checked on git 2.55).
 
 `rebase.autoSquash` is not pinned: it only affects an interactive rebase, and none of
 the commands runs one (checked on git 2.55). None of them runs `git pull`, so

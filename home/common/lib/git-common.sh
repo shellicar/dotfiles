@@ -92,7 +92,17 @@ unpin_git_config() {
 #   backend       the apply backend handles empties and hooks differently.
 # merge: autoStash as above; ff=true is git's default, so the merge of main
 #   into a branch is not refused by merge.ff=only or forced into a merge commit.
+#   The rest keep a conflict a conflict, in merges and in rebases alike:
+#   directoryRenames=true would move a file into a renamed directory where git
+#   otherwise stops; renormalize=true resolves edits that differ only in line
+#   endings; renames=false (or diff.renames=false, which it falls back to)
+#   turns a rename on one side and an edit on the other into a conflict, and
+#   switches directory rename detection off, so a file added under a renamed
+#   directory goes in at the old path without a conflict.
+#   branch.<name>.mergeOptions cannot go in this list, because the key names
+#   the branch: each `git merge` of the trunk clears it with -c instead.
 # rerere: a conflict is reported and aborted, never resolved from a recording.
+#   Unlike leaving it unset: unset turns rerere on when .git/rr-cache exists.
 # fetch, remote.origin: pruneTags would delete local tags origin lacks on every
 #   --prune fetch, git main's git-main/* tags among them.
 # push: default=simple is git's default: the branch to its upstream, never
@@ -106,7 +116,11 @@ unpin_git_config() {
 #   from origin/main tracks it, and rescue/<branch>, cut from a local branch,
 #   tracks nothing ("always" would make it track the branch about to be
 #   deleted; "false" would leave git main's main with no upstream).
-# submodule.recurse: switch, merge and rebase stay in this repository.
+# submodule.recurse: switch, merge and rebase stay in this repository. It also
+#   switches off fetch's default of fetching the submodule commits new
+#   superproject commits point to, so fetch.recurseSubmodules=on-demand puts
+#   that back. It has to come after submodule.recurse in the list: fetch reads
+#   both as one switch and the last one read wins.
 # status.showUntrackedFiles: dirty checks read `status --porcelain`, which
 #   leaves untracked files out under "no".
 #
@@ -119,6 +133,9 @@ pin_git_config \
   rebase.backend=merge \
   merge.autoStash=false \
   merge.ff=true \
+  merge.directoryRenames=conflict \
+  merge.renormalize=false \
+  merge.renames=true \
   rerere.enabled=false \
   fetch.pruneTags=false \
   remote.origin.pruneTags=false \
@@ -127,6 +144,7 @@ pin_git_config \
   push.recurseSubmodules=no \
   branch.autoSetupMerge=true \
   submodule.recurse=false \
+  fetch.recurseSubmodules=on-demand \
   status.showUntrackedFiles=normal
 
 # ── presentation ────────────────────────────────────────────────────────────
@@ -1154,7 +1172,11 @@ update_needs_stash() (
   # The status prefix is stripped only from lines that carry one. A rename adds
   # the old path as a record of its own with no prefix, and both halves of it
   # are in the way.
-  git -C "$wt" status --porcelain -z 2>/dev/null | tr '\0' '\n' |
+  #
+  # --untracked-files=all, because the incoming list names files: under the
+  # default, an untracked file in a new directory is listed only as the
+  # directory ("newdir/"), which matches nothing in it.
+  git -C "$wt" status --porcelain -z --untracked-files=all 2>/dev/null | tr '\0' '\n' |
     sed 's/^[ MADRCU?!][ MADRCU?!] //' | sort -u > "$CACHE_DIR/in-the-way"
   [ -n "$(comm -12 "$CACHE_DIR/incoming" "$CACHE_DIR/in-the-way")" ]
 )
@@ -1220,7 +1242,10 @@ carry_out_update() {
     merge)
       # The pre-merge tip, so a failed push can say which commit undoes the merge.
       before=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
-      if ! git -C "$wt" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
+      # branch.<name>.mergeOptions cleared here rather than in pin_git_config,
+      # whose fixed list cannot name the branch. -Xtheirs or -Xours in it would
+      # settle a conflict silently.
+      if ! git -C "$wt" -c "branch.$b.mergeOptions=" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
         say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
