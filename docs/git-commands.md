@@ -136,7 +136,8 @@ and `GIT_CONFIG_VALUE_<n>` when it is sourced, and every command sources it. Git
 those after the system, global and repository files, so a pin wins over all three, and
 the environment reaches every git a command starts, including the ones git starts
 itself. Entries already in the environment are kept. `git -c key=value <command>` is
-read after the environment, so it overrides a pin for that one run. A new git call in a
+read after the environment, so it overrides a pin for that one run, which is the way to
+change a pinned setting when you need to. A new git call in a
 command is pinned without doing anything; a new setting that changes behaviour goes in
 the list in `git-common.sh`.
 
@@ -165,7 +166,9 @@ silently not apply.
 | `fetch.pruneTags`, `remote.origin.pruneTags` | `false` | delete local tags origin lacks on every fetch, `git main`'s tags among them |
 | `push.default` | `simple` | `matching` pushes every branch with a remote counterpart |
 | `push.followTags` | `false` | push tags along with the branch |
-| `submodule.recurse` | `false` | carry switch, merge and rebase into submodules |
+| `push.recurseSubmodules` | `no` | `on-demand` pushes the submodules' commits as well, which no plan shows |
+| `branch.autoSetupMerge` | `true` | `always` makes `rescue/<branch>` track the local branch about to be deleted; `false` leaves the main `git main` recreates with no upstream |
+| `submodule.recurse` | `false` | carry switch, merge and rebase into submodules; push reads it as `push.recurseSubmodules`, whichever is read last winning |
 | `status.showUntrackedFiles` | `normal` | `no` hides untracked files from the dirty checks |
 
 `rebase.autoSquash` is not pinned: it only affects an interactive rebase, and none of
@@ -182,9 +185,8 @@ the commands runs one (checked on git 2.55). None of them runs `git pull`, so
 - *Settings the commands read on purpose*: `cleanup.subscription`, `cleanup.azconfig`,
   `claude.sessionTrailer`.
 - *Checks that can only refuse*: `merge.verifySignatures`, `push.useForceIfIncludes`.
-  Under them an operation fails and is reported; nothing extra happens.
-- *`push.recurseSubmodules`*, not decided yet: `check` only refuses, but `on-demand`
-  makes a push also push the submodules' commits, which no plan shows.
+  Under them an operation fails and the refusal shows in the command's output; nothing
+  extra happens.
 - *What content is*: line endings, filters, ignore rules.
 - *Display*: colour, diff and log formatting, `advice.*`. What git prints straight to
   you follows them. What a command parses is read with plumbing and explicit formats

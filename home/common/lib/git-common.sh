@@ -41,10 +41,8 @@ TOOL=${TOOL:-git}
 # Appended, never reset: the environment can already carry entries (a sandbox
 # sets safe.directory this way), and those keep applying. `git -c` on the
 # command line (`git -c rebase.updateRefs=true refresh`) is read after these, so
-# it still overrides a pin for that one run.
-# TODO(claude): undecided: whether `git -c` may override a pin. It can for now
-# (checked on git 2.55). Closing it would mean appending the pins to
-# GIT_CONFIG_PARAMETERS as well, whose quoting is git's internal format.
+# it still overrides a pin for that one run. That is intended: it is the way to
+# change a pinned setting for one run.
 #
 # Everything not listed comes from your config: identity, signing, hooks,
 # credentials, the [cleanup] and [claude] keys, and display settings. A setting
@@ -99,20 +97,21 @@ unpin_git_config() {
 #   --prune fetch, git main's git-main/* tags among them.
 # push: default=simple is git's default: the branch to its upstream, never
 #   every matching branch. followTags would push tags along with the branch.
+#   recurseSubmodules=no: "on-demand" would push the submodules' commits too.
+#   Push also reads submodule.recurse as the same switch, last one read
+#   winning, so the submodule.recurse pin below turns it off as well; this one
+#   keeps it off if that pin is ever removed.
+# branch.autoSetupMerge=true is git's default: a new branch tracks its start
+#   point only when that is a remote branch. So the main git main recreates
+#   from origin/main tracks it, and rescue/<branch>, cut from a local branch,
+#   tracks nothing ("always" would make it track the branch about to be
+#   deleted; "false" would leave git main's main with no upstream).
 # submodule.recurse: switch, merge and rebase stay in this repository.
 # status.showUntrackedFiles: dirty checks read `status --porcelain`, which
 #   leaves untracked files out under "no".
 #
-# TODO(claude): undecided: whether branch.autoSetupMerge is pinned. Left to your
-# config for now; it decides whether rescue/<branch> and a main recreated by git
-# main get an upstream.
-# TODO(claude): undecided: whether checks that can only refuse
-# (merge.verifySignatures, push.useForceIfIncludes) are pinned off. Left to your
-# config for now.
-# TODO(claude): undecided: whether push.recurseSubmodules is pinned to no. Left
-# to your config for now: "check" only refuses, but "on-demand" pushes the
-# submodules' commits as well, and submodule.recurse=false does not stop an
-# explicit push.recurseSubmodules.
+# Not pinned on purpose: merge.verifySignatures and push.useForceIfIncludes.
+# They can only refuse, and the refusal shows in the command's output.
 pin_git_config \
   rebase.updateRefs=false \
   rebase.autoStash=false \
@@ -125,6 +124,8 @@ pin_git_config \
   remote.origin.pruneTags=false \
   push.default=simple \
   push.followTags=false \
+  push.recurseSubmodules=no \
+  branch.autoSetupMerge=true \
   submodule.recurse=false \
   status.showUntrackedFiles=normal
 
