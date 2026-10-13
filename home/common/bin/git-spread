@@ -52,9 +52,8 @@ done
 setup() {
 ensure_in_git_repository
 # run_update writes git's own failure message here so it can report the real
-# reason rather than calling everything a conflict.
-CACHE_DIR="$(git rev-parse --git-common-dir)/cleanup-cache"
-mkdir -p "$CACHE_DIR"
+# reason rather than calling everything a conflict. Also takes the run lock.
+use_cache_dir
 
 echo "fetching origin (prune)..."
 git fetch --quiet --prune origin || { echo "❌ fetch failed" >&2; exit 1; }

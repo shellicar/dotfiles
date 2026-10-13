@@ -167,6 +167,18 @@ removal is shown as unavailable with `locked:` and git's reason beside it, in th
 place uncommitted changes are named. A lock does not stop an update: `git refresh`
 still offers one and `git spread` still makes it.
 
+**Another of these commands running in the same repository stops it.** `git refresh`,
+`git cleanup`, `git spread` and `git catchup` each take a lock before doing anything
+else, `--plan` and dry runs included: the folder `cleanup-cache/lock` in the
+repository's common git directory, made with `mkdir` and holding the owner's pid and
+command name. A second command refuses, naming the one running and its pid. A lock
+whose pid is no longer running, left by something no trap could catch, is taken over
+and the command says so. The lock is released on a normal exit, Ctrl-C, a hangup, QUIT
+and TERM, which includes the stop on a `merge-tree` error. It is what keeps two runs
+off the scratch files in `cleanup-cache`, `update-error`, `remove-output`, `incoming`
+and `in-the-way`, whose names are fixed. Running several at once was never intended,
+and nothing needs installing for it: there is no `flock`.
+
 **When git refuses a removal, what it said is shown** under the line reporting it,
 every line of it.
 

@@ -241,6 +241,74 @@ ensure_in_git_repository() {
   git rev-parse --git-dir >/dev/null 2>&1 || { echo "Error: not in a git repository" >&2; exit 1; }
 }
 
+# ── one run at a time ───────────────────────────────────────────────────────
+
+# Sets CACHE_DIR to cleanup-cache in the repository's common git directory,
+# which every worktree shares, and takes the run lock there. Every command
+# that uses the cache calls this before anything else, so two of them never
+# run in one repository at once. That is what keeps them off each other's
+# scratch files in the cache (update-error, remove-output, incoming,
+# in-the-way), which have fixed names.
+use_cache_dir() {
+  CACHE_DIR="$(git rev-parse --git-common-dir)/cleanup-cache"
+  mkdir -p "$CACHE_DIR" || { echo "Error: cannot create $CACHE_DIR" >&2; exit 1; }
+  take_run_lock
+}
+
+# The lock is a directory, made with mkdir, which is atomic: of two commands
+# starting together exactly one makes it. Inside it, pid holds the owner's
+# process id and command its name. When it already exists, a live owner (kill
+# -0 succeeds) means this command refuses; a dead one, killed by something no
+# trap catches, means the lock is taken over. The pattern is
+# tmux-snapshot-watch's. A process id reused by an unrelated process after the
+# owner died reads as alive, and the lock is refused until it is removed.
+take_run_lock() {
+  local owner command
+  RUN_LOCK="$CACHE_DIR/lock"
+  if ! mkdir "$RUN_LOCK" 2>/dev/null; then
+    owner=$(cat "$RUN_LOCK/pid" 2>/dev/null)
+    command=$(cat "$RUN_LOCK/command" 2>/dev/null)
+    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
+      RUN_LOCK=''
+      echo "$TOOL: ${command:-another command} (pid $owner) is already running in this repo" >&2
+      exit 1
+    fi
+    echo "$TOOL: taking over the lock left by ${command:-a command} (pid ${owner:-unknown}), which is no longer running" >&2
+    rm -f "$RUN_LOCK/pid" "$RUN_LOCK/command"
+    rmdir "$RUN_LOCK" 2>/dev/null
+    mkdir "$RUN_LOCK" 2>/dev/null || {
+      RUN_LOCK=''
+      echo "$TOOL: another command took the lock first, try again" >&2
+      exit 1
+    }
+  fi
+  printf '%s\n' "$$" > "$RUN_LOCK/pid"
+  printf '%s\n' "$TOOL" > "$RUN_LOCK/command"
+  set_run_lock_traps
+}
+
+# Removes the lock, if this command holds it. Safe to call more than once.
+release_run_lock() {
+  [ -n "${RUN_LOCK:-}" ] || return 0
+  [ "$(cat "$RUN_LOCK/pid" 2>/dev/null)" = "$$" ] || return 0
+  rm -f "$RUN_LOCK/pid" "$RUN_LOCK/command"
+  rmdir "$RUN_LOCK" 2>/dev/null
+  RUN_LOCK=''
+  return 0
+}
+
+# Releases the lock on every exit the shell can catch: a normal exit, Ctrl-C,
+# a hangup, QUIT, and TERM, which is also how in_main_by_content stops the command
+# on a git error. A command that sets traps of its own, as git refresh's
+# picker does, includes release_run_lock in them and calls this again after.
+set_run_lock_traps() {
+  trap 'release_run_lock' EXIT
+  trap 'release_run_lock; exit 129' HUP
+  trap 'release_run_lock; exit 130' INT
+  trap 'release_run_lock; exit 131' QUIT
+  trap 'release_run_lock; exit 143' TERM
+}
+
 # Sets two things. MAIN_REF is what git is handed for every operation. MAIN is
 # the plain name, and it is only ever printed.
 #
