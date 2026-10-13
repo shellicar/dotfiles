@@ -60,6 +60,14 @@ lock_lines() {
   awk -F"$TAB" -v p="$1" '$1 == p { if ($2 == "") print "locked"; else print "locked " $2; exit }' "$LOCKS"
 }
 
+# branch_created <ref> <epoch>: the time of the oldest entry in the branch's
+# reflog. A branch given none has no reflog.
+CREATED=$WORK/created
+: > "$CREATED"
+branch_created() {
+  printf '%s\t%s\n' "$1" "$2" >> "$CREATED"
+}
+
 # commit <id> [parent]
 commit() {
   printf '%s\t%s\n' "$1" "${2:-}" >> "$PARENTS"
@@ -266,6 +274,14 @@ git_says() (
     # by content that is not in main by ancestry.
     "diff "*)
       printf 'change %s %s\n' "$(nth_word 2 "$@")" "$(nth_word 3 "$@")" ;;
+    # The oldest entry only, printed as git prints a selector under
+    # --date=unix: the short name, then the entry's time. No reflog fails the
+    # way git does.
+    "reflog --date=unix --format=%gd refs/heads/"*)
+      ref=$(last_word "$@")
+      at=$(awk -F"$TAB" -v r="$ref" '$1 == r { print $2; exit }' "$CREATED")
+      [ -n "$at" ] || return 128
+      printf '%s@{%s}\n' "${ref#refs/heads/}" "$at" ;;
     "log -1 --format=%cr "*)
       printf '5 days ago\n' ;;
     # A worktree's HEAD is the branch checked out in it.
