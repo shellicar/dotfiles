@@ -465,6 +465,11 @@ pr_covers_branch() (
 #
 # With no table, because there is no host, no CLI or no sign-in, the answer is
 # no, and the branch is rebased.
+#
+# TODO(claude): undecided: whether a merged pull request's last commit counts
+# as the landed commit when in_main_by_content fails on it, after main changed
+# the same lines again. It does not for now: such a branch finds no landed
+# commit, reads as unmerged, and is offered a rebase from its fork point.
 branch_has_merged_pr() (
   [ -n "$PR_MERGE_TABLE" ] || return 1
   printf '%s\n' "$PR_MERGE_TABLE" | cut -f2 | sort -u > "$CACHE_DIR/pr-heads"
