@@ -42,6 +42,9 @@ TOOL=${TOOL:-git}
 # sets safe.directory this way), and those keep applying. `git -c` on the
 # command line (`git -c rebase.updateRefs=true refresh`) is read after these, so
 # it still overrides a pin for that one run.
+# TODO(claude): undecided: whether `git -c` may override a pin. It can for now
+# (checked on git 2.55). Closing it would mean appending the pins to
+# GIT_CONFIG_PARAMETERS as well, whose quoting is git's internal format.
 #
 # Everything not listed comes from your config: identity, signing, hooks,
 # credentials, the [cleanup] and [claude] keys, and display settings. A setting
@@ -83,8 +86,12 @@ pin_git_config() {
 # config for now; it decides whether rescue/<branch> and a main recreated by git
 # main get an upstream.
 # TODO(claude): undecided: whether checks that can only refuse
-# (merge.verifySignatures, push.useForceIfIncludes, push.recurseSubmodules=check)
-# are pinned off. Left to your config for now.
+# (merge.verifySignatures, push.useForceIfIncludes) are pinned off. Left to your
+# config for now.
+# TODO(claude): undecided: whether push.recurseSubmodules is pinned to no. Left
+# to your config for now: "check" only refuses, but "on-demand" pushes the
+# submodules' commits as well, and submodule.recurse=false does not stop an
+# explicit push.recurseSubmodules.
 pin_git_config \
   rebase.updateRefs=false \
   rebase.autoStash=false \

@@ -174,9 +174,10 @@ the commands runs one (checked on git 2.55). None of them runs `git pull`, so
   and `branch.<name>.pushRemote`.
 - *Settings the commands read on purpose*: `cleanup.subscription`, `cleanup.azconfig`,
   `claude.sessionTrailer`.
-- *Checks that can only refuse*: `merge.verifySignatures`, `push.useForceIfIncludes`,
-  `push.recurseSubmodules=check`. Under them an operation fails and is reported; nothing
-  extra happens.
+- *Checks that can only refuse*: `merge.verifySignatures`, `push.useForceIfIncludes`.
+  Under them an operation fails and is reported; nothing extra happens.
+- *`push.recurseSubmodules`*, not decided yet: `check` only refuses, but `on-demand`
+  makes a push also push the submodules' commits, which no plan shows.
 - *What content is*: line endings, filters, ignore rules.
 - *Display*: colour, diff and log formatting, `advice.*`. What git prints straight to
   you follows them. What a command parses is read with plumbing and explicit formats
