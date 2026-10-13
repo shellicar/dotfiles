@@ -63,4 +63,4 @@ row() { printf '%s' "$ROWS" | awk -F"$TAB" -v id="$1" '$1 == id { print $2 "|" $
 assert_eq "$(row feature/prR)" "off|rescue|merged, 1 commit on top not in main"
 assert_eq "$(row feature/prU)" ""
 assert_eq "$(row feature/plainR)" ""
-assert_eq "$(row feature/plainU)" "on|rebase|2 behind, replays 1"
+assert_eq "$(row feature/plainU)" "on|rebase|2 behind, 1 commit to replay"

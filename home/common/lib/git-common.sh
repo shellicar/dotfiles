@@ -285,10 +285,17 @@ in_main_by_content() (
     [ "$(cat "$file")" = yes ]
     return
   fi
+  out=$(git merge-tree --write-tree "$trunk" "$c" 2>/dev/null)
+  rc=$?
+  # 0 is a clean merge and 1 a conflict, both answers. Anything else is git
+  # failing, a git older than 2.38 among them, and is not cached, so it is
+  # asked again once git can answer.
+  # TODO(claude): undecided: whether a git error here stops the run. It reads
+  # as not in main for now, so a squash merge goes unfound rather than the
+  # command stopping.
+  [ "$rc" -le 1 ] || return 1
   ans=no
-  if out=$(git merge-tree --write-tree "$trunk" "$c" 2>/dev/null); then
-    [ "$(printf '%s\n' "$out" | head -1)" = "$(git rev-parse --verify --quiet "$trunk^{tree}")" ] && ans=yes
-  fi
+  [ "$rc" = 0 ] && [ "$(printf '%s\n' "$out" | head -1)" = "$(git rev-parse --verify --quiet "$trunk^{tree}")" ] && ans=yes
   mkdir -p "$CACHE_DIR/in-main" && printf '%s\n' "$ans" > "$file"
   [ "$ans" = yes ]
 )

@@ -91,7 +91,7 @@ has 'rebase p onto main [3 ahead'
 has '[x]   🔁 rebase r onto main'
 has '[x]   🔁 rebase feature/a onto main'
 has '[ ]   🔁 rebase q onto main'
-has "drops merge $MERGE edited q.txt"
+has "rebasing drops the edits merge $MERGE made to q.txt"
 has 'shares history with feature/a past main'
 
 case "$out" in

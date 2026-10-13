@@ -47,7 +47,7 @@ out=$("$BIN/git-refresh" --plan --no-fetch 2>&1) || fail 'git refresh --plan fai
 printf '%s\n' "$out" | sed 's/^/  /'
 
 case "$out" in
-  *'rebase review onto main'*'replays 1'*)
+  *'rebase review onto main'*'1 commit to replay'*)
     printf '  ok   the rebase replays only the commit on top\n' ;;
   *) fail 'no rebase replaying one commit was offered' ;;
 esac

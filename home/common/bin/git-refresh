@@ -230,7 +230,7 @@ EOF
           replays=$(rebase_count "$udetail" "$b")
           # The library gives one line per merge; the record needs one field.
           drops=$(merge_edits "$udetail" "$b" |
-            awk -F'\t' '{ printf "%s%s edited %s", (NR > 1 ? "; " : ""), $1, $2 }')
+            awk -F'\t' '{ printf "%s%s made to %s", (NR > 1 ? "; " : ""), $1, $2 }')
           drops=${drops:--}
         fi
       fi
@@ -440,12 +440,16 @@ derive() {
       [ -n "$offered" ] && udef=$def
       [ "$stash" = yes ] && udef=off
       uwhy="$behind behind"
-      [ "$replays" != - ] && uwhy="$uwhy, replays $replays"
+      case "$replays" in
+        -) ;;
+        1) uwhy="$uwhy, 1 commit to replay" ;;
+        *) uwhy="$uwhy, $replays commits to replay" ;;
+      esac
       [ "$owner" != - ] && { udef=off; uwhy="$uwhy, not yours: $owner"; }
       # A merge with edits of its own is dropped by the rebase, and those edits
       # with it. Offered all the same, but unticked, with the merge and its
       # files named.
-      [ "$drops" != - ] && { udef=off; uwhy="$uwhy, drops merge $drops"; }
+      [ "$drops" != - ] && { udef=off; uwhy="$uwhy, rebasing drops the edits merge $drops"; }
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
       emit "${name}U" "$st" "$uact" "$act" "$wt" "$uwhy" - - "$ucls" "$meta" "$stash"
