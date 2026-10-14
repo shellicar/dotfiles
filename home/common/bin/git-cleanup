@@ -8,20 +8,23 @@
 # without --apply.
 #
 # THE DECISION is the merge check, and only the merge check: are the branch's
-# commits already in main? Walking the branch tip-first, the first commit whose
-# content is found in main is where the branch joins main; anything before it is
-# work not yet in main.
+# commits already in main? Walking down from the tip, the first commit that
+# merging into main would change nothing is the branch's landed commit (see
+# landed_commit in the lib); everything above it is work not yet in main.
 #
 #   0 commits not in main  → fully merged     → delete (and its worktree)
-#   N commits not in main  → merged + N on top → review (kept)
-#   no join point found    → not merged        → keep
+#   N commits not in main  → in main + N on top:
+#       a merged PR of its own → rescue the N with --rescue
+#       none                   → keep; git refresh rebases it in its worktree
+#   no landed commit       → not merged        → keep
+#   none in --depth tested → not checked       → keep, say so
 #
-# A MERGED PULL REQUEST IS NOT THE SAME CLAIM. It answers the squash case, where
-# none of the branch's commits are in main and the content walk has nothing to
-# find, but it only speaks for the commits it carried. So it counts only when the
-# branch tip is EXACTLY the source tip the PR merged. One commit added after the
-# merge and the branch is a normal branch again, judged by content like any
-# other, because that commit is in main nowhere.
+# A MERGED PULL REQUEST IS NOT THE SAME CLAIM. It only speaks for the commits it
+# carried, so as the whole verdict it counts only when the branch tip is
+# EXACTLY the source tip the PR merged. One commit added after the merge and the
+# branch is a normal branch again, judged by content like any other, because
+# that commit is in main nowhere. A merged PR whose tip is somewhere in the
+# branch is what makes the commits above the landed commit a rescue.
 #
 # GONE IS ONLY AN INDICATOR. The remote branch being deleted says nothing about
 # content; it is a cross-check against the verdict, and only matters when the
@@ -81,7 +84,7 @@ ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
 # Asks the library for the verdict, then says it in this command's words. The
 # deciding is not here, so git refresh reaches the same answers.
 process_branch() {
-  local branch=$1 class wt ahead last meta not_in_main gone icon desc note outcome verdict
+  local branch=$1 class wt ahead last meta not_in_main gone pr icon desc note outcome verdict
 
   [ "$branch" = "$MAIN" ] && return 0
 
@@ -90,12 +93,12 @@ process_branch() {
   # IFS already set to tab, and every unquoted expansion inside the verdict would
   # stop splitting on newlines.
   verdict=$(branch_verdict "$branch")
-  IFS="$TAB" read -r class not_in_main ahead gone wt <<EOF
+  IFS="$TAB" read -r class not_in_main ahead gone pr wt <<EOF
 $verdict
 EOF
   # The sentence is the library's, so git refresh says the same one. What this
   # command adds to it below is its own: the flag that would act on it.
-  branch_reason "$branch" "$class" "$not_in_main" "$gone"
+  branch_reason "$branch" "$class" "$not_in_main" "$gone" "$pr"
   desc=$REASON
   class_icon "$class"
   icon=$CICON
@@ -117,8 +120,22 @@ EOF
     return 0
   fi
 
+  if [ "$class" = review ] && [ "$pr" = no ]; then
+    # In main up to its landed commit, with commits on top, and no merged pull
+    # request of its own: the work under it reached main some other way. Not
+    # rescued; git refresh offers the rebase that carries it forward, and only
+    # to a branch checked out in a worktree.
+    ONTOP_COUNT=$((ONTOP_COUNT + 1))
+    if [ -n "$wt" ]; then
+      say "  $icon $branch $meta ${DIM}($desc, worktree, keeping: git refresh rebases it)${RESET}"
+    else
+      say "  $icon $branch $meta ${DIM}($desc, keeping: git refresh rebases it once it is checked out in a worktree)${RESET}"
+    fi
+    return 0
+  fi
+
   if [ "$class" = review ]; then
-    # Merged up to the join point, but N commits sit on top of it.
+    # Its pull request merged, and N commits sit on top of its landed commit.
     note=$desc
     local block; block=$(worktree_block_reason "$wt")
     if [ -n "$block" ]; then
@@ -128,15 +145,24 @@ EOF
     REVIEW_COUNT=$((REVIEW_COUNT + 1))
     [ -n "$wt" ] && note="$note, worktree"
     say "  $icon $branch $meta ${DIM}($note)${RESET}"
-    local rbase rjoin
-    rbase=$(git merge-base "refs/heads/$branch" "$MAIN_REF")
-    rjoin=$(git rev-list "$rbase..refs/heads/$branch" | sed -n "$((not_in_main + 1))p")
+    local rjoin
+    rjoin=$(landed_sha "$(landed_commit "refs/heads/$branch")")
     do_rescue "$branch" "$rjoin" "$not_in_main" "$wt"
     return 0
   fi
 
-  # Beyond the cap: the cheap checks came back unresolved and the content walk
-  # was not run, so nothing is known either way. Not folded into unmerged, and
+  # The search for a landed commit stopped at --depth with more below: nothing
+  # is known either way, so it is said rather than counted as unmerged.
+  if [ "$class" = unchecked ]; then
+    UNCHECKED_COUNT=$((UNCHECKED_COUNT + 1))
+    note=$desc
+    [ -n "$wt" ] && note="$note, worktree"
+    say "  $icon $branch $meta ${DIM}($note, run --depth)${RESET}"
+    return 0
+  fi
+
+  # Beyond the cap: the cheap checks came back unresolved and the search for a
+  # landed commit was not run, so nothing is known either way. Not folded into unmerged, and
   # not offered to --gone, which means 'searched and not found', not 'not
   # searched'.
   if [ "$class" = inconclusive ]; then
@@ -312,7 +338,11 @@ reported as unsure when neither is true. Whether a branch still holds the commit
 is a reason to keep it, never a reason to remove it, and its age is not used.
 
   merged (0 commits on top)  → deleted by --apply
-  merged + N commits on top  → rescued (stray commits moved off), then deleted, by --rescue
+  merged + N commits on top  → rescued (stray commits moved off), then deleted, by
+                               --rescue, when a pull request of its own merged
+  in main + N commits on top → kept, when no pull request of its own merged;
+                               git refresh rebases it once checked out in a worktree
+  no landed commit in --depth → not checked, reported and kept
   gone but content not found → warned; deleted by --gone if you trust it
   unmerged                   → kept
   too far behind             → inconclusive, not evaluated; evaluated by --old
@@ -335,7 +365,8 @@ Options:
                    branch, instead of walking every local branch — repeat
                    the flag to filter to several
   -a, --all        also list the plain unmerged / idle branches (hidden by default)
-  --depth N        commits to walk back from each tip for the join point (default 5)
+  --depth N        commits to test, down from each tip, for one already in main
+                   (default 50)
   --old            also evaluate branches left inconclusive by the cap: more
                    than $MAX_DISTANCE commits behind main AND untouched for
                    $MAX_AGE_DAYS days
@@ -360,7 +391,7 @@ one login per subscription, so without this the second login evicts the first.
 EOF
 }
 
-APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; APPLY_DETACHED=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=5; ONLY_BRANCHES=''; EVALUATE_OLD=false
+APPLY=false; APPLY_GONE=false; APPLY_EMPTY=false; APPLY_DETACHED=false; RESCUE=false; SHOW_ALL=false; BASE_OVERRIDE=''; NO_FETCH=false; VERBOSE=false; WALK_DEPTH=50; ONLY_BRANCHES=''; EVALUATE_OLD=false
 
 # The evaluation cap. Both must be exceeded before a branch is left unevaluated.
 MAX_DISTANCE=100; MAX_AGE_DAYS=30
@@ -391,7 +422,6 @@ done
 
 setup() {
 ensure_in_git_repository
-command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
 
 # Run from the main working tree, always. git refuses to remove that one, so
 # whatever this run deletes, it is never standing on it. Without this, removing
@@ -402,8 +432,7 @@ MAIN_WT=$(git worktree list --porcelain | awk '/^worktree /{print substr($0, 10)
 [ -n "$MAIN_WT" ] || { echo "Error: cannot find the main working tree" >&2; exit 1; }
 cd "$MAIN_WT" || exit 1
 
-CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
-mkdir -p "$CACHE_DIR"
+use_cache_dir
 NOW=$(date +%s)
 resolve_main
 }
@@ -433,11 +462,6 @@ DETACHED=$(git worktree list --porcelain | awk '
   /^detached/    { print h "\t" p }
 ')
 
-# After DETACHED: the index depth is sized for the detached heads too.
-step 'indexing main ...'
-build_shared_main_index
-step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
-
 DETACHED_PR_TABLE=''
 if [ -n "$DETACHED" ] && [ -z "$ONLY_BRANCHES" ]; then
   step 'detached worktree PRs ...'
@@ -445,7 +469,7 @@ if [ -n "$DETACHED" ] && [ -z "$ONLY_BRANCHES" ]; then
   step_done "$(printf '%s' "$DETACHED_PR_TABLE" | grep -c .) found"
 fi
 
-MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; DETACHED_COUNT=0; UNSURE_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0; INCONCLUSIVE_COUNT=0; PLAN=''
+MERGED_COUNT=0; REVIEW_COUNT=0; SUSPECT_COUNT=0; EMPTY_COUNT=0; DETACHED_COUNT=0; UNSURE_COUNT=0; REMOVED_COUNT=0; RESCUED_COUNT=0; HIDDEN_COUNT=0; INCONCLUSIVE_COUNT=0; ONTOP_COUNT=0; UNCHECKED_COUNT=0; PLAN=''
 
 # Before the branch list, because if it fires none of the branch list is the
 # point: the trunk needs a decision first and only you can make it.
@@ -479,7 +503,7 @@ fi
 
 printf '\n'
 # Summary rule — three kinds of line, three reasons:
-#  - the seven category counts always print, zero or not: this is a fixed report
+#  - the nine category counts always print, zero or not: this is a fixed report
 #    card, and a line that vanishes at zero is ambiguous — "nothing here" or
 #    "never checked"?
 #  - the hidden/unmerged line always prints too, but its wording depends on
@@ -490,8 +514,10 @@ printf '\n'
 say "${GREEN}${OK} merged, ready to delete: $MERGED_COUNT${RESET}  ${DIM}→ --apply${RESET}"
 say "${BLUE}${EMPTYICON} never diverged from main: $EMPTY_COUNT${RESET}  ${DIM}→ --empty${RESET}"
 say "${DIM}${KEEP} merged with commits on top: $REVIEW_COUNT${RESET}  ${DIM}→ --rescue${RESET}"
+say "${DIM}${KEEP} in main with commits on top, no merged PR of its own: $ONTOP_COUNT${RESET}  ${DIM}→ git refresh rebases those checked out in a worktree${RESET}"
 say "${RED}${WARN}gone but content not found: $SUSPECT_COUNT${RESET}  ${DIM}→ --gone to trust${RESET}"
 say "${YELLOW}${UNKNOWN}${RESET} inconclusive, too far behind: $INCONCLUSIVE_COUNT${RESET}  ${DIM}→ --old${RESET}"
+say "${YELLOW}${UNKNOWN}${RESET} not checked past $WALK_DEPTH commits: $UNCHECKED_COUNT${RESET}  ${DIM}→ --depth${RESET}"
 say "${GREEN}${OK} detached worktrees, work landed: $DETACHED_COUNT${RESET}  ${DIM}→ --detached${RESET}"
 say "${YELLOW}${UNKNOWN}${RESET} detached worktrees, unsure: $UNSURE_COUNT${RESET}  ${DIM}→ nothing claims them${RESET}"
 if [ "$SHOW_ALL" = true ]; then

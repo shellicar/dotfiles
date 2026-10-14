@@ -38,6 +38,13 @@ done
 
 ensure_in_git_repository
 
+# The cache the library keeps of which commits are already in main, shared with
+# the other commands, and the run lock, before anything else. resolve_main
+# prunes the cache, so this comes first. WALK_DEPTH is how many commits down
+# from the tip it looks for one: see landed_commit.
+use_cache_dir
+WALK_DEPTH=50
+
 branch=$(git symbolic-ref --quiet --short HEAD) || { echo "detached HEAD" >&2; exit 2; }
 
 git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
@@ -134,14 +141,22 @@ case "$action" in
 esac
 
 base=$detail
-git merge-base --is-ancestor "$base" HEAD || { echo "fork point $base is not an ancestor of $branch" >&2; exit 1; }
+git merge-base --is-ancestor "$base" HEAD || { echo "replay start $base is not an ancestor of $branch" >&2; exit 1; }
 
 echo "plan: rebase $branch onto origin/$main and force-push it"
 echo "  branch      $branch at $local_head"
 echo "  onto        origin/$main at $target"
-echo "  fork point  $base"
-echo "  commits     $(git rev-list --count "$base..HEAD") to replay"
-git log --oneline --no-decorate "$base..HEAD"
+echo "  replay from $base"
+# Counted and listed the way the rebase replays them, and the way git refresh
+# counts them: merges and the trunk's own commits left out.
+echo "  commits     $(rebase_count "$base" "$branch") to replay"
+git log --oneline --no-decorate --no-merges HEAD "^$base" "^$MAIN_REF"
+# A rebase replays only the commits that are not merges, so a merge's own edits
+# go with it. Said in the plan, which --apply then carries out as printed,
+# rather than refused.
+merge_edits "$base" "$branch" | while IFS="$TAB" read -r m files; do
+  echo "  drops       the edits merge $m made to $files"
+done
 
 if [ "$apply" -eq 0 ]; then
   echo "run: git-catchup --apply"

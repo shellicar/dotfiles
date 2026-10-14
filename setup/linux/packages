@@ -25,3 +25,7 @@ libicu74
 
 # pnpm's binary will not start without it.
 libatomic1
+
+# flock, which the git commands use to run one at a time per repository.
+# Essential on Debian and Ubuntu, so always there; listed to record that.
+util-linux

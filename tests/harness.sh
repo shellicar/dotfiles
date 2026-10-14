@@ -40,8 +40,13 @@ GIT_LOG=$WORK/git.log
 # write a plain function without reopening the hole: the fake once had its own
 # `a` and `b` overwrite a caller's mid-loop, and a fork point was computed
 # against a branch name that was no longer the branch.
+#
+# `git --version` is answered here rather than by each case, because the
+# library asks it when it is sourced. FAKE_GIT_VERSION sets the answer.
+FAKE_GIT_VERSION='git version 2.55.0'
 git() {
   printf '%s\n' "$*" >> "$GIT_LOG"
+  [ "$*" = --version ] && { printf '%s\n' "$FAKE_GIT_VERSION"; return 0; }
   ( git_says "$@" )
 }
 
@@ -153,7 +158,6 @@ PR_MERGE_TABLE=''
 PR_DETACHED_TABLE=''
 PR_SOURCE=''
 WT_MAP=''
-MAIN_IDX=''
 CACHE_DIR=$WORK/cache
 mkdir -p "$CACHE_DIR"
 REMOVED_COUNT=0

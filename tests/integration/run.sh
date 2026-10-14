@@ -27,14 +27,11 @@ for scenario in "$HERE"/scenarios/*.sh; do
   ran=$((ran + 1))
   name=$(basename "$scenario" .sh)
 
-  # shasum is what content_hash uses and alpine does not ship it; sha1sum is the
-  # same algorithm and the same first field, so a shim keeps the command honest
-  # without changing it for a test.
   out=$(docker run --rm --entrypoint sh \
     -v "$REPO:/repo:ro" \
     -v "$HERE/lib.sh:/scenario/lib.sh:ro" \
     -v "$scenario:/scenario/run.sh:ro" \
-    "$IMAGE" -c 'printf "#!/bin/sh\nexec sha1sum \"\$@\"\n" > /usr/local/bin/shasum && chmod +x /usr/local/bin/shasum && exec sh /scenario/run.sh' 2>&1)
+    "$IMAGE" -c 'exec sh /scenario/run.sh' 2>&1)
   status=$?
 
   case "$out" in

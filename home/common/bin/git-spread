@@ -35,6 +35,9 @@ TAB=$(printf '\t')
 PLAN=''
 VERBOSE=false
 BASE_OVERRIDE=''
+# How many commits down from a branch's tip the library looks for one already
+# in main: see landed_commit.
+WALK_DEPTH=50
 
 parse_args() {
 for arg in "$@"; do
@@ -49,9 +52,8 @@ done
 setup() {
 ensure_in_git_repository
 # run_update writes git's own failure message here so it can report the real
-# reason rather than calling everything a conflict.
-CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
-mkdir -p "$CACHE_DIR"
+# reason rather than calling everything a conflict. Also takes the run lock.
+use_cache_dir
 
 echo "fetching origin (prune)..."
 git fetch --quiet --prune origin || { echo "❌ fetch failed" >&2; exit 1; }
@@ -137,6 +139,17 @@ EOF
   if [ "$owner" != - ]; then
     printf '⛔ %s [%s]: not yours (%s), skipping, git refresh can merge it\n' "$wt" "$branch" "$owner"
     continue
+  fi
+
+  # A rebase replays only the commits that are not merges, so a merge's own
+  # edits would go with it. git refresh offers that rebase unticked with the
+  # edits named; with no way to leave it unticked here, the branch is skipped.
+  if [ "$action" = rebase ]; then
+    drops=$(merge_edits "$detail" "$branch" | cut -f1 | paste -sd, - | sed 's/,/, /g')
+    if [ -n "$drops" ]; then
+      printf '⛔ %s [%s]: a rebase would drop the edits made in merge %s, skipping, git refresh can rebase it\n' "$wt" "$branch" "$drops"
+      continue
+    fi
   fi
 
   if [ -n "$dirty" ] && [ "$stash" -eq 0 ]; then
