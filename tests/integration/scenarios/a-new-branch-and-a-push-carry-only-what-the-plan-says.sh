@@ -24,15 +24,33 @@ set -eu
 
 new_repo
 
-# review: squash-merged, then one more commit, so git cleanup rescues it.
+# review: squash-merged through its own pull request, then one more commit, so
+# git cleanup rescues it.
 branch review
 commit R1 r1.txt
+R1=$(git rev-parse HEAD)
 squash_into_main review
+SQUASH=$(git rev-parse refs/remotes/origin/main)
 commit R2 r2.txt
 git switch -q main
 
 git config branch.autoSetupMerge always
-run_command git-cleanup --no-fetch --apply --rescue
+# A rescue needs the branch's own merged pull request, and origin is a path
+# with no host to ask. The command is sourced and the query answered with the
+# pull request that squashed review: its source branch, its last commit, and
+# the squash on main.
+printf '%s\n' '--- git-cleanup --no-fetch --apply --rescue, with review'"'"'s pull request ---'
+(
+  # shellcheck source=../../../home/common/lib/git-common.sh
+  . /repo/home/common/lib/git-common.sh
+  # shellcheck source=../../../home/common/bin/git-cleanup
+  . "$BIN/git-cleanup"
+  fetch_pr_merges() {
+    PR_MERGE_TABLE=$(printf 'review\t%s\t%s' "$R1" "$SQUASH")
+    PR_SOURCE='from the scenario'; PR_HINT=''
+  }
+  main --no-fetch --apply --rescue
+) 2>&1 | sed 's/^/  /'
 
 echo '--- outcome: the rescue branch ---'
 exists refs/heads/rescue/review
