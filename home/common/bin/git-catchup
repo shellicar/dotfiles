@@ -148,9 +148,8 @@ echo "  replay from $base"
 echo "  commits     $(git rev-list --count "$base..HEAD") to replay"
 git log --oneline --no-decorate "$base..HEAD"
 # A rebase replays only the commits that are not merges, so a merge's own edits
-# go with it. Said in the plan, which --apply then carries out as printed.
-# TODO(claude): undecided: whether git catchup refuses such a rebase instead of
-# naming what it drops. It names it for now.
+# go with it. Said in the plan, which --apply then carries out as printed,
+# rather than refused.
 merge_edits "$base" "$branch" | while IFS="$TAB" read -r m files; do
   echo "  drops       the edits merge $m made to $files"
 done

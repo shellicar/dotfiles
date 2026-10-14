@@ -12,8 +12,9 @@
 # of thing this repo keeps having to avoid.
 #
 # WHAT THE CALLER OWES IT. This file defines functions and the colour variables,
-# and pins git's behaviour settings in the environment (see "pinned settings"
-# below); nothing else runs at source time. Everything the functions read is the
+# checks the git version (see require_git_version) and pins git's behaviour
+# settings in the environment (see "pinned settings" below); nothing else runs
+# at source time. Everything the functions read is the
 # caller's: MAIN, CACHE_DIR, TAB, NOW, VERBOSE, WALK_DEPTH, EVALUATE_OLD,
 # ONLY_BRANCHES, DETACHED, PLAN, and the counters run_plan increments. Under
 # `set -u` that is safe because a function only runs once the caller has set up.
@@ -147,6 +148,42 @@ pin_git_config \
   submodule.recurse=false \
   fetch.recurseSubmodules=on-demand \
   status.showUntrackedFiles=normal
+
+# ── git version ─────────────────────────────────────────────────────────────
+
+# The oldest git these commands run on. merge-tree --write-tree is the newest
+# thing they use (2.38); show --remerge-diff (2.36), rev-list
+# --no-commit-header (2.33) and GIT_CONFIG_COUNT (2.31) are all older.
+GIT_MIN_MAJOR=2 GIT_MIN_MINOR=38
+
+# Refuses, with a non-zero exit, when git is older than that. Run when this file
+# is sourced, so a command stops before it does anything else.
+#
+# The version is the third word of `git --version`, compared on its first two
+# numbers. Seen: "git version 2.55.0", "git version 2.39.5 (Apple Git-154)",
+# and suffixes such as ".rc1" after the numbers. Output it cannot read is an
+# error that shows the output as it came, so the parsing can be fixed, rather
+# than a guess either way.
+require_git_version() {
+  local out word major rest minor
+  out=$(git --version 2>&1)
+  word=$(printf '%s\n' "$out" | awk 'NR == 1 { print $3 }')
+  major=${word%%.*}
+  rest=${word#*.}
+  minor=${rest%%.*}
+  case "$word" in *.*) ;; *) major='' ;; esac
+  case "$major" in ''|*[!0-9]*) minor='' ;; esac
+  case "$minor" in
+    ''|*[!0-9]*)
+      echo "$TOOL: cannot read the git version from 'git --version', which printed: $out" >&2
+      exit 1 ;;
+  esac
+  [ "$major" -gt "$GIT_MIN_MAJOR" ] && return 0
+  [ "$major" -eq "$GIT_MIN_MAJOR" ] && [ "$minor" -ge "$GIT_MIN_MINOR" ] && return 0
+  echo "$TOOL: needs git $GIT_MIN_MAJOR.$GIT_MIN_MINOR or newer, found $word" >&2
+  exit 1
+}
+require_git_version
 
 # ── presentation ────────────────────────────────────────────────────────────
 
@@ -285,17 +322,28 @@ in_main_by_content() (
     [ "$(cat "$file")" = yes ]
     return
   fi
-  out=$(git merge-tree --write-tree "$trunk" "$c" 2>/dev/null)
+  out=$(git merge-tree --write-tree "$trunk" "$c" 2>"$CACHE_DIR/merge-tree-error")
   rc=$?
-  # 0 is a clean merge and 1 a conflict, both answers. Anything else is git
-  # failing, a git older than 2.38 among them, and is not cached, so it is
-  # asked again once git can answer.
-  # TODO(claude): undecided: whether a git error here stops the run. It reads
-  # as not in main for now, so a squash merge goes unfound rather than the
-  # command stopping.
-  [ "$rc" -le 1 ] || return 1
+  tree=$(printf '%s\n' "$out" | head -1)
+  # 0 is a clean merge and 1 a conflict, both answers, and both print the
+  # merged tree first. Anything else is git failing, and stops the whole
+  # command with git's error: read as "not in main", it would hide a squash
+  # merge and change what is offered. The tree is checked as well as the exit,
+  # because git 2.55 also exits 1 for a commit it cannot find, printing no tree.
+  #
+  # This runs in a subshell inside a command substitution, where exit would end
+  # only the subshell, so the command's own shell is signalled instead: $$ is
+  # that shell's id even here. Nothing is cached.
+  case "$tree" in
+    *[!0-9a-f]*|'') rc=2 ;;
+  esac
+  if [ "$rc" -gt 1 ]; then
+    { printf '%s: git merge-tree failed on %s:\n' "$TOOL" "$c"; cat "$CACHE_DIR/merge-tree-error"; } >&2
+    kill "$$"
+    exit 1
+  fi
   ans=no
-  [ "$rc" = 0 ] && [ "$(printf '%s\n' "$out" | head -1)" = "$(git rev-parse --verify --quiet "$trunk^{tree}")" ] && ans=yes
+  [ "$rc" = 0 ] && [ "$tree" = "$(git rev-parse --verify --quiet "$trunk^{tree}")" ] && ans=yes
   mkdir -p "$CACHE_DIR/in-main" && printf '%s\n' "$ans" > "$file"
   [ "$ans" = yes ]
 )
@@ -466,10 +514,10 @@ pr_covers_branch() (
 # With no table, because there is no host, no CLI or no sign-in, the answer is
 # no, and the branch is rebased.
 #
-# TODO(claude): undecided: whether a merged pull request's last commit counts
-# as the landed commit when in_main_by_content fails on it, after main changed
-# the same lines again. It does not for now: such a branch finds no landed
-# commit, reads as unmerged, and is offered a rebase from its fork point.
+# A merged pull request's last commit is not counted as the landed commit when
+# in_main_by_content fails on it, after main changed the same lines again. Such
+# a branch finds no landed commit, reads as unmerged, and is offered a rebase
+# from its fork point.
 branch_has_merged_pr() (
   [ -n "$PR_MERGE_TABLE" ] || return 1
   printf '%s\n' "$PR_MERGE_TABLE" | cut -f2 | sort -u > "$CACHE_DIR/pr-heads"
@@ -1132,9 +1180,9 @@ branch_foreign_authors() (
 # default) merges it again, which is what git spread and git catchup do.
 # 'rebase' sends it to the rebase like any other branch, which is what git
 # refresh does, showing what the rebase drops with merge_edits.
-# TODO(claude): undecided: whether git spread and git catchup also stop merging
-# again. They keep merging for now; neither can leave a rebase unticked behind a
-# warning, so a rebase there would drop a merge's edits with nothing to stop it.
+# git spread and git catchup keep merging again: neither can leave a rebase
+# unticked behind a warning, so a rebase there would drop a merge's edits with
+# nothing to stop it.
 #
 # The strategy only. Whether the tree is dirty, whether it is behind at all and
 # whether to push afterwards are the caller's, because the commands differ on
@@ -1165,8 +1213,7 @@ rebase_from() (
   b=$1
   l=$(landed_commit "refs/heads/$b")
   landed=$(landed_sha "$l")
-  # TODO(claude): undecided: whether a branch tested WALK_DEPTH deep without a
-  # landed commit is still rebased from its fork point. It is not for now: a
+  # A branch tested WALK_DEPTH deep without a landed commit is not rebased: a
   # landed commit further down would be replayed onto main a second time.
   [ "$l" = unchecked ] &&
     { printf 'none\tnot checked past %s commits, run with --depth\n' "$WALK_DEPTH"; return 0; }

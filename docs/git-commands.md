@@ -42,8 +42,14 @@ so a failure there says nothing.
 It tests at most 50 commits, or `--depth N`. A branch with more commits than that and
 no pass among them is reported as not checked, rather than as unmerged.
 
-`merge-tree --write-tree` needs git 2.38 or newer. It writes the merged tree into the
-object store, where nothing refers to it and `git gc` removes it. Each answer is cached
+The commands need git 2.38 or newer, for `merge-tree --write-tree`; everything else
+they use is older: `show --remerge-diff` (2.36), `rev-list --no-commit-header` (2.33)
+and the `GIT_CONFIG_COUNT` variables that carry the pins (2.31). `git-common.sh`
+checks `git --version` when it is loaded, so every command refuses on an older git,
+and on output it cannot read, before doing anything else. A git error from
+`merge-tree` stops the command with git's message rather than reading as "not in the
+trunk". `merge-tree` writes the merged tree into the object store, where nothing refers
+to it and `git gc` removes it. Each answer is cached
 under `.git/cleanup-cache/in-main/`, keyed by the trunk's tip and the commit.
 
 A deleted remote branch is never the verdict. It is a cross-check, and it earns a
@@ -190,9 +196,9 @@ review` removes the entries it added, and only those, before it launches VS Code
 its environment for as long as it runs, and every terminal opened in it would have the
 pins on git you run by hand.
 
-The variables need git 2.31 or newer, and the commands also use `rev-list
---no-commit-header`, from 2.33. Older git ignores the variables, so the pins would
-silently not apply.
+The variables need git 2.31 or newer; older git would ignore them, and the pins would
+silently not apply. That cannot happen: the commands refuse any git older than 2.38
+(see "Content" under "The verdict").
 
 **Pinned.** Each value is the one git uses when nothing is set, with two exceptions,
 noted in their rows: `rerere.enabled` and `submodule.recurse`, where pinning differs

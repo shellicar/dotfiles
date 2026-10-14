@@ -137,6 +137,13 @@ refs() {
 # Overridden by a case that needs a branch to have an upstream configured.
 git_config_says() { return 1; }
 
+# A tree id for a description, in hex as git prints one, since the library
+# reads anything else from merge-tree as git failing.
+tree_id() {
+  printf '%s' "$1" | od -An -tx1 | tr -d ' \n'
+  printf '\n'
+}
+
 replayed() {
   printf 'replayed-onto-%s-from-%s' "$1" "$2"
 }
@@ -172,7 +179,7 @@ git_says() (
     "rev-parse --verify --quiet "*"^{tree}")
       name=$(last_word "$@")
       c=$(commit_of "${name%^\{tree\}}") || return 1
-      printf 'tree-of-%s\n' "$c" ;;
+      tree_id "tree $c" ;;
     "rev-parse --verify --quiet "*"^{commit}")
       name=$(last_word "$@")
       commit_of "${name%^\{commit\}}" ;;
@@ -183,9 +190,9 @@ git_says() (
       main=$(commit_of "$(nth_word 3 "$@")") || return 1
       c=$(commit_of "$(nth_word 4 "$@")") || return 1
       if reaches "$main" "$c" || grep -qxF "$c" "$LANDS"; then
-        printf 'tree-of-%s\n' "$main"
+        tree_id "tree $main"
       else
-        printf 'tree-of-merging-%s\n' "$c"
+        tree_id "merging $c"
       fi ;;
     "rev-parse --verify --quiet "*)
       name=$(last_word "$@")
