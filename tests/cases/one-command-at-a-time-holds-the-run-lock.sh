@@ -73,6 +73,26 @@ run_as 'git refresh' 'kill "$$"; sleep 5'
 assert_eq "$?" 143
 assert_free 'after the stop on a merge-tree error'
 
+# Something at the lock's path that cannot be opened for writing, a folder
+# here: the command says so in its own words and exits 1, rather than the
+# shell ending it with its own error.
+mkdir -p "$WORK/blocked/cleanup-cache/lock"
+sh -c '
+  git() {
+    case "$*" in
+      --version) echo "git version 2.55.0" ;;
+      *) echo "$WORK/blocked" ;;
+    esac
+  }
+  TOOL="git spread"
+  . "$REPO/home/common/lib/git-common.sh"
+  use_cache_dir
+  echo reached
+' > "$WORK/out" 2> "$WORK/err"
+assert_eq "$?" 1
+assert_eq "$(cat "$WORK/out")" ""
+assert_eq "$(cat "$WORK/err")" "git spread: cannot open the run lock $WORK/blocked/cleanup-cache/lock for writing"
+
 # flock missing: refused before anything else, with how to install it. PATH
 # holds only mkdir, which use_cache_dir needs before it looks for flock.
 mkdir -p "$WORK/minbin"

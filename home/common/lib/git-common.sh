@@ -284,7 +284,14 @@ take_run_lock() {
     echo "$TOOL: needs flock, to run one command at a time per repository. On macOS: brew install flock" >&2
     exit 1
   fi
-  exec 9>>"$lock" || { echo "$TOOL: cannot open $lock" >&2; exit 1; }
+  # A failed redirection on a plain exec ends a non-interactive shell before
+  # the || is reached, under dash and bash --posix alike. With command it
+  # returns instead, and the group's 2>/dev/null keeps the shell's own error
+  # out without redirecting stderr for good, as exec's own 2> would.
+  { command exec 9>>"$lock"; } 2>/dev/null || {
+    echo "$TOOL: cannot open the run lock $lock for writing" >&2
+    exit 1
+  }
   if ! flock -n 9; then
     holder=$(cat "$CACHE_DIR/lock-holder" 2>/dev/null)
     echo "$TOOL: another command is running in this repo (it holds $lock)" >&2

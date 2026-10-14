@@ -172,8 +172,11 @@ still offers one and `git spread` still makes it.
 else, `--plan` and dry runs included: `flock` on the file `cleanup-cache/lock` in the
 repository's common git directory. A second command refuses and names the lock's path,
 and the command and pid that last took it, which may not be the one holding it now.
-The kernel releases the lock when the command exits, however it exits, so none is ever
-left behind. The lock is what keeps two runs off the scratch files in `cleanup-cache`,
+The kernel releases the lock when the last process holding its descriptor exits,
+however it exits, so none is ever left behind. A child still running when the command
+is killed keeps it until that child ends. git, gh and az are started with the
+descriptor closed, so nothing they leave running keeps it; everything else the commands
+start ends with them or soon after. The lock is what keeps two runs off the scratch files in `cleanup-cache`,
 `update-error`, `remove-output`, `incoming` and `in-the-way`, whose names are fixed.
 Running several at once was never intended.
 
