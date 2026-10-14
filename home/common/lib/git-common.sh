@@ -250,63 +250,50 @@ ensure_in_git_repository() {
 # scratch files in the cache (update-error, remove-output, incoming,
 # in-the-way), which have fixed names.
 use_cache_dir() {
-  CACHE_DIR="$(git rev-parse --git-common-dir)/cleanup-cache"
+  # Absolute, so the lock's path in a refusal reads the same from anywhere.
+  CACHE_DIR="$(git rev-parse --path-format=absolute --git-common-dir)/cleanup-cache"
   mkdir -p "$CACHE_DIR" || { echo "Error: cannot create $CACHE_DIR" >&2; exit 1; }
   take_run_lock
 }
 
-# The lock is a directory, made with mkdir, which is atomic: of two commands
-# starting together exactly one makes it. Inside it, pid holds the owner's
-# process id and command its name. When it already exists, a live owner (kill
-# -0 succeeds) means this command refuses; a dead one, killed by something no
-# trap catches, means the lock is taken over. The pattern is
-# tmux-snapshot-watch's. A process id reused by an unrelated process after the
-# owner died reads as alive, and the lock is refused until it is removed.
+# The lock is flock(1) on cleanup-cache/lock, held on file descriptor 9 for the
+# life of the command's shell. The kernel releases it when the last process
+# holding that descriptor exits, however it exits, so nothing has to release
+# it and a lock is never left behind.
+#
+# flock, not a folder holding a pid checked with kill -0: in Claude Code's
+# sandbox each command runs in its own pid namespace, where kill -0 cannot see
+# a process in another one, so a live lock read as dead and was taken over.
+#
+# Descriptor 9 would be inherited by every process the command starts, and one
+# that outlived the command would keep the lock. git starts several that can:
+# ssh left as a connection master, a credential cache, the fsmonitor daemon,
+# gpg-agent for signing. So once the lock is taken, git becomes a function
+# that runs the real git with descriptor 9 closed, and every git call after
+# that goes through it. gh and az, which may start helpers of their own, close
+# it with 9>&- where they are called. Nothing else these commands start
+# outlives them.
+#
+# Beside the lock, holder names the command and pid that took it. It is only
+# written after the lock is taken and never removed, so a refusal shows it as
+# the last command known to have held the lock, which may not be the one
+# holding it now.
 take_run_lock() {
-  local owner command
-  RUN_LOCK="$CACHE_DIR/lock"
-  if ! mkdir "$RUN_LOCK" 2>/dev/null; then
-    owner=$(cat "$RUN_LOCK/pid" 2>/dev/null)
-    command=$(cat "$RUN_LOCK/command" 2>/dev/null)
-    if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
-      RUN_LOCK=''
-      echo "$TOOL: ${command:-another command} (pid $owner) is already running in this repo" >&2
-      exit 1
-    fi
-    echo "$TOOL: taking over the lock left by ${command:-a command} (pid ${owner:-unknown}), which is no longer running" >&2
-    rm -f "$RUN_LOCK/pid" "$RUN_LOCK/command"
-    rmdir "$RUN_LOCK" 2>/dev/null
-    mkdir "$RUN_LOCK" 2>/dev/null || {
-      RUN_LOCK=''
-      echo "$TOOL: another command took the lock first, try again" >&2
-      exit 1
-    }
+  local lock="$CACHE_DIR/lock" holder
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "$TOOL: needs flock, to run one command at a time per repository. On macOS: brew install flock" >&2
+    exit 1
   fi
-  printf '%s\n' "$$" > "$RUN_LOCK/pid"
-  printf '%s\n' "$TOOL" > "$RUN_LOCK/command"
-  set_run_lock_traps
-}
-
-# Removes the lock, if this command holds it. Safe to call more than once.
-release_run_lock() {
-  [ -n "${RUN_LOCK:-}" ] || return 0
-  [ "$(cat "$RUN_LOCK/pid" 2>/dev/null)" = "$$" ] || return 0
-  rm -f "$RUN_LOCK/pid" "$RUN_LOCK/command"
-  rmdir "$RUN_LOCK" 2>/dev/null
-  RUN_LOCK=''
+  exec 9>>"$lock" || { echo "$TOOL: cannot open $lock" >&2; exit 1; }
+  if ! flock -n 9; then
+    holder=$(cat "$CACHE_DIR/lock-holder" 2>/dev/null)
+    echo "$TOOL: another command is running in this repo (it holds $lock)" >&2
+    [ -n "$holder" ] && echo "  last taken by $holder, which may not be the one holding it now" >&2
+    exit 1
+  fi
+  printf '%s (pid %s)\n' "$TOOL" "$$" > "$CACHE_DIR/lock-holder" 2>/dev/null
+  git() { command git "$@" 9>&-; }
   return 0
-}
-
-# Releases the lock on every exit the shell can catch: a normal exit, Ctrl-C,
-# a hangup, QUIT, and TERM, which is also how in_main_by_content stops the command
-# on a git error. A command that sets traps of its own, as git refresh's
-# picker does, includes release_run_lock in them and calls this again after.
-set_run_lock_traps() {
-  trap 'release_run_lock' EXIT
-  trap 'release_run_lock; exit 129' HUP
-  trap 'release_run_lock; exit 130' INT
-  trap 'release_run_lock; exit 131' QUIT
-  trap 'release_run_lock; exit 143' TERM
 }
 
 # Sets two things. MAIN_REF is what git is handed for every operation. MAIN is
@@ -539,7 +526,7 @@ ado_login_hint() {
     PR_HINT="  ${DIM}run: AZURE_CONFIG_DIR=$AZ_CONFIG az login --scope $ADO_RESOURCE/.default${RESET}"
     return 0
   fi
-  t=$(az account list --query "[?id=='$1'].tenantId | [0]" -o tsv 2>/dev/null) || return 0
+  t=$(az 9>&- account list --query "[?id=='$1'].tenantId | [0]" -o tsv 2>/dev/null) || return 0
   [ -n "$t" ] && PR_HINT="  ${DIM}run: az login --tenant $t --scope $ADO_RESOURCE/.default${RESET}"
   return 0
 }
@@ -571,10 +558,10 @@ fetch_pr_merges() {
       # the identity signed in for it, where --tenant names only the target and
       # leaves az using the default account's credentials. AAD then rejects them
       # with AADSTS50020 when that user is foreign to the tenant.
-      token=$(az account get-access-token --subscription "$sub" --resource "$ADO_RESOURCE" --query accessToken -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, no token for subscription'; log "ado token error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub" force; return 0; }
+      token=$(az 9>&- account get-access-token --subscription "$sub" --resource "$ADO_RESOURCE" --query accessToken -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, no token for subscription'; log "ado token error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub" force; return 0; }
       # $top is an OData parameter, single-quoted so no shell expands it away.
       # Without it the API returns its default first page of 101, not the lot.
-      raw=$(az rest --method get --skip-authorization-header --headers "Authorization=Bearer $token" --url "https://dev.azure.com/$org/$project/_apis/git/repositories/$repo/pullrequests" --uri-parameters searchCriteria.status=completed '$top=1000' api-version=7.1 --query 'value[?lastMergeCommit.commitId!=null && lastMergeSourceCommit.commitId!=null].[sourceRefName, lastMergeSourceCommit.commitId, lastMergeCommit.commitId]' -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, query failed'; log "ado query error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub"; return 0; }
+      raw=$(az 9>&- rest --method get --skip-authorization-header --headers "Authorization=Bearer $token" --url "https://dev.azure.com/$org/$project/_apis/git/repositories/$repo/pullrequests" --uri-parameters searchCriteria.status=completed '$top=1000' api-version=7.1 --query 'value[?lastMergeCommit.commitId!=null && lastMergeSourceCommit.commitId!=null].[sourceRefName, lastMergeSourceCommit.commitId, lastMergeCommit.commitId]' -o tsv 2>"$CACHE_DIR/az-error") || { PR_SOURCE='azure devops, query failed'; log "ado query error: $(cat "$CACHE_DIR/az-error")"; ado_login_hint "$sub"; return 0; }
       # An expired session gets Azure DevOps's HTML sign-in page with a 200, so az
       # exits 0, skips --query because the body is not JSON, and prints the page.
       # Rows are therefore validated, not trusted: branch, tab, 40 hex characters.
@@ -589,7 +576,7 @@ fetch_pr_merges() {
     github)
       command -v gh >/dev/null 2>&1 || { PR_SOURCE='github, gh missing'; return 0; }
       PR_SOURCE='github'
-      PR_MERGE_TABLE=$(gh pr list --state merged --json headRefName,headRefOid,mergeCommit --limit 1000 --jq '.[] | select(.mergeCommit != null) | [.headRefName, .headRefOid, .mergeCommit.oid] | @tsv' 2>/dev/null) || { PR_SOURCE='github, query failed'; return 0; }
+      PR_MERGE_TABLE=$(gh 9>&- pr list --state merged --json headRefName,headRefOid,mergeCommit --limit 1000 --jq '.[] | select(.mergeCommit != null) | [.headRefName, .headRefOid, .mergeCommit.oid] | @tsv' 2>/dev/null) || { PR_SOURCE='github, query failed'; return 0; }
       ;;
   esac
 }
@@ -673,7 +660,7 @@ fetch_detached_prs() {
       command -v gh >/dev/null 2>&1 || return 0
       while IFS="$TAB" read -r head _; do
         [ -z "$head" ] && continue
-        rows=$(gh api "repos/{owner}/{repo}/commits/$head/pulls" --jq '.[] | [(if .merged_at then "merged" elif .state == "open" then "open" else "closed" end), "PR #\(.number) \(.head.ref)"] | @tsv' 2>/dev/null) || continue
+        rows=$(gh 9>&- api "repos/{owner}/{repo}/commits/$head/pulls" --jq '.[] | [(if .merged_at then "merged" elif .state == "open" then "open" else "closed" end), "PR #\(.number) \(.head.ref)"] | @tsv' 2>/dev/null) || continue
         [ -z "$rows" ] && continue
         DETACHED_PR_TABLE="$DETACHED_PR_TABLE$(printf '%s\n' "$rows" | awk -v h="$head" '{print h "\t" $0}')
 "
@@ -686,7 +673,7 @@ EOF
       # status=all, because a detached worktree is judged on merged, open and
       # abandoned alike. lastMergeSourceCommit is the source branch tip, which
       # is what the local ancestry test needs.
-      raw=$(az rest --method get --skip-authorization-header --headers "Authorization=Bearer $ADO_TOKEN" --url "https://dev.azure.com/$ADO_ORG/$ADO_PROJECT/_apis/git/repositories/$ADO_REPO/pullrequests" --uri-parameters searchCriteria.status=all '$top=1000' api-version=7.1 --query 'value[?lastMergeSourceCommit.commitId!=null].[lastMergeSourceCommit.commitId, status, pullRequestId, sourceRefName]' -o tsv 2>/dev/null) || return 0
+      raw=$(az 9>&- rest --method get --skip-authorization-header --headers "Authorization=Bearer $ADO_TOKEN" --url "https://dev.azure.com/$ADO_ORG/$ADO_PROJECT/_apis/git/repositories/$ADO_REPO/pullrequests" --uri-parameters searchCriteria.status=all '$top=1000' api-version=7.1 --query 'value[?lastMergeSourceCommit.commitId!=null].[lastMergeSourceCommit.commitId, status, pullRequestId, sourceRefName]' -o tsv 2>/dev/null) || return 0
       printf '%s\n' "$raw" | awk -F'\t' 'NF==4 && $1 ~ /^[0-9a-f]{40}$/' > "$CACHE_DIR/ado-prs"
       # A source tip the object store no longer holds cannot be tested, so those
       # rows are dropped once here rather than failing per worktree.

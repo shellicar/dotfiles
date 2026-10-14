@@ -785,11 +785,11 @@ restore() { stty "$SAVED" 2>/dev/null; printf '%b[?2026l%b[?7h%b[?25h%b[?1049l' 
 #
 # Each exits as well as restoring. Restoring alone lets the loop carry on
 # against a terminal that is no longer in raw mode.
-trap 'restore; release_run_lock; exit 129' HUP
-trap 'restore; release_run_lock; exit 130' INT
-trap 'restore; release_run_lock; exit 131' QUIT
-trap 'restore; release_run_lock; exit 143' TERM
-trap 'restore; release_run_lock' EXIT
+trap 'restore; exit 129' HUP
+trap 'restore; exit 130' INT
+trap 'restore; exit 131' QUIT
+trap 'restore; exit 143' TERM
+trap 'restore' EXIT
 
 # min 0 time 2: a read with nothing to read gives up after 0.2s, so picker_loop
 # can notice a resize between keys.
@@ -803,7 +803,7 @@ printf '%b[?1049h%b[?25l%b[?7l' "$E" "$E" "$E"
 picker_loop
 
 restore
-set_run_lock_traps
+trap - EXIT HUP INT QUIT TERM
 
 [ "$VERDICT" = quit ] && { printf 'nothing done\n'; exit 0; }
 
