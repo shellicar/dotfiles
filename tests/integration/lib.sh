@@ -52,7 +52,9 @@ worktree_for() {
 run_command() {
   cmd=$1
   shift
-  printf '--- %s %s ---\n' "$cmd" "$*"
+  # Not printf '--- ...': a format starting with a dash is read as an option by
+  # dash's printf.
+  printf '%s\n' "--- $cmd $* ---"
   # The countdown before it acts is five seconds of nothing here.
   "$BIN/$cmd" "$@" 2>&1 | sed 's/^/  /'
 }

@@ -60,6 +60,16 @@ lock_lines() {
   awk -F"$TAB" -v p="$1" '$1 == p { if ($2 == "") print "locked"; else print "locked " $2; exit }' "$LOCKS"
 }
 
+# lands <commit>: the commit's work reached the trunk under another commit, as a
+# squash merge leaves it, so merging it into the trunk changes nothing. Only
+# the commits a case names: a commit under one of them is not implied, because
+# in a real repository it can fail once the trunk has changed the same lines.
+LANDS=$WORK/lands
+: > "$LANDS"
+lands() {
+  printf '%s\n' "$1" >> "$LANDS"
+}
+
 # commit <id> [parent]
 commit() {
   printf '%s\t%s\n' "$1" "${2:-}" >> "$PARENTS"
@@ -159,6 +169,24 @@ range() {
 # test.
 git_says() (
   case "$*" in
+    "rev-parse --verify --quiet "*"^{tree}")
+      name=$(last_word "$@")
+      c=$(commit_of "${name%^\{tree\}}") || return 1
+      printf 'tree-of-%s\n' "$c" ;;
+    "rev-parse --verify --quiet "*"^{commit}")
+      name=$(last_word "$@")
+      commit_of "${name%^\{commit\}}" ;;
+    # The merged tree is the trunk's own when the commit is in it: by ancestry,
+    # or because a case said its work landed there under another commit (a
+    # squash). Anything else merges into a tree of its own.
+    "merge-tree --write-tree "*)
+      main=$(commit_of "$(nth_word 3 "$@")") || return 1
+      c=$(commit_of "$(nth_word 4 "$@")") || return 1
+      if reaches "$main" "$c" || grep -qxF "$c" "$LANDS"; then
+        printf 'tree-of-%s\n' "$main"
+      else
+        printf 'tree-of-merging-%s\n' "$c"
+      fi ;;
     "rev-parse --verify --quiet "*)
       name=$(last_word "$@")
       # ref_of's status is the answer: resolve_ref only builds a name, and a
@@ -261,11 +289,6 @@ git_says() (
       esac ;;
     "for-each-ref --format=%(refname:short) refs/heads/"|"for-each-ref --format %(refname:short) refs/heads/")
       cut -f1 "$REFS" | sed -n 's@^refs/heads/@@p' ;;
-    # The content of a change, named by its two ends. Two changes are the same
-    # content only when they are the same change, so nothing is found in main
-    # by content that is not in main by ancestry.
-    "diff "*)
-      printf 'change %s %s\n' "$(nth_word 2 "$@")" "$(nth_word 3 "$@")" ;;
     "rev-list --no-commit-header -1 --format=%cr "*)
       printf '5 days ago\n' ;;
     # A worktree's HEAD is the branch checked out in it.
@@ -294,6 +317,22 @@ git_says() (
     "rev-list --no-commit-header --format=%ae "*)
       spec=$(last_word "$@")
       range "${spec%%..*}" "${spec##*..}" | while read -r c; do author_of "$c"; done ;;
+    # Tip first, as --topo-order gives it. The graph has first parents only, so
+    # there are no merges and the walk down the ancestry is that order.
+    "rev-list --topo-order -n "*)
+      n=$(nth_word 4 "$@")
+      spec=$(last_word "$@")
+      range "${spec%%..*}" "${spec##*..}" | head -n "$n" ;;
+    # The graph has no merges, so --no-merges leaves everything and --merges
+    # finds nothing. The form is <tip> ^<base> ^<trunk>.
+    "rev-list --count --no-merges "*)
+      tip=$(nth_word 4 "$@"); b1=$(nth_word 5 "$@"); b2=$(nth_word 6 "$@")
+      range "${b1#^}" "$tip" | while read -r c; do
+        x=$(commit_of "${b2#^}") && reaches "$x" "$c" && continue
+        printf '%s\n' "$c"
+      done | awk 'END { print NR }' ;;
+    "rev-list --merges "*)
+      return 0 ;;
     "rev-list --count "*)
       spec=$(last_word "$@")
       # awk, not grep -c: grep exits non-zero on no matches, and a count of

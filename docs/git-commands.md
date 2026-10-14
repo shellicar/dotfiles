@@ -27,25 +27,52 @@ branch's own commits survive in the trunk and there is nothing for a content sea
 find. Commit to the branch after the merge and it stops counting, because that commit
 exists nowhere else while the pull request still says merged.
 
-**Content.** Walking the branch tip first, each commit's cumulative diff against the
-fork point is stripped of its headers and hashed, and looked up in an index of the
-trunk's own commit diffs. The first hit is where the branch joined; anything above it
-is work the trunk does not have.
+**Content.** A commit's work is in the trunk when merging it into the trunk changes
+nothing: `git merge-tree --write-tree origin/HEAD <commit>` prints the same tree as
+`origin/HEAD^{tree}`. Walking down from the branch tip, children before parents, the
+first commit that passes is the branch's **landed commit**. Everything from it down
+counts as in the trunk, and everything above it is the branch's own work. The test
+compares the commit with the whole trunk rather than with any one commit of it, so a
+branch whose work landed as several separate squash merges still passes.
+
+The walk stops at the first pass and never tests below it. A commit lower down can
+fail after the trunk has changed the same lines again, even though its work landed,
+so a failure there says nothing.
+
+It tests at most 50 commits, or `--depth N`. A branch with more commits than that and
+no pass among them is reported as not checked, rather than as unmerged.
+
+`merge-tree --write-tree` needs git 2.38 or newer. It writes the merged tree into the
+object store, where nothing refers to it and `git gc` removes it. Each answer is cached
+under `.git/cleanup-cache/in-main/`, keyed by the trunk's tip and the commit.
 
 A deleted remote branch is never the verdict. It is a cross-check, and it earns a
 mention only when it disagrees with the content: merged with the remote still there, or
 the remote gone with nothing found.
 
-That produces six answers:
+That produces seven answers:
 
 | | |
 |---|---|
 | `empty` | nothing of its own, so it is the trunk under another name |
 | `merged` | its work is in the trunk |
-| `review` | merged up to a point, with commits sitting on top |
+| `review` | in the trunk up to its landed commit, with commits on top |
 | `suspect` | the remote is gone and the content cannot be found |
 | `inconclusive` | too far behind to have been evaluated |
+| `unchecked` | more commits than the walk tests, and none of those tested had landed |
 | `unmerged` | work of its own, not in the trunk |
+
+**Rescue or rebase.** A `review` branch gets one of two things. When one of its own
+pull requests merged, meaning the last commit of a merged pull request is among the
+branch's commits the trunk does not have, the commits above the landed commit were
+added after that merge, and it is offered the rescue: those commits move to
+`rescue/<branch>` and the original goes. Otherwise its landed commit reached the trunk
+some other way, for instance as commits on a local trunk that were squash-merged
+upstream from other branches, and it is rebased from the landed commit, keeping the
+branch and its worktree. That includes a branch with no pull request information at
+all, and a branch squash-merged by hand. Both hosts answer the question the same way:
+GitHub's `headRefOid` and Azure DevOps's `lastMergeSourceCommit` are each pull
+request's last commit.
 
 `inconclusive` needs both halves of a cap: more than a hundred commits behind the trunk
 *and* untouched for thirty days. A recent branch on a busy repository is far behind and
@@ -62,15 +89,30 @@ at, and its age is never consulted.
 
 The strategy follows the branch's own history.
 
-The trunk fast-forwards, and only ever fast-forwards. A branch that has already merged
-the trunk into itself merges again, because a rebase would flatten that merge away and
-discard whatever was resolved in it. Everything else is rebased.
+The trunk fast-forwards, and only ever fast-forwards. Everything else is rebased by
+`git refresh`, including a branch that has merged the trunk into itself.
 
-A rebase is given the branch's fork point, not its merge base. For a branch cut from
-another branch those differ, and the merge base is where the *other* branch left the
-trunk, so a plain rebase replays that branch's commits too and publishes them under new
-ids as though they were yours. Where two live branches genuinely share history past the
-trunk, no update is offered at all, because nothing can tell which was cut from which.
+A rebase replays only the commits that are not merges, so a merge that carries edits of
+its own, a resolved conflict or a change made while the merge was open, loses them.
+`git show --remerge-diff <merge>` shows exactly those edits. When a merge above where
+the rebase starts has any, the rebase is still offered, unticked, and its row names the
+merge and the files. A rebase with nothing to drop is ticked as usual. Merging the trunk
+in again is not the safer alternative: it can stop on a conflict of its own.
+
+`git spread` and `git catchup` still merge again into a branch that has merged the
+trunk, since neither can leave a rebase unticked behind a warning. For any other
+rebase that would drop a merge's edits, `git spread` skips the branch and says so, and
+`git catchup` names the merge and the files in its plan.
+
+A rebase starts from the branch's landed commit when it has one, so the work already in
+the trunk is not replayed onto it a second time. Otherwise it is given the branch's fork
+point, not its merge base. For a branch cut from another branch those differ, and the
+merge base is where the *other* branch left the trunk, so a plain rebase replays that
+branch's commits too and publishes them under new ids as though they were yours. Where
+two live branches genuinely share history past the trunk, no update is offered at all,
+because nothing can tell which was cut from which. Commits under the landed commit do
+not count as shared history: their work is in the trunk, so several branches cut from
+the same unpushed commits, which then landed upstream, are each rebased.
 
 In `git refresh`, a branch is yours only when every commit it has that the trunk does
 not is authored under the email the repository resolves to, exactly. Anything else is
@@ -211,9 +253,14 @@ the commands runs one (checked on git 2.55). None of them runs `git pull`, so
   (`rev-list --format`, `for-each-ref --format`, `diff-tree`, `status --porcelain`), which
   these settings do not change.
 
-One exception: the content walk's `git diff` (`content_hash`) is porcelain and reads
-`diff.algorithm`, `diff.renames`, `diff.noprefix`, `color.ui=always` and similar, so a
-change to one of them can change its hashes.
+Two calls read settings beyond those. The check for whether a commit's work is in the
+trunk, `git merge-tree --write-tree`, merges as git would, so it reads `merge.*` and
+the rename settings: `merge.renames`, `merge.directoryRenames` and `merge.renormalize`
+are pinned above, so your values of those three do not change its answer, and the
+repository's merge drivers apply. `git show
+--remerge-diff`, which lists the files a merge edited by hand, reads the diff settings;
+it is called with `--no-renames`, `--no-color`, `--no-ext-diff` and `--name-only`,
+which leave only the list of paths to depend on them.
 
 ## The commands
 
@@ -237,7 +284,10 @@ Reports every branch and what it would do to it. Nothing is deleted without `--a
 and each class beyond the plainly merged needs its own flag as well: `--empty` for
 branches that never diverged, `--gone` for ones whose remote is gone and whose content
 cannot be found, `--detached` for worktrees with no branch, `--rescue` to move the stray
-commits off a `review` branch onto `rescue/<branch>` before deleting the original.
+commits off a `review` branch whose own pull request merged onto `rescue/<branch>`
+before deleting the original. A `review` branch without one is kept and listed, for
+`git refresh` to rebase. `--depth N` sets how many commits the walk for a landed commit
+tests, 50 by default.
 
 On an Azure DevOps remote it reads `cleanup.subscription` from git config to know which
 identity to authenticate as. Without it the pull request check is skipped rather than

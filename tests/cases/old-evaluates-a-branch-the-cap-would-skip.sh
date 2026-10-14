@@ -7,7 +7,7 @@ REPO=$(cd "$TESTS/.." && pwd)
 
 describe "--old evaluates a branch the distance and age cap would skip"
 
-# The cap exists because the content walk gets both expensive and unreliable
+# The cap exists because the search for a landed commit gets expensive and unreliable
 # once main has moved a long way. --old says look anyway, so a branch that is
 # both far behind and long untouched has to stop being capped.
 

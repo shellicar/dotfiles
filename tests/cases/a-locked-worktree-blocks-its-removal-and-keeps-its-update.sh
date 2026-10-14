@@ -61,6 +61,6 @@ expected='off|ff|1 behind'
 actual=$(row feature/idleU)
 assert_eq "${actual:-<no update row>}" "$expected"
 
-expected='on|rebase|1 behind'
+expected='on|rebase|1 behind, replays 1'
 actual=$(row feature/liveU)
 assert_eq "${actual:-<no update row>}" "$expected"

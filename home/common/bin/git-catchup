@@ -44,6 +44,11 @@ git fetch --quiet --prune origin || { echo "fetch failed" >&2; exit 1; }
 
 resolve_main
 main=$MAIN
+# Where the library caches which commits are already in main, and how many
+# commits down from the tip it looks for one: see landed_commit.
+CACHE_DIR="$(git rev-parse --git-dir)/cleanup-cache"
+mkdir -p "$CACHE_DIR"
+WALK_DEPTH=50
 target=$(git rev-parse --verify --quiet "$MAIN_REF")
 
 say_environment
@@ -134,14 +139,21 @@ case "$action" in
 esac
 
 base=$detail
-git merge-base --is-ancestor "$base" HEAD || { echo "fork point $base is not an ancestor of $branch" >&2; exit 1; }
+git merge-base --is-ancestor "$base" HEAD || { echo "replay start $base is not an ancestor of $branch" >&2; exit 1; }
 
 echo "plan: rebase $branch onto origin/$main and force-push it"
 echo "  branch      $branch at $local_head"
 echo "  onto        origin/$main at $target"
-echo "  fork point  $base"
+echo "  replay from $base"
 echo "  commits     $(git rev-list --count "$base..HEAD") to replay"
 git log --oneline --no-decorate "$base..HEAD"
+# A rebase replays only the commits that are not merges, so a merge's own edits
+# go with it. Said in the plan, which --apply then carries out as printed.
+# TODO(claude): undecided: whether git catchup refuses such a rebase instead of
+# naming what it drops. It names it for now.
+merge_edits "$base" "$branch" | while IFS="$TAB" read -r m files; do
+  echo "  drops       the edits merge $m made to $files"
+done
 
 if [ "$apply" -eq 0 ]; then
   echo "run: git-catchup --apply"

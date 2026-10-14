@@ -259,30 +259,67 @@ fetch_origin() {
 
 # ── the merge check (the verdict) ───────────────────────────────────────────
 
-# The stripped-diff CONTENT of a change: the diff with its ---/+++/@@/index
-# header lines removed, then hashed for indexing. This is git-check.sh's
-# comparison — the actual diff content, NOT a patch-id.
-content_hash() {
-  git diff "$1" "$2" | sed -e '/^--- /d' -e '/^+++ /d' -e '/^@@/d' -e '/^index /d' | shasum | awk '{print $1}'
-}
-
-# content_hash is a pure function of two immutable git SHAs — once a commit
-# exists its diff against another commit never changes, so a cache entry
-# never goes stale and needs no invalidation. Repo-local, under .git/, so it
-# survives across runs but never leaks between repos.
-content_hash_cached() (
-  a=$1 b=$2
-  key=$(printf '%s %s' "$a" "$b" | shasum | awk '{print $1}')
-  file="$CACHE_DIR/$key"
+# Is this commit's work already in the trunk? It is when merging the commit into
+# origin/HEAD changes nothing: `git merge-tree --write-tree` does the merge in
+# memory and prints the resulting tree, and that tree is origin/HEAD's own.
+# The commit is compared with the whole trunk, not with any one commit of it,
+# so a branch whose work landed as several separate squash merges still passes.
+#
+# A pass speaks for the commit and everything under it. The reverse does not
+# hold: a commit lower down can fail after the trunk has changed the same lines
+# again, even though it landed. So callers stop at the first pass from the tip
+# down and never test below it. See landed_commit.
+#
+# A conflict exits 1 and counts as not in the trunk. merge-tree writes the
+# merged tree into the object store, where nothing refers to it and gc removes
+# it. --write-tree needs git 2.38 or newer.
+#
+# The answer depends only on the trunk's tip and the commit, so it is cached
+# under both. Repo-local, under .git/, so it survives across runs but never
+# leaks between repos.
+in_main_by_content() (
+  c=$1
+  trunk=$(git rev-parse --verify --quiet "$MAIN_REF^{commit}") || return 1
+  file="$CACHE_DIR/in-main/$trunk-$c"
   if [ -f "$file" ]; then
-    h=$(cat "$file")
-  else
-    h=$(content_hash "$a" "$b")
-    printf '%s\n' "$h" > "$file"
+    [ "$(cat "$file")" = yes ]
+    return
   fi
-  # The newline matters: the main index is line-oriented, matched with grep -x.
-  printf '%s\n' "$h"
+  ans=no
+  if out=$(git merge-tree --write-tree "$trunk" "$c" 2>/dev/null); then
+    [ "$(printf '%s\n' "$out" | head -1)" = "$(git rev-parse --verify --quiet "$trunk^{tree}")" ] && ans=yes
+  fi
+  mkdir -p "$CACHE_DIR/in-main" && printf '%s\n' "$ans" > "$file"
+  [ "$ans" = yes ]
 )
+
+# The branch's landed commit: walking down from the tip, the first commit
+# in_main_by_content passes. Everything from it down counts as in the trunk,
+# and everything above it is the branch's own work. As one of:
+#   found <commit>   tab separated
+#   none             every commit the trunk lacks was tested, and none passed
+#   unchecked        WALK_DEPTH commits were tested without a pass, and the
+#                    branch has more than that
+#
+# --topo-order, so no commit is tested before a commit built on it. The walk has
+# to meet the highest pass first, and on a branch that merged something in, the
+# landed commit can sit behind the merge's second parent, where a first-parent
+# walk never goes.
+landed_commit() (
+  rev=$1
+  for c in $(git rev-list --topo-order -n "$WALK_DEPTH" "$MAIN_REF..$rev" 2>/dev/null); do
+    in_main_by_content "$c" && { printf 'found\t%s\n' "$c"; return 0; }
+  done
+  total=$(git rev-list --count "$MAIN_REF..$rev" 2>/dev/null) || total=0
+  if [ "$total" -gt "$WALK_DEPTH" ]; then echo unchecked; else echo none; fi
+)
+
+# The landed commit alone, or empty when there is none.
+landed_sha() {
+  case "$1" in
+    found"$TAB"*) printf '%s\n' "${1#found"$TAB"}" ;;
+  esac
+}
 
 # The PR host origin points at. Decided by the remote, not by which CLI happens
 # to be installed, so a machine with both does not guess wrong.
@@ -407,6 +444,27 @@ pr_covers_branch() (
   [ "$tip" = "$head" ]
 )
 
+# Was a pull request of this branch's merged? Asked as: is the last commit of
+# any merged pull request among the commits this branch has and the trunk does
+# not. Then the commits above the landed commit were added after that merge,
+# and a rescue is what moves them off. Without it, the commits under the landed
+# commit reached the trunk some other way, and the branch is rebased instead.
+#
+# The table's second column is that last commit on both hosts: GitHub's
+# headRefOid and Azure DevOps's lastMergeSourceCommit. One rev-list per branch
+# compared against the whole column, not a merge-base per pull request, which
+# would be a thousand calls per branch. A commit the object store does not hold
+# simply matches nothing.
+#
+# With no table, because there is no host, no CLI or no sign-in, the answer is
+# no, and the branch is rebased.
+branch_has_merged_pr() (
+  [ -n "$PR_MERGE_TABLE" ] || return 1
+  printf '%s\n' "$PR_MERGE_TABLE" | cut -f2 | sort -u > "$CACHE_DIR/pr-heads"
+  git rev-list "$MAIN_REF..refs/heads/$1" 2>/dev/null | sort -u > "$CACHE_DIR/branch-commits"
+  [ -n "$(comm -12 "$CACHE_DIR/branch-commits" "$CACHE_DIR/pr-heads")" ]
+)
+
 # Which pull requests carry each detached commit, as sha/kind/label rows. A
 # failed lookup is the same as no pull request, which sends a worktree towards
 # unsure, never towards removal.
@@ -471,7 +529,7 @@ detached_pr() {
   printf '%s\n' "$DETACHED_PR_TABLE" | awk -F'\t' -v h="$1" -v k="$2" '$1==h && $2==k {print $3; exit}'
 }
 
-# Past the cap the content walk is skipped: main has moved far enough that the
+# Past the cap the search for a landed commit is skipped: main has moved far enough that the
 # branch's paths have likely been restructured out from under the comparison, so
 # the walk is both the expensive check and the futile one. Distance AND age,
 # never either alone — a recent branch on a fast repo is far back but still
@@ -489,82 +547,31 @@ branch_beyond_cap() (
 # Commits main has moved past the branch's fork, for the inconclusive report.
 distance_from_main() { git rev-list --count "$MAIN_REF" "^$1" 2>/dev/null || echo '?'; }
 
-# How many main commits, back from the tip, we actually need indexed this
-# run: the largest base..origin/$MAIN distance among branches that fail BOTH
-# the ancestor check AND the PR check and are within the evaluation cap (only
-# those ever fall through to the content walk). Not a fixed constant — the true
-# maximum this run needs, and 0 (skip entirely) if none qualify.
-compute_max_walk_depth() (
-  max=0
-  # Each candidate as the ref git is asked about, then the branch name when
-  # there is one. A branch is named in full so a tag cannot answer for it; a
-  # detached head is already a commit and has no name the PR table could use.
-  # Detached heads are here because they reach the same content walk, so the
-  # index has to be deep enough for them too.
-  cands=$(
-    for b in ${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}; do
-      [ "$b" = "$MAIN" ] && continue
-      printf 'refs/heads/%s\t%s\n' "$b" "$b"
-    done
-    [ -n "$ONLY_BRANCHES" ] || printf '%s' "$DETACHED" | cut -f1 | awk 'NF{print $1 "\t"}'
-  )
-  while IFS="$TAB" read -r rev name; do
-    [ -z "$rev" ] && continue
-    base=$(git merge-base "$rev" "$MAIN_REF" 2>/dev/null) || continue
-    git merge-base --is-ancestor "$rev" "$MAIN_REF" 2>/dev/null && continue
-    # Same test the verdict uses, or the index is sized for fewer branches than
-    # actually reach the content walk and their answers come out wrong.
-    [ -n "$name" ] && pr_covers_branch "$name" && continue
-    branch_beyond_cap "$rev" && continue
-    dist=$(git rev-list --count "$base..$MAIN_REF" 2>/dev/null) || continue
-    [ "$dist" -gt "$max" ] && max=$dist
-  done <<EOF
-$cands
-EOF
-  echo "$max"
-)
-
-# ONE shared index of main's commit-content hashes, built once for the whole
-# run at the size compute_max_walk_depth actually needs — not per branch, not
-# a fixed 500. Every pending branch's own range is a prefix of this same set
-# (both count back from origin/$MAIN's tip), so one walk covers all of them.
-build_shared_main_index() {
-  local depth c p
-  depth=$(compute_max_walk_depth)
-  # Repo-local and truncated per run, so nothing is left behind in $TMPDIR.
-  MAIN_IDX="$CACHE_DIR/main-index"
-  : > "$MAIN_IDX" || { echo "Error: cannot write $MAIN_IDX" >&2; exit 1; }
-  [ "$depth" -eq 0 ] && return 0
-  git rev-list -n "$depth" "$MAIN_REF" | while read -r c; do
-    p=$(git rev-parse "$c^" 2>/dev/null) || continue
-    content_hash_cached "$p" "$c"
-  done | sort -u > "$MAIN_IDX"
-}
-
-# Walk the branch tip-first; the first commit whose cumulative content
-# (merge-base..C) is found in main is the join point. Echoes the number of
-# commits sitting after that join point (0 = fully merged), -1 if no join point
-# is found within WALK_DEPTH, or -2 if the branch is past the evaluation cap and
-# the content walk was never run.
+# How many commits the branch has above its landed commit, as a number, or:
+#   0   all of it is in main (includes a branch sitting at main)
+#   -1  no landed commit: every commit main lacks was tested and none passed,
+#       or the branch shares no history with main
+#   -2  past the evaluation cap, so nothing was tested
+#   -3  WALK_DEPTH commits tested without finding one, and there are more
 #
 # PR checked FIRST, and only ever as an EXACT MATCH: the branch tip is the same
 # commit the PR merged, so the PR is a statement about this branch and not just
-# about some commits it once had. A squash merge leaves none of the branch's
-# commits in main, so without this the content walk has nothing to find and the
-# branch reads as unmerged, which is what the PR is here to answer.
+# about some commits it once had.
 #
 # Anything short of an exact match falls through. A merged PR does NOT mean the
 # branch is in main: commit to it afterwards and the extra work exists nowhere
-# else, while the PR still says merged. The content walk below is what covers
+# else, while the PR still says merged. The landed commit below is what finds
 # the difference.
+#
+# The count includes merge commits, because it is what the branch has that main
+# does not. What a rebase would replay is counted separately, by rebase_count.
 commits_not_in_main() (
   # Two arguments, because they answer different questions. rev is what git is
   # asked about, and a detached worktree's head comes through here as well as a
   # branch. name is the branch it belongs to, given only when there is one,
   # because the pull request table is keyed by name and cannot take a commit.
   rev=$1 name=${2:-}
-  base=$(git merge-base "$rev" "$MAIN_REF" 2>/dev/null) || { echo -1; return; }
-  # Fully contained in main (0 unique commits — includes a branch sitting at main).
+  git merge-base "$rev" "$MAIN_REF" >/dev/null 2>&1 || { echo -1; return; }
   git merge-base --is-ancestor "$rev" "$MAIN_REF" && { echo 0; return; }
 
   [ -n "$name" ] && pr_covers_branch "$name" && { echo 0; return; }
@@ -572,17 +579,12 @@ commits_not_in_main() (
   # Cheap checks done and unresolved; only the expensive one is left.
   branch_beyond_cap "$rev" && { echo -2; return; }
 
-  # Only WALK_DEPTH diffs against the rev's OWN history, tip-first, each
-  # checked against the shared index built once for the whole run.
-  i=0
-  for c in $(git rev-list -n "$WALK_DEPTH" "$base..$rev"); do
-    h=$(content_hash_cached "$base" "$c")
-    if [ -s "$MAIN_IDX" ] && grep -qxF "$h" "$MAIN_IDX"; then
-      echo "$i"; return
-    fi
-    i=$((i + 1))
-  done
-  echo -1
+  l=$(landed_commit "$rev")
+  case "$l" in
+    found"$TAB"*) git rev-list --count "$(landed_sha "$l")..$rev" ;;
+    unchecked) echo -3 ;;
+    *) echo -1 ;;
+  esac
 )
 
 # ── the gone indicator (cross-check only) ───────────────────────────────────
@@ -739,13 +741,21 @@ remove_branch() (
 # The decision, with no opinion about how it is shown. A front-end asks and then
 # says it in its own words, which is what lets two of them agree.
 
-# A branch, as: class, commits not in main, commits ahead, gone, worktree.
+# A branch, as: class, commits not in main, commits ahead, gone, merged pull
+# request, worktree.
 #   empty        identical to main, nothing of its own
 #   merged       its work is in main
-#   review       merged up to a point, with N commits sitting on top
+#   review       in main up to its landed commit, with N commits on top
 #   suspect      the remote branch is gone but the content cannot be found
 #   inconclusive too far behind to have been evaluated at all
+#   unchecked    WALK_DEPTH commits tested without finding a landed commit,
+#                and the branch has more than that
 #   unmerged     work of its own, not in main
+#
+# The merged pull request field is yes only for review, when one of this
+# branch's pull requests has merged (branch_has_merged_pr). It decides between
+# the two things a review branch is offered: a rescue when yes, a rebase when
+# no.
 branch_verdict() (
   b=$1
   # Everything git is asked resolves refs/heads/, so a tag of the same name
@@ -764,12 +774,16 @@ branch_verdict() (
     class=review
   elif [ "$n" = -2 ]; then
     class=inconclusive
+  elif [ "$n" = -3 ]; then
+    class=unchecked
   elif [ "$gone" = true ]; then
     class=suspect
   else
     class=unmerged
   fi
-  printf '%s\t%s\t%s\t%s\t%s\n' "$class" "$n" "$ahead" "$gone" "$wt"
+  pr=no
+  [ "$class" = review ] && branch_has_merged_pr "$b" && pr=yes
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$class" "$n" "$ahead" "$gone" "$pr" "$wt"
 )
 
 # What the class looks like, as CICON. Beside branch_reason for the same
@@ -786,7 +800,7 @@ class_icon() {
     merged|landed)       CICON="${GREEN}${OK}${RESET}" ;;
     review)              CICON="$REVIEW" ;;
     suspect)             CICON="${RED}${WARN}${RESET}" ;;
-    inconclusive|unsure) CICON="${YELLOW}${UNKNOWN}${RESET}" ;;
+    inconclusive|unchecked|unsure) CICON="${YELLOW}${UNKNOWN}${RESET}" ;;
     unmerged|live)       CICON="${DIM}${KEEP}${RESET}" ;;
     blocked)             CICON="$NOACCESS" ;;
     # Not a class. An update has none of its own, so the column is free, and
@@ -807,8 +821,10 @@ class_icon() {
 #
 # Set rather than echoed, because git refresh builds these in a loop that must
 # not fork.
+#
+# pr is the verdict's merged pull request field, read only for review.
 branch_reason() {
-  local b=$1 class=$2 n=$3 gone=$4 noun
+  local b=$1 class=$2 n=$3 gone=$4 pr=${5:-no} noun
   case "$class" in
     empty) REASON='never diverged from main' ;;
     merged)
@@ -819,10 +835,18 @@ branch_reason() {
       ;;
     review)
       [ "$n" -gt 1 ] && noun=commits || noun=commit
-      REASON="merged, $n $noun on top not in main"
+      if [ "$pr" = yes ]; then
+        REASON="merged, $n $noun on top not in main"
+      else
+        REASON="$n $noun on top of work already in main"
+      fi
       [ "$gone" = true ] && REASON="$REASON [gone]"
       ;;
     suspect) REASON='gone, but content not found in main' ;;
+    unchecked)
+      REASON="not checked past $WALK_DEPTH commits"
+      [ "$gone" = true ] && REASON="$REASON [gone]"
+      ;;
     inconclusive)
       REASON="$(distance_from_main "refs/heads/$b") behind, not evaluated"
       [ "$gone" = true ] && REASON="$REASON [gone]"
@@ -882,9 +906,11 @@ detached_verdict() (
 
 # ── bringing main in ────────────────────────────────────────────────────────
 
-# Has this branch already merged origin/$MAIN into itself? Then it keeps
-# merging: a rebase would flatten that merge away and discard whatever was
-# resolved in it. The test is the merge commits' parents past the first, not the
+# Has this branch already merged origin/$MAIN into itself? Then git spread and
+# git catchup keep merging: a rebase would flatten that merge away and discard
+# whatever was resolved in it. git refresh rebases anyway and warns instead,
+# with merge_edits naming what the rebase would drop.
+# The test is the merge commits' parents past the first, not the
 # merge commits themselves. 'git pull' without --rebase also writes a merge
 # commit, but of the branch's own remote, which is not main and is no reason to
 # stop rebasing.
@@ -953,14 +979,16 @@ live_refs() {
 }
 
 # Where the branch was cut: the parent of the oldest commit on it that no other
-# LIVE branch can reach. Empty when the branch has nothing of its own.
+# LIVE branch can reach, and that is not under its landed commit, given as the
+# second argument when it has one. Empty when the branch has nothing of its own.
 #
-# This is what a rebase has to be given. Plain 'git rebase origin/$MAIN' replays
+# This is what a rebase has to be given, unless the branch has a landed commit:
+# see rebase_from. Plain 'git rebase origin/$MAIN' replays
 # everything back to the merge-base, which for a branch cut from another branch
 # is where THAT branch left main, so it replays the other branch's commits too
 # and force-pushes them back rewritten under new ids.
 fork_point() (
-  b=$1
+  b=$1 landed=${2:-}
   tip=$(git rev-parse --verify --quiet "refs/heads/$b") || return 1
   # Live branches only: published, or checked out in a worktree. A branch that is
   # neither is the leftover of a rebranch, and excluding it hides commits that are
@@ -988,7 +1016,7 @@ fork_point() (
       '
   )
   # shellcheck disable=SC2086  # deliberate split: --not takes many refs
-  oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" --not $others | tail -1)
+  oldest=$(git rev-list "$MAIN_REF..refs/heads/$b" --not $others $landed | tail -1)
   [ -n "$oldest" ] || return 1
   git rev-parse --verify --quiet "$oldest^"
 )
@@ -1013,10 +1041,17 @@ fork_point() (
 # One cheap test does the discriminating first: if the fork parent is on main
 # there is nothing to look at, and a ref lookup on it would otherwise match every
 # branch cut from main at or after that commit, which is all of them.
+#
+# Under the branch's landed commit, given as the third argument when it has one,
+# counts as on main. Those commits' work is in main, so another branch holding
+# them holds nothing a rebase could publish as this one's. That is the common
+# case of several branches cut from a local main whose commits then landed
+# upstream as squash merges: every one of them holds the same old commits.
 branch_cut_from() (
-  b=$1 base=$2
+  b=$1 base=$2 landed=${3:-}
   [ -n "$base" ] || return 0
   git merge-base --is-ancestor "$base" "$MAIN_REF" 2>/dev/null && return 0
+  [ -n "$landed" ] && git merge-base --is-ancestor "$base" "$landed" 2>/dev/null && return 0
   { git for-each-ref --contains "$base" --format='holds %(refname)' refs/heads refs/remotes
     live_refs | sed 's/^/live /'
   } | awk '
@@ -1078,23 +1113,55 @@ branch_foreign_authors() (
 # How to bring main into this worktree, as: action, then what it needs.
 #   ff              the default branch itself, fast-forward only
 #   merge           it has merged main before, so it merges again
-#   rebase  <base>  replayed from where it was cut
+#   rebase  <base>  replayed from <base>, see rebase_from
 #   none    <why>   nothing is on offer, and why
+#
+# The third argument says what a branch that has merged main gets: 'merge' (the
+# default) merges it again, which is what git spread and git catchup do.
+# 'rebase' sends it to the rebase like any other branch, which is what git
+# refresh does, showing what the rebase drops with merge_edits.
+# TODO(claude): undecided: whether git spread and git catchup also stop merging
+# again. They keep merging for now; neither can leave a rebase unticked behind a
+# warning, so a rebase there would drop a merge's edits with nothing to stop it.
 #
 # The strategy only. Whether the tree is dirty, whether it is behind at all and
 # whether to push afterwards are the caller's, because the commands differ on
 # those and agree on this.
 update_verdict() (
-  wt=$1 b=$2
+  wt=$1 b=$2 merged=${3:-merge}
   [ "$b" = "$MAIN" ] && { printf 'ff\t-\n'; return 0; }
-  branch_merged_main "$wt" >/dev/null && { printf 'merge\t-\n'; return 0; }
+  [ "$merged" = merge ] && branch_merged_main "$wt" >/dev/null && { printf 'merge\t-\n'; return 0; }
   # Nothing of its own, so it is main under another name and a fast-forward is
   # the whole of it. Without this it falls through to the fork point, finds
   # none, and is reported as being tangled with a branch that does not exist.
   [ "$(git rev-list --count "$MAIN_REF..refs/heads/$b" 2>/dev/null || echo 0)" = 0 ] &&
     { printf 'ff\t-\n'; return 0; }
-  base=$(fork_point "$b") || base=''
-  parent=$(branch_cut_from "$b" "$base")
+  rebase_from "$b"
+)
+
+# Where a rebase of this branch starts, as: rebase <commit>, or none <why>.
+#
+# From the landed commit when the branch has one, since everything under it is
+# in main already and replaying it would apply that work a second time. From
+# the fork point otherwise. Either way a fork point on another live branch's
+# unmerged commits stops it: see branch_cut_from.
+#
+# Asked again when the rebase runs rather than carried in the plan, because the
+# plan's fields are shared with git spread. It reads the same repository both
+# times, so it gives the same answer.
+rebase_from() (
+  b=$1
+  l=$(landed_commit "refs/heads/$b")
+  landed=$(landed_sha "$l")
+  # TODO(claude): undecided: whether a branch tested WALK_DEPTH deep without a
+  # landed commit is still rebased from its fork point. It is not for now: a
+  # landed commit further down would be replayed onto main a second time.
+  [ "$l" = unchecked ] &&
+    { printf 'none\tnot checked past %s commits, run with --depth\n' "$WALK_DEPTH"; return 0; }
+  [ -n "$landed" ] && [ "$landed" = "$(git rev-parse --verify --quiet "refs/heads/$b")" ] &&
+    { printf 'none\tits work is already in %s\n' "$MAIN"; return 0; }
+  base=$(fork_point "$b" "$landed") || base=''
+  parent=$(branch_cut_from "$b" "$base" "$landed")
   # The trunk itself is live because it is checked out here. Its unpushed commits
   # are the accidental commit to main, and naming them is more use than the
   # general wording, which reads as "shares history with main past main".
@@ -1102,12 +1169,40 @@ update_verdict() (
     { printf 'none\ton unpushed commits of local %s\n' "$MAIN"; return 0; }
   [ -n "$parent" ] && { printf 'none\tshares history with %s past %s\n' "$parent" "$MAIN"; return 0; }
   # Only reachable when the branch and the trunk share no history at all.
-  [ -z "$base" ] && { printf 'none\tshares no history with %s\n' "$MAIN"; return 0; }
-  printf 'rebase\t%s\n' "$base"
+  [ -z "$base" ] && [ -z "$landed" ] && { printf 'none\tshares no history with %s\n' "$MAIN"; return 0; }
+  printf 'rebase\t%s\n' "${landed:-$base}"
+)
+
+# How many commits a rebase from <base> replays: the branch's commits above
+# <base> that main does not have, merges left out, because a rebase drops them.
+rebase_count() {
+  git rev-list --count --no-merges "refs/heads/$2" "^$1" "^$MAIN_REF" 2>/dev/null || echo '?'
+}
+
+# The merges a rebase from <base> drops that carry edits of their own, as one
+# line each: the merge's short id, a tab, then the files, comma separated.
+# Nothing when there are none.
+#
+# A merge carries edits of its own when it differs from what git would have
+# produced merging its parents by itself: a resolved conflict, or a change
+# made while the merge was open. `git show --remerge-diff` shows exactly that
+# difference and nothing else. A rebase replays only the commits that are not
+# merges, so those edits are lost. A clean merge loses nothing.
+#
+# --no-renames so a renamed file is listed under both of its paths.
+# --remerge-diff needs git 2.36 or newer.
+merge_edits() (
+  base=$1 b=$2
+  for m in $(git rev-list --merges "refs/heads/$b" "^$base" "^$MAIN_REF" 2>/dev/null); do
+    files=$(git show --remerge-diff --no-color --no-ext-diff --no-renames --format= --name-only "$m" 2>/dev/null | grep . | paste -sd, - | sed 's/,/, /g')
+    [ -n "$files" ] && printf '%s\t%s\n' "$(git rev-parse --short "$m")" "$files"
+  done
+  return 0
 )
 
 # update_verdict, and whose branch it is: action, detail, then who else wrote
-# it, or '-' when nobody did.
+# it, or '-' when nobody did. The third argument passes through to
+# update_verdict.
 #
 # On someone else's branch a rebase becomes a merge, and with no upstream to
 # push the merge to, nothing is offered. A fast-forward and 'none' pass through
@@ -1117,7 +1212,7 @@ update_verdict() (
 # unticked, git spread skips the branch.
 owned_update_verdict() (
   wt=$1 b=$2
-  uv=$(update_verdict "$wt" "$b")
+  uv=$(update_verdict "$wt" "$b" "${3:-merge}")
   act=${uv%%"$TAB"*}; detail=${uv#*"$TAB"}
   owner=''
   case "$act" in
@@ -1248,7 +1343,7 @@ merge_without_branch_options() {
 # The branch name is named to git, not the sha behind it: git builds a merge
 # message from what it is given, and a raw sha writes "Merge commit '<sha>'".
 carry_out_update() {
-  local act=$1 b=$2 wt=$3 base push=no
+  local act=$1 b=$2 wt=$3 base rf push=no
   git -C "$wt" rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 && push=yes
 
   case "$act" in
@@ -1282,8 +1377,11 @@ carry_out_update() {
       ;;
   esac
 
-  base=$(fork_point "$b") || base=''
-  [ -n "$base" ] || { say "  ${YELLOW}${WARN}${RESET}$b: cannot find where it was cut from, skipped"; return 0; }
+  rf=$(rebase_from "$b")
+  case "$rf" in
+    rebase"$TAB"*) base=${rf#rebase"$TAB"} ;;
+    *) say "  ${YELLOW}${WARN}${RESET}$b: ${rf#*"$TAB"}, skipped"; return 0 ;;
+  esac
   if ! git -C "$wt" rebase --quiet --onto "$MAIN_REF" "$base" >/dev/null 2>"$CACHE_DIR/update-error"; then
     git -C "$wt" rebase --abort 2>/dev/null
     say "  ${YELLOW}${WARN}${RESET}$b: rebase failed, aborted and untouched — $(why_it_failed)"

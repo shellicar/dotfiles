@@ -9,8 +9,8 @@
 #   --base REF           compare against REF instead of the detected trunk
 #   --branch BRANCH      look at only this branch, not every local branch;
 #                        repeat to name several
-#   --depth N            commits to walk back from each tip for the join point
-#                        (default 5)
+#   --depth N            commits to test, down from each tip, for one already
+#                        in the trunk (default 50)
 #   --no-fetch           skip the initial 'git fetch --prune origin'
 #   --old                evaluate branches too far behind to be worth walking
 #   -v, --verbose        log progress to stderr
@@ -28,8 +28,8 @@
 # operations depend on nothing. The update operations depend on which removals
 # you took, because a worktree that survives the run is a worktree that can be
 # updated. So the analysis runs once and the operations are derived again after
-# every keystroke. The expensive half — the fetch, the pull request queries, the
-# content walk, the index of main — is the half that never changes.
+# every keystroke. The expensive half — the fetch, the pull request queries,
+# the search for each branch's landed commit — is the half that never changes.
 #
 # A TARGET IS REMOVED OR UPDATED, NEVER BOTH. That is not a policy, it falls out
 # of what git allows: a branch with no worktree can only be deleted, a worktree
@@ -53,7 +53,7 @@ VERBOSE=false
 BASE_OVERRIDE=''
 EVALUATE_OLD=false
 ONLY_BRANCHES=''
-WALK_DEPTH=5
+WALK_DEPTH=50
 MAX_DISTANCE=100; MAX_AGE_DAYS=30
 ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
 
@@ -94,7 +94,6 @@ parse_args() {
 
 setup() {
   ensure_in_git_repository
-  command -v shasum >/dev/null 2>&1 || { echo "Error: shasum not found (needed for the content hash)" >&2; exit 1; }
 
   # Run from the main working tree, which git refuses to remove, so this is never
   # standing on what it deletes.
@@ -149,10 +148,6 @@ if [ -n "$DETACHED" ] && [ -z "$ONLY_BRANCHES" ]; then
   step_done "$(printf '%s' "$DETACHED_PR_TABLE" | grep -c .) found"
 fi
 
-step 'indexing main ...'
-build_shared_main_index
-step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
-
 # EVERYTHING THAT ASKS GIT ANYTHING HAPPENS HERE, once. What is left for derive
 # is string work, because derive runs on every keystroke. Getting this wrong is
 # not a small cost: a git status per worktree is most of a second on a tree with
@@ -164,7 +159,8 @@ step_done "$(wc -l < "$MAIN_IDX" | tr -d ' ') commits"
 step 'reading branches and worktrees ...'
 
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
-# its detail, ignored, meta, unpushed, stash, other authors
+# its detail, ignored, meta, unpushed, stash, other authors, merged pull
+# request, commits the rebase replays, merge edits the rebase drops
 BFACTS=''
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs,
 # ignored, meta
@@ -172,12 +168,12 @@ DFACTS=''
 
 for b in ${ONLY_BRANCHES:-$(git for-each-ref --format '%(refname:short)' refs/heads/)}; do
   verdict=$(branch_verdict "$b")
-  IFS="$TAB" read -r class n ahead gone wt <<EOF
+  IFS="$TAB" read -r class n ahead gone pr wt <<EOF
 $verdict
 EOF
   # The library's sentence, so this says what git cleanup says. It is never
   # empty, which the tab-delimited record below depends on.
-  branch_reason "$b" "$class" "$n" "$gone"
+  branch_reason "$b" "$class" "$n" "$gone" "$pr"
   why=$REASON
 
   meta=$(target_meta "$ahead" "$(git rev-list --no-commit-header -1 --format=%cr "refs/heads/$b" 2>/dev/null)")
@@ -188,7 +184,7 @@ EOF
   unpushed=0
   [ "$b" = "$MAIN" ] || unpushed=$(git rev-list --count "$b@{u}..refs/heads/$b" 2>/dev/null || echo 0)
 
-  block='-'; behind=0; uact='-'; udetail='-'; ign='-'; stash=no; owner=-
+  block='-'; behind=0; uact='-'; udetail='-'; ign='-'; stash=no; owner=-; replays=-; drops=-
   if [ -n "$wt" ]; then
     ign=$(worktree_ignored "$wt"); ign=${ign:--}
     b_reason=$(worktree_block_reason "$wt")
@@ -199,11 +195,11 @@ EOF
     # has their content duplicates them and pushes them to a branch the merge
     # deleted.
     #
-    # review is the same case wearing a different number. Its older commits are
-    # in main, usually squashed, so a rebase from the fork point replays those
-    # too, and a squash has a different patch id so git cannot tell they have
-    # landed. The rescue is what carries that branch forward; the rebase is what
-    # undoes it.
+    # Nor for a review branch with a merged pull request of its own: the
+    # commits above its landed commit were added after that merge, and the
+    # rescue is what carries them forward. A review branch without one is
+    # rebased from its landed commit, which replays only the commits above it
+    # and keeps the branch and its worktree.
     #
     # A dirty worktree is not excluded here. It blocks a removal absolutely,
     # because that destroys work. An update only has to get past git, which
@@ -213,8 +209,8 @@ EOF
     # Nor is a locked one. git refuses to remove, move or prune a locked
     # worktree and nothing else, so the lock is in block and stops the removal
     # row only.
-    if [ "$behind" != 0 ] &&
-       [ "$class" != merged ] && [ "$class" != review ]; then
+    if [ "$behind" != 0 ] && [ "$class" != merged ] &&
+       { [ "$class" != review ] || [ "$pr" = no ]; }; then
       # Asked before the strategy, because the strategy is a rebase and a rebase
       # here force-pushes. git spread stops for this and so does git catchup.
       if branch_diverged_from_remote "$wt" "$b"; then
@@ -223,15 +219,24 @@ EOF
         # Computed before the read: a here-doc is expanded as part of setting
         # up the command it feeds, so the substitution would run with IFS
         # already set to tab.
-        uv=$(owned_update_verdict "$wt" "$b")
+        # rebase: a branch that has merged the trunk is rebased like any other
+        # here, and what the rebase would drop of its merges is named below.
+        uv=$(owned_update_verdict "$wt" "$b" rebase)
         IFS="$TAB" read -r uact udetail owner <<EOF
 $uv
 EOF
         if [ "$uact" != none ] && update_needs_stash "$wt" "$uact"; then stash=yes; fi
+        if [ "$uact" = rebase ]; then
+          replays=$(rebase_count "$udetail" "$b")
+          # The library gives one line per merge; the record needs one field.
+          drops=$(merge_edits "$udetail" "$b" |
+            awk -F'\t' '{ printf "%s%s edited %s", (NR > 1 ? "; " : ""), $1, $2 }')
+          drops=${drops:--}
+        fi
       fi
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$TAB$owner$NL"
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$TAB$owner$TAB$pr$TAB$replays$TAB$drops$NL"
 done
 
 # With --branch the run is about the branches you named, so a worktree with no
@@ -328,9 +333,11 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash owner; do
+  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash owner pr replays drops; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
+    # A record that stops short of the last three fields has none of them.
+    pr=${pr:-no}; replays=${replays:--}; drops=${drops:--}
 
     # The trunk is here for its update and nothing else. Left to the verdict it
     # reads as "empty", being an ancestor of itself with nothing ahead, and would
@@ -347,8 +354,11 @@ derive() {
       merged)  removal="remove $name"; def=on ;;
       empty)   removal="remove $name"; def=off ;;
       suspect) removal="remove $name"; def=off ;;
-      review)  removal="rescue $n off $name, then remove it"; def=off ;;
     esac
+    # A rescue only when a pull request of this branch's own has merged. Without
+    # one the branch is offered its rebase below instead, and kept.
+    [ "$name" != "$MAIN" ] && [ "$class" = review ] && [ "$pr" = yes ] &&
+      { removal="rescue $n off $name, then remove it"; def=off; }
     # What the class offers, kept because the update's default follows it even
     # when the removal cannot run.
     offered=$removal
@@ -385,6 +395,8 @@ derive() {
       NOTED="$NOTED$name${TAB}blocked$TAB$meta$TAB$block$NL"
     elif [ "$class" = inconclusive ]; then
       NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$why, run --old$NL"
+    elif [ "$class" = unchecked ] && [ -z "$removal" ] && [ "$uact" = - ]; then
+      NOTED="$NOTED$name$TAB$class$TAB$meta$TAB$why, run --depth$NL"
     elif [ -z "$removal" ] && [ "$uact" = - ] && [ "$unpushed" != 0 ]; then
       # Work on no remote is the one thing in this list you can actually lose,
       # so it displaces the plainer reason below.
@@ -428,7 +440,12 @@ derive() {
       [ -n "$offered" ] && udef=$def
       [ "$stash" = yes ] && udef=off
       uwhy="$behind behind"
+      [ "$replays" != - ] && uwhy="$uwhy, replays $replays"
       [ "$owner" != - ] && { udef=off; uwhy="$uwhy, not yours: $owner"; }
+      # A merge with edits of its own is dropped by the rebase, and those edits
+      # with it. Offered all the same, but unticked, with the merge and its
+      # files named.
+      [ "$drops" != - ] && { udef=off; uwhy="$uwhy, drops merge $drops"; }
       note_default "${name}U" "$udef"
       st=off; has "${name}U" "$SELECTED" && st=on
       emit "${name}U" "$st" "$uact" "$act" "$wt" "$uwhy" - - "$ucls" "$meta" "$stash"
@@ -688,10 +705,12 @@ EOF
 # every removal before the update of anything that survives it.
 #
 # A function rather than a loop inside main, so that a test can call it. The
-# rescue reads its commit count out of the row and counts back from the tip with
-# it: get that wrong and it replays from the wrong commit, then deletes the
-# original, which is the only place in these commands where work goes without
-# anything saying so.
+# rescue replays from the branch's landed commit, asked for again here by the
+# same function the verdict used, not counted back from the tip by the row's
+# number: on a branch with a merge in it, the nth commit down need not be the
+# landed commit. Get the commit wrong and it replays from there, then deletes
+# the original, which is the only place in these commands where work goes
+# without anything saying so.
 build_plan() {
   while IFS="$TAB" read -r op state kind action target why ign n class meta stash; do
     [ -z "$op" ] && continue
@@ -705,8 +724,8 @@ build_plan() {
         ;;
       rescue)
         b=${op%R}
-        base=$(git merge-base "refs/heads/$b" "$MAIN_REF")
-        join=$(git rev-list "$base..refs/heads/$b" | sed -n "$((n + 1))p")
+        join=$(landed_sha "$(landed_commit "refs/heads/$b")")
+        [ -n "$join" ] || { say "  ${YELLOW}${WARN}${RESET}$b: no landed commit found, rescue skipped"; continue; }
         plan_add rescue "$b" "$join" "$n" "${target:--}"
         ;;
       ff|merge|rebase)

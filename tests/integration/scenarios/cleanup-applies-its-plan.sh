@@ -20,11 +20,13 @@ squash_into_main landed
 git switch -q main
 worktree_for landed
 
-# review: squash-merged, then one more commit. The extra must survive on
-# rescue/review and the original must go.
+# review: squash-merged through its own pull request, then one more commit.
+# The extra must survive on rescue/review and the original must go.
 branch review
 commit R1 three.txt
+R1=$(git rev-parse HEAD)
 squash_into_main review
+SQUASH=$(git rev-parse refs/remotes/origin/main)
 commit R2 four.txt
 
 # keep: unmerged, and cut from main rather than from review, or it inherits
@@ -35,7 +37,30 @@ commit K1 five.txt
 
 git switch -q main
 
-run_command git-cleanup --no-fetch --apply --rescue
+# Without pull request information, review's squash cannot be told from work
+# that reached main some other way, so it is kept for git refresh to rebase.
+out=$("$BIN/git-cleanup" --no-fetch --rescue 2>&1)
+printf '%s\n' "$out" | sed 's/^/  /'
+case "$out" in
+  *'review'*'keeping: git refresh rebases it'*) printf '  ok   review kept with no pull request to go on\n' ;;
+  *) fail 'review was not kept for a rebase with no pull request to go on' ;;
+esac
+
+# origin is a path, so no host answers the pull request query. The command is
+# sourced and the query answered with the pull request that squashed review:
+# its source branch, its last commit, and the squash on main.
+printf '%s\n' "--- git-cleanup --no-fetch --apply --rescue, with review's pull request ---"
+(
+  # shellcheck source=../../../home/common/lib/git-common.sh
+  . /repo/home/common/lib/git-common.sh
+  # shellcheck source=../../../home/common/bin/git-cleanup
+  . "$BIN/git-cleanup"
+  fetch_pr_merges() {
+    PR_MERGE_TABLE=$(printf 'review\t%s\t%s' "$R1" "$SQUASH")
+    PR_SOURCE='from the scenario'; PR_HINT=''
+  }
+  main --no-fetch --apply --rescue
+) 2>&1 | sed 's/^/  /'
 
 echo '--- outcome ---'
 gone refs/heads/landed
