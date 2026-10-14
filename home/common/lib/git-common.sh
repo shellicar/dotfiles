@@ -11,8 +11,9 @@
 # matters: BSD readlink has no -f, and the portable resolver is exactly the kind
 # of thing this repo keeps having to avoid.
 #
-# WHAT THE CALLER OWES IT. This file defines functions and the colour variables
-# and nothing else runs at source time. Everything the functions read is the
+# WHAT THE CALLER OWES IT. This file defines functions and the colour variables,
+# and pins git's behaviour settings in the environment (see "pinned settings"
+# below); nothing else runs at source time. Everything the functions read is the
 # caller's: MAIN, CACHE_DIR, TAB, NOW, VERBOSE, WALK_DEPTH, EVALUATE_OLD,
 # ONLY_BRANCHES, DETACHED, PLAN, and the counters run_plan increments. Under
 # `set -u` that is safe because a function only runs once the caller has set up.
@@ -27,6 +28,125 @@
 # shellcheck disable=SC2034
 
 TOOL=${TOOL:-git}
+
+# ── pinned settings ─────────────────────────────────────────────────────────
+#
+# Settings that change what a command does, fixed for every git process this
+# one starts, including the ones git starts itself (a rebase's own merges and
+# ref updates). Each is appended through GIT_CONFIG_COUNT / GIT_CONFIG_KEY_<n> /
+# GIT_CONFIG_VALUE_<n>, which git reads after the system, global and repository
+# files, so a pin wins over all three. Needs git 2.31 or newer; older git
+# ignores the variables and the pins silently do nothing.
+#
+# Appended, never reset: the environment can already carry entries (a sandbox
+# sets safe.directory this way), and those keep applying. `git -c` on the
+# command line (`git -c rebase.updateRefs=true refresh`) is read after these, so
+# it still overrides a pin for that one run. That is intended: it is the way to
+# change a pinned setting for one run.
+#
+# Everything not listed comes from your config: identity, signing, hooks,
+# credentials, the [cleanup] and [claude] keys, and display settings. A setting
+# belongs here when a different value would make a command do something its
+# plan did not show, or skip something its plan relies on. docs/git-commands.md
+# lists both sides and why.
+#
+# Programs the commands start inherit the pins: pnpm in git wt-create, az, gh.
+# They run and exit, so any git they start is pinned for that one call. VS Code
+# is the exception, see unpin_git_config.
+#
+# PINS_FROM is the entry count the environment had before pinning, or empty
+# when GIT_CONFIG_COUNT was unset, so unpin_git_config can put it back.
+pin_git_config() {
+  local n="${GIT_CONFIG_COUNT:-0}" kv
+  PINS_FROM=${GIT_CONFIG_COUNT-}
+  for kv in "$@"; do
+    export "GIT_CONFIG_KEY_$n=${kv%%=*}" "GIT_CONFIG_VALUE_$n=${kv#*=}"
+    n=$((n + 1))
+  done
+  export GIT_CONFIG_COUNT="$n"
+}
+
+# Removes the entries pin_git_config added and leaves the ones that were there
+# before. Called before launching VS Code: if `code` starts a new VS Code rather
+# than handing off to a running one, that process keeps its environment for as
+# long as it runs, and every terminal opened in it would have git pinned.
+unpin_git_config() {
+  local n="${PINS_FROM:-0}"
+  while [ "$n" -lt "${GIT_CONFIG_COUNT:-0}" ]; do
+    unset "GIT_CONFIG_KEY_$n" "GIT_CONFIG_VALUE_$n"
+    n=$((n + 1))
+  done
+  if [ -n "${PINS_FROM-}" ]; then
+    export GIT_CONFIG_COUNT="$PINS_FROM"
+  else
+    unset GIT_CONFIG_COUNT
+  fi
+}
+
+# rebase: replay only the named range, onto the named base, and nothing else.
+#   updateRefs    would also move every other local branch pointing into the
+#                 replayed range, which no plan shows.
+#   autoStash     the commands decide stashing themselves (update_needs_stash),
+#                 and rely on git refusing a dirty tree otherwise.
+#   rebaseMerges  would recreate merges instead of replaying a flat range.
+#   backend       the apply backend handles empties and hooks differently.
+# merge: autoStash as above; ff=true is git's default, so the merge of main
+#   into a branch is not refused by merge.ff=only or forced into a merge commit.
+#   The rest keep a conflict a conflict, in merges and in rebases alike:
+#   directoryRenames=true would move a file into a renamed directory where git
+#   otherwise stops; renormalize=true resolves edits that differ only in line
+#   endings; renames=false (or diff.renames=false, which it falls back to)
+#   turns a rename on one side and an edit on the other into a conflict, and
+#   switches directory rename detection off, so a file added under a renamed
+#   directory goes in at the old path without a conflict.
+#   branch.<name>.mergeOptions cannot go in this list, because the key names
+#   the branch: every merge the commands run clears it instead, through
+#   merge_without_branch_options.
+# rerere: a conflict is reported and aborted, never resolved from a recording.
+#   Unlike leaving it unset: unset turns rerere on when .git/rr-cache exists.
+# fetch, remote.origin: pruneTags would delete local tags origin lacks on every
+#   --prune fetch, git main's git-main/* tags among them.
+# push: default=simple is git's default: the branch to its upstream, never
+#   every matching branch. followTags would push tags along with the branch.
+#   recurseSubmodules=no: "on-demand" would push the submodules' commits too.
+#   Push also reads submodule.recurse as the same switch, last one read
+#   winning, so the submodule.recurse pin below turns it off as well; this one
+#   keeps it off if that pin is ever removed.
+# branch.autoSetupMerge=true is git's default: a new branch tracks its start
+#   point only when that is a remote branch. So the main git main recreates
+#   from origin/main tracks it, and rescue/<branch>, cut from a local branch,
+#   tracks nothing ("always" would make it track the branch about to be
+#   deleted; "false" would leave git main's main with no upstream).
+# submodule.recurse: switch, merge and rebase stay in this repository. It also
+#   switches off fetch's default of fetching the submodule commits new
+#   superproject commits point to, so fetch.recurseSubmodules=on-demand puts
+#   that back. It has to come after submodule.recurse in the list: fetch reads
+#   both as one switch and the last one read wins.
+# status.showUntrackedFiles: dirty checks read `status --porcelain`, which
+#   leaves untracked files out under "no".
+#
+# Not pinned on purpose: merge.verifySignatures and push.useForceIfIncludes.
+# They can only refuse, and the refusal shows in the command's output.
+pin_git_config \
+  rebase.updateRefs=false \
+  rebase.autoStash=false \
+  rebase.rebaseMerges=false \
+  rebase.backend=merge \
+  merge.autoStash=false \
+  merge.ff=true \
+  merge.directoryRenames=conflict \
+  merge.renormalize=false \
+  merge.renames=true \
+  rerere.enabled=false \
+  fetch.pruneTags=false \
+  remote.origin.pruneTags=false \
+  push.default=simple \
+  push.followTags=false \
+  push.recurseSubmodules=no \
+  branch.autoSetupMerge=true \
+  submodule.recurse=false \
+  fetch.recurseSubmodules=on-demand \
+  status.showUntrackedFiles=normal
 
 # ── presentation ────────────────────────────────────────────────────────────
 
@@ -362,7 +482,7 @@ branch_beyond_cap() (
   [ -n "$ONLY_BRANCHES" ] && return 1
   dist=$(git rev-list --count "$MAIN_REF" "^$1" 2>/dev/null) || return 1
   [ "$dist" -gt "$MAX_DISTANCE" ] || return 1
-  last=$(git log -1 --format=%ct "$1" 2>/dev/null) || return 1
+  last=$(git rev-list --no-commit-header -1 --format=%ct "$1" 2>/dev/null) || return 1
   [ $(( NOW - last )) -gt $(( MAX_AGE_DAYS * 86400 )) ]
 )
 
@@ -940,7 +1060,7 @@ branch_diverged_from_remote() (
 # repository with no user.email nothing is yours.
 branch_foreign_authors() (
   b=$1 me=$2
-  all=$(git log --format=%ae "$MAIN_REF..refs/heads/$b" 2>/dev/null)
+  all=$(git rev-list --no-commit-header --format=%ae "$MAIN_REF..refs/heads/$b" 2>/dev/null)
   [ -n "$all" ] || return 0
   # An unset identity matches nobody. Handled here rather than by grep, because
   # -x with an empty pattern is an edge case GNU and BSD may not agree on.
@@ -1039,7 +1159,12 @@ update_needs_stash() (
   # --porcelain` quotes a path containing a space and `diff --name-only` does
   # not, so no such path can ever match. -z turns quoting off in both, which is
   # the only way to compare them.
-  git -C "$wt" diff --name-only -z "$from" "$MAIN_REF" 2>/dev/null |
+  #
+  # diff-tree rather than diff: it reads none of the diff.* settings. Under
+  # `git diff`, rename detection (on by default, or via diff.renames) lists only
+  # a renamed file's new path, and the old path the operation deletes is just as
+  # much in the way. --no-renames lists both.
+  git -C "$wt" diff-tree -r --name-only -z --no-renames "$from" "$MAIN_REF" 2>/dev/null |
     tr '\0' '\n' | sort -u > "$CACHE_DIR/incoming"
   [ -s "$CACHE_DIR/incoming" ] || return 1
   # Untracked entries included, not just modified ones: a file the incoming
@@ -1048,7 +1173,11 @@ update_needs_stash() (
   # The status prefix is stripped only from lines that carry one. A rename adds
   # the old path as a record of its own with no prefix, and both halves of it
   # are in the way.
-  git -C "$wt" status --porcelain -z 2>/dev/null | tr '\0' '\n' |
+  #
+  # --untracked-files=all, because the incoming list names files: under the
+  # default, an untracked file in a new directory is listed only as the
+  # directory ("newdir/"), which matches nothing in it.
+  git -C "$wt" status --porcelain -z --untracked-files=all 2>/dev/null | tr '\0' '\n' |
     sed 's/^[ MADRCU?!][ MADRCU?!] //' | sort -u > "$CACHE_DIR/in-the-way"
   [ -n "$(comm -12 "$CACHE_DIR/incoming" "$CACHE_DIR/in-the-way")" ]
 )
@@ -1091,6 +1220,26 @@ run_update() {
   return 0
 }
 
+# `git merge <args>` in worktree <wt>, with branch <b>'s mergeOptions cleared.
+# Every merge the commands run goes through here: the merge and the
+# fast-forward below, and the same two in git catchup.
+#
+# mergeOptions cannot be pinned in pin_git_config, because its key names the
+# branch. Left in place, -Xtheirs or -Xours in it would settle a conflict
+# silently, --autostash would carry a fast-forward over a dirty tree despite
+# the merge.autoStash pin, and --squash would stage the trunk's changes and
+# leave the branch where it was.
+#
+# --config-env, not -c: -c splits key=value at the first "=", so for a branch
+# named a=b it would set "branch.a" to "b.mergeOptions=" and leave the real
+# setting alone. --config-env takes the value from the variable named after
+# the last "=", and a variable name cannot contain one.
+merge_without_branch_options() {
+  local wt=$1 b=$2
+  shift 2
+  GIT_COMMON_EMPTY='' git -C "$wt" --config-env="branch.$b.mergeOptions=GIT_COMMON_EMPTY" merge "$@"
+}
+
 # A failure is aborted and reported, never left half done. A merge rewrites
 # nothing, so its push is an ordinary one; a rebase rewrote history, so its push
 # needs the lease, which is only sound because the caller fetched once at the
@@ -1104,7 +1253,7 @@ carry_out_update() {
 
   case "$act" in
     ff)
-      if git -C "$wt" merge --ff-only --quiet "$MAIN_REF" 2>/dev/null; then
+      if merge_without_branch_options "$wt" "$b" --ff-only --quiet "$MAIN_REF" 2>/dev/null; then
         say "  ${GREEN}${OK}${RESET} $b fast-forwarded"
       else
         say "  ${YELLOW}${WARN}${RESET}$b: cannot fast-forward (local commits?), skipped"
@@ -1114,7 +1263,7 @@ carry_out_update() {
     merge)
       # The pre-merge tip, so a failed push can say which commit undoes the merge.
       before=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
-      if ! git -C "$wt" merge --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
+      if ! merge_without_branch_options "$wt" "$b" --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
         say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
@@ -1323,5 +1472,7 @@ review_main() {
   # why ("no merge base"), so its error is the one shown.
   fork=$(git merge-base "$2" "$1") || { git diff --quiet "$2...$1"; return 1; }
   root=$(review_folder)
-  "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$1")"
+  # Without the pins: the opener may start the VS Code process itself.
+  ( unpin_git_config
+    "${REVIEW_OPENER:-vscode-open-review}" "$root" "$(review_link "$root" "$fork" "$1")" )
 }

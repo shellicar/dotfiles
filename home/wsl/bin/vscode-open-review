@@ -17,6 +17,8 @@ DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../../common/lib/git-common.sh
 . "$DIR/../lib/git-common.sh"
+# Sourcing pinned git's settings again; VS Code must not inherit them.
+unpin_git_config
 
 [ $# -eq 2 ] || { echo "usage: vscode-open-review <folder> <link>" >&2; exit 64; }
 

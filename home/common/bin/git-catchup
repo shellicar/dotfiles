@@ -72,7 +72,8 @@ if [ "$branch" = "$main" ]; then
 
   # No message of our own: git names the exact reason a fast-forward is refused,
   # whether that is local commits or a modified file the incoming commits touch.
-  git merge --ff-only "$target" || exit 1
+  # merge_without_branch_options says why the branch's mergeOptions are cleared.
+  merge_without_branch_options . "$branch" --ff-only "$target" || exit 1
   echo "$main fast-forwarded to origin/$main"
   exit 0
 fi
@@ -124,7 +125,7 @@ case "$action" in
     # what it is given, and a raw sha writes "Merge commit '<sha>'". The ref is
     # local and only moves on fetch, and this run fetched once above, so naming
     # it cannot pick up a commit the plan did not print.
-    git merge --no-edit "$MAIN_REF" || exit 1
+    merge_without_branch_options . "$branch" --no-edit "$MAIN_REF" || exit 1
 
     # Nothing was rewritten, so the remote is still an ancestor: an ordinary push.
     git push --quiet

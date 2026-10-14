@@ -36,7 +36,9 @@ base=$(git rev-parse HEAD)
 commit B a.txt
 printf 'new\n' > n.txt
 printf 'spaced\n' > 'two words.txt'
-git add n.txt 'two words.txt'
+mkdir newdir
+printf 'nested\n' > newdir/f.txt
+git add n.txt 'two words.txt' newdir/f.txt
 git commit -qm N
 git push -q origin main
 git fetch -q origin
@@ -115,5 +117,17 @@ close_case ff-spaced-name-collides ff
 open_case rebase-spaced-name-collides rebase yes
 printf 'mine\n' > 'two words.txt'
 close_case rebase-spaced-name-collides rebase
+
+# A directory the incoming commits create, already there untracked with the
+# same file in it. status lists the directory alone unless asked for files.
+open_case ff-untracked-in-new-dir-collides ff no
+mkdir newdir
+printf 'mine\n' > newdir/f.txt
+close_case ff-untracked-in-new-dir-collides ff
+
+open_case rebase-untracked-in-new-dir-collides rebase yes
+mkdir newdir
+printf 'mine\n' > newdir/f.txt
+close_case rebase-untracked-in-new-dir-collides rebase
 
 echo 'PASS stash-is-predicted-the-way-git-decides'

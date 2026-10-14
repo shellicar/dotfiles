@@ -123,6 +123,98 @@ cleanup reads, and it replays commits onto branches that were about to be delete
 two commands that order is something to remember. As one it cannot be expressed
 wrongly.
 
+## Your git config
+
+The commands run under whatever config the repository, your global file and the
+system file set, and some settings would make them do what their plan does not show.
+`rebase.updateRefs` is the one that started this: under it, a rebase also moves every
+other local branch pointing into the replayed range. So the settings that change what
+a command does are pinned, and everything else is yours.
+
+**How.** `git-common.sh` appends the pins to `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`
+and `GIT_CONFIG_VALUE_<n>` when it is sourced, and every command sources it. Git reads
+those after the system, global and repository files, so a pin wins over all three, and
+the environment reaches every git a command starts, including the ones git starts
+itself. Entries already in the environment are kept. `git -c key=value <command>` is
+read after the environment, so it overrides a pin for that one run, which is the way to
+change a pinned setting when you need to. A new git call in a
+command is pinned without doing anything; a new setting that changes behaviour goes in
+the list in `git-common.sh`.
+
+Programs a command starts inherit the pins too: pnpm in `git wt-create`, `az`, `gh`.
+They run and exit, so the pins last for that one call. VS Code is the exception: `git
+review` removes the entries it added, and only those, before it launches VS Code. If
+`code` starts a new VS Code instead of handing off to a running one, that process keeps
+its environment for as long as it runs, and every terminal opened in it would have the
+pins on git you run by hand.
+
+The variables need git 2.31 or newer, and the commands also use `rev-list
+--no-commit-header`, from 2.33. Older git ignores the variables, so the pins would
+silently not apply.
+
+**Pinned.** Each value is the one git uses when nothing is set, with two exceptions,
+noted in their rows: `rerere.enabled` and `submodule.recurse`, where pinning differs
+from leaving the setting unset.
+
+| Setting | Value | What a different value would do |
+|---|---|---|
+| `rebase.updateRefs` | `false` | move other local branches along with a rebase |
+| `rebase.autoStash` | `false` | set a dirty tree aside and carry on, where the commands rely on git refusing |
+| `merge.autoStash` | `false` | the same for a merge or fast-forward |
+| `rebase.rebaseMerges` | `false` | recreate merges instead of replaying a flat range |
+| `rebase.backend` | `merge` | the apply backend treats empty commits and hooks differently |
+| `merge.ff` | `true` | `only` refuses the merge of the trunk into a branch |
+| `merge.directoryRenames` | `conflict` | `true` moves a file added in a directory the other side renamed, where git would stop |
+| `merge.renormalize` | `false` | `true` lets an edit through a line-ending conversion on the other side, where git would stop |
+| `merge.renames` | `true` | `false`, or `diff.renames=false` when it is unset, turns a rename against an edit into a conflict, and adds a file under a renamed directory at the old path without one |
+| `rerere.enabled` | `false` | resolve a conflict from an old recording instead of stopping on it. When unset, git turns rerere on if `.git/rr-cache` exists; pinning `false` keeps it off even then, which is the difference wanted |
+| `fetch.pruneTags`, `remote.origin.pruneTags` | `false` | delete local tags origin lacks on every fetch, `git main`'s tags among them |
+| `push.default` | `simple` | `matching` pushes every branch with a remote counterpart |
+| `push.followTags` | `false` | push tags along with the branch |
+| `push.recurseSubmodules` | `no` | `on-demand` pushes the submodules' commits as well, which no plan shows |
+| `branch.autoSetupMerge` | `true` | `always` makes `rescue/<branch>` track the local branch about to be deleted; `false` leaves the main `git main` recreates with no upstream |
+| `submodule.recurse` | `false` | carry switch, merge and rebase into submodules. Unlike leaving it unset, `false` also switches off fetch's default of fetching the submodule commits new superproject commits point to; the next row puts that back. Push and fetch each read it as the same switch as their own setting, whichever is read last winning |
+| `fetch.recurseSubmodules` | `on-demand` | git's default fetch behaviour, restored after the `submodule.recurse` pin. It comes after that pin in the list for the reason above |
+| `status.showUntrackedFiles` | `normal` | `no` hides untracked files from the dirty checks |
+
+One setting cannot go in the list, because its key names a branch:
+`branch.<name>.mergeOptions`. Options such as `-Xtheirs` in it would settle a conflict
+silently; `--autostash` in it carries a fast-forward over a dirty tree despite the
+`merge.autoStash` pin, and `--squash` makes a fast-forward stage the trunk's changes and
+leave the branch where it was. So every merge the commands run goes through one helper
+in `git-common.sh`, `merge_without_branch_options`, which clears it for the branch it
+merges: the merge and the fast-forward in `carry_out_update` (`git refresh`, `git
+spread`) and the same two in `git catchup`. That helper is the one exception to keeping
+the pins in one list. It clears the setting with `--config-env`, not `-c`: `-c` splits
+at the first `=`, so for a branch named `a=b` it would set a different key and leave
+the real one in force. A rebase does not read the setting (checked on git 2.55).
+
+`rebase.autoSquash` is not pinned: it only affects an interactive rebase, and none of
+the commands runs one (checked on git 2.55). None of them runs `git pull`, so
+`pull.rebase` and `pull.ff` do not reach them.
+
+**Yours**, read from your config as they always were:
+
+- *Who you are and how you sign*: `user.*`, the `includeIf` files that set them,
+  `commit.gpgsign`, `tag.gpgSign`, `gpg.*`. A command's commits are yours.
+- *Hooks*: `core.hooksPath`, so the push gate and the commit-message hook run.
+- *Credentials and transport*: `credential.*`, `http.*`, remote URLs, `remote.pushDefault`
+  and `branch.<name>.pushRemote`.
+- *Settings the commands read on purpose*: `cleanup.subscription`, `cleanup.azconfig`,
+  `claude.sessionTrailer`.
+- *Checks that can only refuse*: `merge.verifySignatures`, `push.useForceIfIncludes`.
+  Under them an operation fails and the refusal shows in the command's output; nothing
+  extra happens.
+- *What content is*: line endings, filters, ignore rules.
+- *Display*: colour, diff and log formatting, `advice.*`. What git prints straight to
+  you follows them. What a command parses is read with plumbing and explicit formats
+  (`rev-list --format`, `for-each-ref --format`, `diff-tree`, `status --porcelain`), which
+  these settings do not change.
+
+One exception: the content walk's `git diff` (`content_hash`) is porcelain and reads
+`diff.algorithm`, `diff.renames`, `diff.noprefix`, `color.ui=always` and similar, so a
+change to one of them can change its hashes.
+
 ## The commands
 
 ### git refresh

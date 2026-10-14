@@ -39,6 +39,13 @@
 
 set -eu
 
+DIR=$(cd "$(dirname "$0")" && pwd)
+TOOL='git wt-create'
+# For the settings it pins; this command uses none of its functions.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/git-common.sh
+. "$DIR/../lib/git-common.sh"
+
 [ -n "${1:-}" ] || { echo "usage: git wt-create <branch> [base]" >&2; exit 2; }
 
 branch=$1
