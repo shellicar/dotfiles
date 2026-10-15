@@ -1,4 +1,4 @@
 # zsh: login shells. Runs after /etc/zprofile's path_helper, which reshuffles
-# PATH and pushes Homebrew ahead of the user bins. Re-assert the env phase so
-# path.sh regains precedence.
-. "$DOTFILES/load.sh" env
+# PATH. Re-assert the order with path.sh; .zshenv already set the rest of the
+# environment.
+. "$DOTFILES/path.sh"
