@@ -343,6 +343,15 @@ git_says() (
       done | awk 'END { print NR }' ;;
     "rev-list --merges "*)
       return 0 ;;
+    # <a> ^<b>: commits reachable from a and not from b, the same set as b..a.
+    # The ^ is on the last word, so the a..b case below would read it as a
+    # range from ^<b> to itself and answer 0.
+    "rev-list --count "*" ^"*)
+      [ $# -eq 4 ] || fail "the fake does not model: git $*"
+      exclude=$(nth_word 4 "$@")
+      range "${exclude#^}" "$(nth_word 3 "$@")" | awk 'END { print NR }' ;;
+    # TODO(claude): undecided: whether a last word with no .. in it fails here
+    # instead of being answered as a range from itself to itself, which is 0.
     "rev-list --count "*)
       spec=$(last_word "$@")
       # awk, not grep -c: grep exits non-zero on no matches, and a count of
