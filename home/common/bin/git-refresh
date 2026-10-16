@@ -718,22 +718,24 @@ build_plan() {
   while IFS="$TAB" read -r op state kind action target why ign n class meta stash; do
     [ -z "$op" ] && continue
     [ "$state" = on ] || continue
+    # The icon the row showed, so each result line names its action the same way.
+    icon_of "$kind"
     case "$kind" in
       remove)
-        plan_add delete "${op%R}" - - "${target:--}"
+        plan_add delete "${op%R}" - - "${target:--}" "$IC"
         ;;
       detach)
-        plan_add detached "${op%D}" - - "$target"
+        plan_add detached "${op%D}" - - "$target" "$IC"
         ;;
       rescue)
         b=${op%R}
         join=$(landed_sha "$(landed_commit "refs/heads/$b")")
-        [ -n "$join" ] || { say "  ${YELLOW}${WARN}${RESET}$b: no landed commit found, rescue skipped"; continue; }
-        plan_add rescue "$b" "$join" "$n" "${target:--}"
+        [ -n "$join" ] || { say "  ${YELLOW}${WARN}${RESET}$IC $b: no landed commit found, rescue skipped"; continue; }
+        plan_add rescue "$b" "$join" "$n" "${target:--}" "$IC"
         ;;
       ff|merge|rebase)
         b=${op%U}
-        plan_add "$kind" "$b" "$stash" - "$target"
+        plan_add "$kind" "$b" "$stash" - "$target" "$IC"
         ;;
     esac
   done <<EOF

@@ -1481,14 +1481,17 @@ why_it_failed() {
 # out can stop the whole command on a git error (in_main_by_content), and a stop
 # between the stash and the pop would leave your work in the stash list with
 # nothing said about it.
+#
+# The fifth argument is the icon the caller's plan showed for this action; every
+# result line about the action carries it, and with none given they have no icon.
 run_update() {
-  local act=$1 b=$2 wt=$3 stash=${4:-no} stashed=no rf=''
+  local act=$1 b=$2 wt=$3 stash=${4:-no} icon=${5:-} stashed=no rf=''
   [ "$act" = rebase ] && rf=$(rebase_from "$b")
   if [ "$stash" = yes ]; then
     if git -C "$wt" stash push --quiet --include-untracked; then
       stashed=yes
     else
-      say "  ${YELLOW}${WARN}${RESET}$b: could not set the working tree aside, skipped"
+      say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$b: could not set the working tree aside, skipped"
       return 0
     fi
   fi
@@ -1496,13 +1499,13 @@ run_update() {
   # Unguarded, the pop below is skipped when a caller runs under set -e and the
   # update returns non-zero, which leaves the work in the stash list with
   # nothing said about it.
-  carry_out_update "$act" "$b" "$wt" "$rf" || :
+  carry_out_update "$act" "$b" "$wt" "$rf" "$icon" || :
 
   [ "$stashed" = yes ] || return 0
   if git -C "$wt" stash pop --quiet; then
     say "     ${DIM}↳ working tree restored${RESET}"
   else
-    say "  ${YELLOW}${WARN}${RESET}$b: could not put the working tree back, it is in the stash list"
+    say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$b: could not put the working tree back, it is in the stash list"
   fi
   return 0
 }
@@ -1536,16 +1539,17 @@ merge_without_branch_options() {
 # message from what it is given, and a raw sha writes "Merge commit '<sha>'".
 #
 # The fourth argument is rebase_from's answer, when the caller has it already.
+# The fifth is the icon, as for run_update.
 carry_out_update() {
-  local act=$1 b=$2 wt=$3 rf=${4:-} base push=no
+  local act=$1 b=$2 wt=$3 rf=${4:-} icon=${5:-} base push=no
   git -C "$wt" rev-parse --verify --quiet '@{u}' >/dev/null 2>&1 && push=yes
 
   case "$act" in
     ff)
       if merge_without_branch_options "$wt" "$b" --ff-only --quiet "$MAIN_REF" 2>/dev/null; then
-        say "  ${GREEN}${OK}${RESET} $b fast-forwarded"
+        say "  ${GREEN}${OK}${RESET} ${icon:+$icon }$b fast-forwarded"
       else
-        say "  ${YELLOW}${WARN}${RESET}$b: cannot fast-forward (local commits?), skipped"
+        say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$b: cannot fast-forward (local commits?), skipped"
       fi
       return 0
       ;;
@@ -1554,19 +1558,19 @@ carry_out_update() {
       before=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null)
       if ! merge_without_branch_options "$wt" "$b" --quiet --no-edit "$MAIN_REF" >/dev/null 2>"$CACHE_DIR/update-error"; then
         git -C "$wt" merge --abort 2>/dev/null
-        say "  ${YELLOW}${WARN}${RESET}$b: merge failed, aborted and untouched — $(why_it_failed)"
+        say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$b: merge failed, aborted and untouched — $(why_it_failed)"
         return 0
       fi
       if [ "$push" = yes ] && ! git -C "$wt" push --quiet 2>/dev/null; then
-        say "  ${YELLOW}${WARN}${RESET}$b: merged, but the push failed. The merge is local only: push it, or undo it with git switch -C $b $before"
+        say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$b: merged, but the push failed. The merge is local only: push it, or undo it with git switch -C $b $before"
         return 0
       fi
       # No upstream, or its remote-tracking ref was pruned: the merge stays local.
       [ "$push" = yes ] || {
-        say "  ${GREEN}${OK}${RESET} $b merged origin/$MAIN locally, nothing to push it to (before: $before)"
+        say "  ${GREEN}${OK}${RESET} ${icon:+$icon }$b merged origin/$MAIN locally, nothing to push it to (before: $before)"
         return 0
       }
-      say "  ${GREEN}${OK}${RESET} $b merged origin/$MAIN"
+      say "  ${GREEN}${OK}${RESET} ${icon:+$icon }$b merged origin/$MAIN"
       return 0
       ;;
   esac
@@ -1574,18 +1578,18 @@ carry_out_update() {
   [ -n "$rf" ] || rf=$(rebase_from "$b")
   case "$rf" in
     rebase"$TAB"*) base=${rf#rebase"$TAB"} ;;
-    *) say "  ${YELLOW}${WARN}${RESET}$b: ${rf#*"$TAB"}, skipped"; return 0 ;;
+    *) say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$b: ${rf#*"$TAB"}, skipped"; return 0 ;;
   esac
   if ! git -C "$wt" rebase --quiet --onto "$MAIN_REF" "$base" >/dev/null 2>"$CACHE_DIR/update-error"; then
     git -C "$wt" rebase --abort 2>/dev/null
-    say "  ${YELLOW}${WARN}${RESET}$b: rebase failed, aborted and untouched — $(why_it_failed)"
+    say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$b: rebase failed, aborted and untouched — $(why_it_failed)"
     return 0
   fi
   if [ "$push" = yes ] && ! git -C "$wt" push --quiet --force-with-lease 2>/dev/null; then
-    say "  ${YELLOW}${WARN}${RESET}$b: rebased, but the push was refused (the remote moved) — push it yourself"
+    say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$b: rebased, but the push was refused (the remote moved) — push it yourself"
     return 0
   fi
-  say "  ${GREEN}${OK}${RESET} $b rebased onto origin/$MAIN"
+  say "  ${GREEN}${OK}${RESET} ${icon:+$icon }$b rebased onto origin/$MAIN"
 }
 
 # ── the plan, and carrying it out ───────────────────────────────────────────
@@ -1593,8 +1597,11 @@ carry_out_update() {
 # Append one action to the plan. Fields are tab separated and never empty ('-'
 # stands in for an absent worktree or an unused rescue field), because tab is
 # IFS whitespace and consecutive tabs would otherwise collapse into one.
+#
+# The sixth field is the icon the caller's plan showed for the action, '-' when
+# it gave none. run_plan prints it on the action's result lines.
 plan_add() {
-  PLAN="${PLAN}$1${TAB}$2${TAB}$3${TAB}$4${TAB}$5
+  PLAN="${PLAN}$1${TAB}$2${TAB}$3${TAB}$4${TAB}$5${TAB}${6:--}
 "
 }
 
@@ -1672,38 +1679,39 @@ run_rescue() {
 # Decides nothing. Every choice was made in the pass above and is already on
 # screen; this walks the recorded actions and carries them out in order.
 run_plan() {
-  local action branch join n wt outcome
-  while IFS="$TAB" read -r action branch join n wt; do
+  local action branch join n wt icon outcome
+  while IFS="$TAB" read -r action branch join n wt icon; do
     [ -z "$action" ] && continue
     [ "$wt" = - ] && wt=''
+    [ "$icon" = - ] && icon=''
     case "$action" in
       delete)
         outcome=$(remove_branch "$branch" "$wt")
         if [ "$outcome" = removed ]; then
           REMOVED_COUNT=$((REMOVED_COUNT + 1))
-          say "  ${GREEN}${OK}${RESET} $branch removed"
+          say "  ${GREEN}${OK}${RESET} ${icon:+$icon }$branch removed"
         else
-          say "  ${YELLOW}${WARN}${RESET}$branch: $outcome, skipped"
+          say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$branch: $outcome, skipped"
           say_removal_output
         fi
         ;;
       detached)
         if git worktree remove "$wt" >"$CACHE_DIR/remove-output" 2>&1; then
           REMOVED_COUNT=$((REMOVED_COUNT + 1))
-          say "  ${GREEN}${OK}${RESET} $branch removed"
+          say "  ${GREEN}${OK}${RESET} ${icon:+$icon }$branch removed"
         else
-          say "  ${YELLOW}${WARN}${RESET}$branch: worktree remove failed, skipped"
+          say "  ${YELLOW}${WARN}${RESET}${icon:+$icon }$branch: worktree remove failed, skipped"
           say_removal_output
         fi
         ;;
       rescue)
-        say "  $branch"
+        say "  ${icon:+$icon }$branch"
         run_rescue "$branch" "$join" "$n" "$wt"
         ;;
       ff|merge|rebase)
         # join carries the stash flag for an update, which is what git spread's
         # plan uses that field for too.
-        run_update "$action" "$branch" "$wt" "$join"
+        run_update "$action" "$branch" "$wt" "$join" "$icon"
         ;;
     esac
   done <<EOF

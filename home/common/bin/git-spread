@@ -186,7 +186,7 @@ EOF
   printf '%s %s [%s]: %s %s origin/%s (behind %s, ahead %s)%s\n' \
     "$icon" "$wt" "$branch" "$word" "$verb" "$MAIN" "$behind" "$ahead" "$extra"
 
-  [ "$apply" -eq 1 ] && plan_add "$action" "$branch" "$stash_first" "$push_after" "$wt"
+  [ "$apply" -eq 1 ] && plan_add "$action" "$branch" "$stash_first" "$push_after" "$wt" "$icon"
 done <<EOF
 $WORKTREES
 EOF
@@ -211,12 +211,13 @@ sleep 5
 echo
 
 # Decides nothing. Every choice was made in the pass above and is on screen.
-while IFS="$TAB" read -r action branch stash_first push_after wt; do
+while IFS="$TAB" read -r action branch stash_first push_after wt icon; do
   [ -z "$action" ] && continue
   # One implementation, in the library, shared with git refresh. It works out
   # whether to push from the branch's own upstream rather than being told, and
-  # it owns the stash and the pop around the update.
-  run_update "$action" "$branch" "$wt" "$stash_first"
+  # it owns the stash and the pop around the update. The icon is the one the
+  # plan line above showed, so the result line carries it too.
+  run_update "$action" "$branch" "$wt" "$stash_first" "$icon"
 done <<EOF
 $PLAN
 EOF
