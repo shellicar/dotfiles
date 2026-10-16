@@ -82,10 +82,6 @@ configure_windows_agent_conf() {
     return 0
   }
   win_agent_conf="$appdata/gnupg/gpg-agent.conf"
-  if [ -f "$win_agent_conf" ] && [ "$(cat "$win_agent_conf")" = "$(windows_agent_conf_text)" ]; then
-    echo "  Windows gpg-agent cache: already ${CACHE_TTL_HARDWARE}s"
-    return 0
-  fi
   mkdir -p "$(dirname "$win_agent_conf")"
   windows_agent_conf_text > "$win_agent_conf"
   echo "  Windows gpg-agent cache: ${CACHE_TTL_HARDWARE}s (agent lifetime, in practice)"
@@ -94,13 +90,10 @@ configure_windows_agent_conf() {
   # Makes a running agent re-read gpg-agent.conf without stopping it. An agent
   # that is not running reads it when it starts. Through the bridge, this
   # connection also starts the agent when it is down.
-  # TODO(claude): undecided: whether --configure reloads the agent after changing
-  # gpg-agent.conf, which uses the agent outside the key step. It reloads for now,
-  # and only when the file changed.
   if gpg-connect-agent --no-autostart reloadagent /bye >/dev/null 2>&1; then
     echo "  Windows gpg-agent reloaded"
   else
-    echo "  Windows gpg-agent not reached; it reads the new cache settings when it next starts"
+    echo "  Windows gpg-agent not reached; it reads its configuration when it next starts"
   fi
 }
 
