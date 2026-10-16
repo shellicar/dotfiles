@@ -350,10 +350,11 @@ git_says() (
       [ $# -eq 4 ] || fail "the fake does not model: git $*"
       exclude=$(nth_word 4 "$@")
       range "${exclude#^}" "$(nth_word 3 "$@")" | awk 'END { print NR }' ;;
-    # TODO(claude): undecided: whether a last word with no .. in it fails here
-    # instead of being answered as a range from itself to itself, which is 0.
+    # A last word with no .. fails: read as a range it would be one from itself
+    # to itself, a quiet 0 that hides a form the fake does not model.
     "rev-list --count "*)
       spec=$(last_word "$@")
+      case "$spec" in *..*) ;; *) fail "the fake does not model: git $*" ;; esac
       # awk, not grep -c: grep exits non-zero on no matches, and a count of
       # zero is an answer, not a failure.
       range "${spec%%..*}" "${spec##*..}" | awk 'END { print NR }' ;;
