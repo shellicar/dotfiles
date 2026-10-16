@@ -19,7 +19,7 @@
 
 NL='
 '
-# TODO(claude): undecided: whether the log path can be changed from the environment. It can, so the tests write their own log rather than the hook's.
+# The tests set VSCODE_OPEN_WORKSPACE_LOG so they never write the hook's log.
 LOG=${VSCODE_OPEN_WORKSPACE_LOG:-/tmp/tmux-vscode-workspace.log}
 
 if [ $# -ne 2 ]; then
