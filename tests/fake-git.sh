@@ -284,7 +284,10 @@ git_says() (
       onto=$(nth_word 4 "$@")
       cur=$(cat "$HEAD_REF")
       [ -n "$cur" ] || return 1
-      ref_set "$cur" "$(replayed "$onto" "$(ref_of "$cur")")"
+      new=$(replayed "$onto" "$(ref_of "$cur")")
+      # Dated when the rebase runs, as git dates the commits it replays.
+      printf '%s\t%s\n' "$new" "$(fake_now)" >> "$TIMES"
+      ref_set "$cur" "$new"
       return 0 ;;
     "rebase --abort")
       return 0 ;;
@@ -347,10 +350,14 @@ git_says() (
     # The tip's time, and how long before the fake's clock that was.
     "rev-list --no-commit-header -1 --format=%cr "*)
       c=$(commit_of "$(last_word "$@")") || return 128
-      relative_date "$(commit_time "$c")" "$(fake_now)" ;;
+      t=$(commit_time "$c")
+      [ -n "$t" ] || fail "the fake made commit $c without a date: git $*"
+      relative_date "$t" "$(fake_now)" ;;
     "rev-list --no-commit-header -1 --format=%ct "*)
       c=$(commit_of "$(last_word "$@")") || return 128
-      commit_time "$c" ;;
+      t=$(commit_time "$c")
+      [ -n "$t" ] || fail "the fake made commit $c without a date: git $*"
+      printf '%s\n' "$t" ;;
     # A worktree's HEAD is the branch checked out in it.
     "-C "*" rev-list --count HEAD.."*)
       wt=$(nth_word 2 "$@")
@@ -397,14 +404,15 @@ git_says() (
     "rev-list --merges "*)
       return 0 ;;
     # <a> ^<b>: commits reachable from a and not from b, the same set as b..a.
-    # The ^ is on the last word, so the a..b case below would read it as a
-    # range from ^<b> to itself and answer 0.
+    # Either side naming nothing fails as git does, with 128. range() cannot be
+    # left to do it: it reads an unknown excluded ref as excluding nothing.
     "rev-list --count "*" ^"*)
       [ $# -eq 4 ] || fail "the fake does not model: git $*"
-      exclude=$(nth_word 4 "$@")
-      range "${exclude#^}" "$(nth_word 3 "$@")" | awk 'END { print NR }' ;;
-    # A last word with no .. fails: read as a range it would be one from itself
-    # to itself, a quiet 0 that hides a form the fake does not model.
+      case "$3" in -*) fail "the fake does not model: git $*" ;; esac
+      tip=$(commit_of "$3") || return 128
+      exclude=$(commit_of "${4#^}") || return 128
+      range "$exclude" "$tip" | awk 'END { print NR }' ;;
+    # A last word with no .. is a form the fake does not model.
     "rev-list --count "*)
       spec=$(last_word "$@")
       case "$spec" in *..*) ;; *) fail "the fake does not model: git $*" ;; esac
