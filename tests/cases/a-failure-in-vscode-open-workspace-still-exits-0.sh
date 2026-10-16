@@ -34,3 +34,21 @@ run_open_workspace weaver
 assert_eq "$OPEN_STATUS" 0
 assert_eq "$(code_ran_with)" ''
 assert_contains "$(cat "$WORK/stderr")" "usage:"
+
+# flock missing: nothing is checked, rather than a check per focus.
+FLOCKBIN=$WORK/no-flock
+mkdir -p "$FLOCKBIN"
+run_open_workspace weaver "$WS"
+assert_eq "$OPEN_STATUS" 0
+assert_eq "$(checks_run)" 0
+assert_contains "$(cat "$WORK/stderr")" "needs flock"
+FLOCKBIN=$WORK/flockbin
+
+# Something at the lock's path that cannot be opened for writing, a folder
+# here: said in the command's own words, rather than the shell ending it.
+WS=$WORK/blocked.code-workspace
+mkdir "$WS.lock"
+run_open_workspace weaver "$WS"
+assert_eq "$OPEN_STATUS" 0
+assert_eq "$(checks_run)" 0
+assert_eq "$(cat "$WORK/stderr")" "vscode-open-workspace: cannot open the lock $WS.lock for writing"

@@ -38,29 +38,34 @@ fi
 unset VSCODE_OPEN_WORKSPACE_DETACHED
 
 # One check at a time per workspace file: a check already running covers this
-# focus too. The lock is a directory holding its owner's pid; a lock whose owner
-# is dead was left by a killed check and is taken over.
+# focus too. The lock is flock(1) on <workspace-file>.lock, held on descriptor 9
+# for the life of this shell. The kernel releases it when the last process
+# holding the descriptor exits, however it exits, so nothing releases it here
+# and no lock is left behind. Without flock nothing is checked: running
+# unlocked would let every focus start its own check.
 #
-# mkdir and writing the pid are two steps, so a lock with no pid yet is one
-# being taken right now, and counts as held. Removing it would let two checks
-# run at once.
-# TODO(claude): undecided: where the lock lives. Beside the workspace file, as <workspace-file>.lock.
-# TODO(claude): undecided: whether a lock with no pid is held or stale. Held, so a check killed between the two steps leaves a lock that must be removed by hand.
+# flock, not a folder holding a pid checked with kill -0: in Claude Code's
+# sandbox each command runs in its own pid namespace, where kill -0 cannot see
+# a live holder, so a held lock reads as dead (see take_run_lock in
+# home/common/lib/git-common.sh).
+#
+# Every program started below gets 9>&-. One that inherited the descriptor and
+# outlived this shell would hold the lock for good: `code` run from WSL can
+# start the VS Code server in WSL, which keeps running.
+if ! command -v flock > /dev/null 2>&1; then
+  echo "vscode-open-workspace: needs flock, to run one window check at a time" >&2
+  exit 0
+fi
 LOCK=$WS_FILE.lock
-take_lock() {
-  mkdir "$LOCK" 2> /dev/null && return 0
-  [ -d "$LOCK" ] || { echo "vscode-open-workspace: cannot create $LOCK" >&2; return 1; }
-  owner=$(cat "$LOCK/pid" 2> /dev/null)
-  [ -n "$owner" ] || return 1
-  kill -0 "$owner" 2> /dev/null && return 1
-  rm -f "$LOCK/pid"
-  rmdir "$LOCK" 2> /dev/null
-  mkdir "$LOCK" 2> /dev/null
+# A failed redirection on a plain exec ends a non-interactive shell before the
+# || is reached, under dash and bash --posix alike. With command it returns
+# instead, and the group's 2>/dev/null keeps the shell's own error out without
+# redirecting stderr for good, as exec's own 2> would.
+{ command exec 9>> "$LOCK"; } 2> /dev/null || {
+  echo "vscode-open-workspace: cannot open the lock $LOCK for writing" >&2
+  exit 0
 }
-take_lock || exit 0
-echo "$$" > "$LOCK/pid"
-trap 'rm -f "$LOCK/pid"; rmdir "$LOCK" 2> /dev/null' EXIT
-trap 'exit 0' HUP INT TERM
+flock -n 9 || exit 0
 
 # Every top-level window belonging to a Code process, one title per line.
 # VS Code keeps all its windows under one main process, so a process's
@@ -81,7 +86,7 @@ $auto::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [Sys
 '
 
 # A failed check opens the workspace anyway, as the macOS command does.
-if TITLES=$(powershell.exe -NoProfile -NonInteractive -Command "$LIST_TITLES"); then
+if TITLES=$(powershell.exe -NoProfile -NonInteractive -Command "$LIST_TITLES" 9>&-); then
   case "$NL$TITLES" in
     *"$NL$NAME - "*) exit 0 ;;
   esac
@@ -89,5 +94,5 @@ else
   echo "vscode-open-workspace: could not list VS Code windows; opening $WS_FILE" >&2
 fi
 
-code "$WS_FILE" || echo "vscode-open-workspace: code $WS_FILE failed" >&2
+code "$WS_FILE" 9>&- || echo "vscode-open-workspace: code $WS_FILE failed" >&2
 exit 0
