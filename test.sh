@@ -75,7 +75,7 @@ while IFS= read -r f; do
     *'shell script'*)              set -- "$@" "$f"; /bin/sh -n "$f" || note_unparseable "$f" ;;
   esac
 done <<EOF
-$(find . -type f -not -path './.git/*' -not -path '*/node_modules/*')
+$(find . -type f -not -path './.git/*' -not -path '*/node_modules/*' -not -path './.claude/worktrees/*')
 EOF
 
 [ "$#" -gt 0 ] || { echo "found no shell scripts to lint" >&2; exit 64; }
