@@ -1,21 +1,21 @@
 #!/bin/sh
 #
-# GPG setup, WSL. The card is held by the Windows gpg-agent and reached through
-# gpg-bridge, so there is no local agent, pinentry or scdaemon to configure.
+# GPG setup, WSL: setup/linux/gpg-setup.sh plus what only WSL needs. The card is
+# held by the Windows gpg-agent and reached through gpg-bridge, so there is no
+# local agent, pinentry or scdaemon to configure; the Windows side is configured
+# from here instead.
 
 set -eu
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 
-# GPG_FINGERPRINT and the YubiKey serials.
-LIB="$DIR/../../home/common/lib/yubikeys.sh"
-[ -f "$LIB" ] || { echo "ERROR: $LIB not found" >&2; exit 1; }
-# shellcheck source=/dev/null
-. "$LIB"
+GPG_SETUP_SOURCED=1
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../linux/gpg-setup.sh
+. "$DIR/../linux/gpg-setup.sh"
+# shellcheck source=../../home/wsl/lib/gpg-bridge.sh
+. "$DIR/../../home/wsl/lib/gpg-bridge.sh"
 
-GPG_CONF="${GNUPGHOME:-$HOME/.gnupg}/gpg.conf"
-SERVICE=gpg-bridge.service
-CERT_SLOT=3
 # gpg-agent has no infinite value: the man page defines both TTLs as plain
 # seconds, and 0 means no caching at all rather than never expiring. 400 days is
 # the stand-in, since the agent dies at logout long before it elapses.
@@ -24,139 +24,113 @@ CACHE_TTL_HARDWARE=34560000
 # No --generate here: key generation is always on-card, identical regardless
 # of OS (see docs/yubikey.md), and is not needed from WSL.
 
-usage() {
-  echo "Usage: $(basename "$0") <command>"
-  echo ""
-  echo "Commands:"
-  echo "  --test-sign    Test signing with the key on the card, through the bridge"
-  echo "  --test-sign --hardware"
-  echo "                 The same thing. The card is the only key reachable here"
-  echo "  --configure    Configure this distro to sign with the card"
-  echo "  --configure --hardware"
-  echo "                 The same thing. There is no on-disk key mode under WSL"
-  echo "  --reset        Restart the Windows gpg-agent"
-  echo "                 (next sign prompts for the PIN)"
-  echo "  --schedule     Not applicable under WSL; explains why"
-  exit 1
+# Steps that could not be done. --configure carries on past them and fails at
+# the end.
+blocked=0
+
+start_agent() {
+  gpg_bridge_start_agent
 }
 
 # To gpg, a stopped bridge looks the same as an absent card.
-require_bridge() {
-  if [ "$(systemctl --user is-active "$SERVICE" 2>/dev/null || true)" != active ]; then
-    echo "ERROR: $SERVICE is not running" >&2
+require_agent() {
+  if ! gpg_bridge_service_active; then
+    echo "ERROR: $GPG_BRIDGE_SERVICE is not running" >&2
     echo "  the Windows agent holds the card; nothing here can reach it without the bridge" >&2
     echo "  run: gpg-bridge-install --apply" >&2
     exit 1
   fi
 }
 
-# The serial of the card gpg --card-status reports. gpg 2.3+ can see several
-# cards; this is the one it currently addresses.
-card_serial() {
-  gpg --card-status --with-colons 2>/dev/null | grep '^serial:' | head -1 | cut -d: -f2
-}
-
-# Checks the bridge is up, a card answers, and it is one of the three in
-# yubikeys.sh. It does not count the cards.
-require_one_card() {
-  require_bridge
-
-  serial=$(card_serial)
-  if [ -z "$serial" ]; then
-    echo "ERROR: the agent reports no card" >&2
-    echo "  check the key is in the dock, and that Windows gpg-agent is running:" >&2
-    echo "    gpg --card-status" >&2
-    exit 1
-  fi
-
-  # Leading zeros stripped in case gpg reports the padded form.
-  serial=$(echo "$serial" | sed 's/^0*//')
-  case "$serial" in
-    "$YUBIKEY_A_SERIAL"|"$YUBIKEY_B_SERIAL"|"$YUBIKEY_C_SERIAL")
-      echo "  card $serial" ;;
-    *)
-      echo "ERROR: card $serial is not one of the three in yubikeys.sh" >&2
-      exit 1 ;;
-  esac
-}
-
-# Ubuntu does not ship gpg-card, so the keyblock is read with SCD READCERT and
-# taken from the only OCTET STRING in its DER container.
-import_pubkey_from_card() {
-  tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT INT TERM
-
-  if ! gpg-connect-agent --no-autostart "/datafile $tmp/cert.der" \
-      "SCD READCERT OPENPGP.$CERT_SLOT" /bye >/dev/null 2>&1; then
-    echo "ERROR: could not read slot $CERT_SLOT from the card" >&2
-    exit 1
-  fi
-
-  if [ ! -s "$tmp/cert.der" ]; then
-    echo "ERROR: no data came back for slot $CERT_SLOT" >&2
-    echo "  confirm with gpg --card-status before writing to the card; if the slot really is empty:" >&2
-    echo "    gpg-card --no-history writecert --openpgp OPENPGP.$CERT_SLOT <fingerprint>" >&2
-    exit 1
-  fi
-
-  offset=$(openssl asn1parse -inform DER -in "$tmp/cert.der" 2>/dev/null \
-    | grep 'OCTET STRING' | head -1 | cut -d: -f1 | tr -d ' ')
-  if [ -z "$offset" ]; then
-    echo "ERROR: slot $CERT_SLOT does not hold the container gpg-card writes" >&2
-    exit 1
-  fi
-
-  if ! openssl asn1parse -inform DER -in "$tmp/cert.der" -strparse "$offset" \
-      -noout -out "$tmp/keyblock.pgp" 2>/dev/null; then
-    echo "ERROR: could not unwrap the keyblock from slot $CERT_SLOT" >&2
-    exit 1
-  fi
-
-  fpr=$(gpg --no-options --with-colons --show-keys "$tmp/keyblock.pgp" 2>/dev/null \
-    | grep '^fpr' | head -1 | cut -d: -f10)
-  if [ -z "$fpr" ]; then
-    echo "ERROR: slot $CERT_SLOT is not an OpenPGP key" >&2
-    exit 1
-  fi
-
-  # Checked before the import below, which marks whatever arrives as ultimately trusted.
-  if [ "$fpr" != "$GPG_FINGERPRINT" ]; then
-    echo "ERROR: this card holds $fpr" >&2
-    echo "       expected $GPG_FINGERPRINT" >&2
-    exit 1
-  fi
-
-  gpg --no-options --quiet --import "$tmp/keyblock.pgp"
-  echo "  imported $fpr from the card"
-
-  # Trust is per machine and does not travel with the key.
-  printf '%s:6:\n' "$fpr" | gpg --no-options --quiet --import-ownertrust
-  echo "  marked ultimately trusted"
-
-  # Builds the stubs that point gpg at the card.
-  gpg --card-status >/dev/null
-  echo "  card stubs created"
-}
-
 test_sign() {
-  require_one_card
-
   # Without no-autostart, gpg silently starts a keyless local agent instead
   # of reaching the card through the bridge.
-  if ! { [ -f "$GPG_CONF" ] && grep -qx 'no-autostart' "$GPG_CONF"; }; then
+  if ! has_conf_line "$GPG_CONF" no-autostart; then
     echo "ERROR: gpg.conf does not have no-autostart set" >&2
     echo "  run gpg-setup.sh --configure first" >&2
     exit 1
   fi
-
-  echo "Testing sign with $GPG_FINGERPRINT through the bridge..."
-  if echo "banana" | gpg --no-options --local-user "$GPG_FINGERPRINT" --clearsign >/dev/null 2>&1; then
-    echo "Signing works."
-  else
-    echo "Signing failed."
+  if ! linux_test_sign; then
     echo "  if the key is present but signing fails, the PIN prompt appears on Windows" >&2
     exit 1
   fi
+}
+
+windows_agent_conf_text() {
+  printf 'default-cache-ttl %s\nmax-cache-ttl %s\n' "$CACHE_TTL_HARDWARE" "$CACHE_TTL_HARDWARE"
+}
+
+# A daily kill in cron reaches the Windows agent through the bridge too.
+remove_cron() {
+  if crontab -l 2>/dev/null | grep -q 'gpgconf --kill gpg-agent'; then
+    crontab -l 2>/dev/null | grep -v 'gpgconf --kill gpg-agent' | crontab -
+    echo "  Removed the daily gpg-agent kill from cron"
+  else
+    echo "  no leftover cron entry"
+  fi
+}
+
+# Without it the Windows agent runs its out-of-the-box cache (10 minutes /
+# 2 hours); the card should only need its PIN once.
+configure_windows_agent_conf() {
+  appdata=$(gpg_bridge_win_dir APPDATA) || {
+    echo "  BLOCKED: could not read APPDATA from Windows, so the Windows gpg-agent.conf was not written" >&2
+    blocked=1
+    return 0
+  }
+  win_agent_conf="$appdata/gnupg/gpg-agent.conf"
+  if [ -f "$win_agent_conf" ] && [ "$(cat "$win_agent_conf")" = "$(windows_agent_conf_text)" ]; then
+    echo "  Windows gpg-agent cache: already ${CACHE_TTL_HARDWARE}s"
+    return 0
+  fi
+  mkdir -p "$(dirname "$win_agent_conf")"
+  windows_agent_conf_text > "$win_agent_conf"
+  echo "  Windows gpg-agent cache: ${CACHE_TTL_HARDWARE}s (agent lifetime, in practice)"
+  echo "  config: $win_agent_conf"
+
+  # Makes a running agent re-read gpg-agent.conf without stopping it. An agent
+  # that is not running reads it when it starts.
+  if gpg-connect-agent --no-autostart reloadagent /bye >/dev/null 2>&1; then
+    echo "  Windows gpg-agent reloaded"
+  else
+    echo "  Windows gpg-agent not reached; it reads the new cache settings when it next starts"
+  fi
+}
+
+# The Windows startup entry that starts the agent at logon. Read first and
+# written only when it differs.
+configure_run_entry() {
+  if [ ! -f "$(wslpath -u "$GPG_BRIDGE_WIN_GPGCONF")" ]; then
+    echo "  WARNING: $GPG_BRIDGE_WIN_GPGCONF not found; the startup entry cannot start the agent until GnuPG is installed there" >&2
+  fi
+
+  status=0
+  current=$(gpg_bridge_run_entry) || status=$?
+  if [ "$status" -eq 2 ]; then
+    echo "  BLOCKED: could not read the Windows registry, so the startup entry was not written" >&2
+    blocked=1
+    return 0
+  fi
+  if [ "$status" -eq 0 ] && [ "$current" = "$GPG_BRIDGE_RUN_DATA" ]; then
+    echo "  Windows startup entry: already set"
+    return 0
+  fi
+
+  if ! gpg_bridge_write_run_entry; then
+    echo "  BLOCKED: reg.exe could not write $GPG_BRIDGE_RUN_KEY\\$GPG_BRIDGE_RUN_VALUE" >&2
+    blocked=1
+    return 0
+  fi
+  status=0
+  current=$(gpg_bridge_run_entry) || status=$?
+  if [ "$status" -ne 0 ] || [ "$current" != "$GPG_BRIDGE_RUN_DATA" ]; then
+    echo "  ERROR: the startup entry reads back differently from what was written" >&2
+    echo "    expected: $GPG_BRIDGE_RUN_DATA" >&2
+    echo "    stored:   $current" >&2
+    blocked=1
+    return 0
+  fi
+  echo "  Windows startup entry: written ($GPG_BRIDGE_RUN_KEY\\$GPG_BRIDGE_RUN_VALUE)"
 }
 
 configure() {
@@ -176,71 +150,34 @@ configure() {
   echo "==================================================="
   echo ""
 
-  require_one_card
-
-  # A daily kill in cron reaches the Windows agent through the bridge too.
-  if crontab -l 2>/dev/null | grep -q 'gpgconf --kill gpg-agent'; then
-    crontab -l 2>/dev/null | grep -v 'gpgconf --kill gpg-agent' | crontab -
-    echo "  Removed the daily gpg-agent kill from cron"
-  else
-    echo "  no leftover cron entry"
-  fi
-
-  mkdir -p "$(dirname "$GPG_CONF")"
-  chmod 700 "$(dirname "$GPG_CONF")"
-
+  linux_configure_files
   # Without no-autostart, gpg starts a keyless local agent when the bridge is down.
-  if [ -f "$GPG_CONF" ] && grep -qx 'no-autostart' "$GPG_CONF"; then
-    echo "  gpg.conf: no-autostart already set"
-  else
-    # Without a final newline the option would join the file's last line.
-    if [ -s "$GPG_CONF" ] && [ -n "$(tail -c 1 "$GPG_CONF")" ]; then
-      echo >> "$GPG_CONF"
-    fi
-    echo 'no-autostart' >> "$GPG_CONF"
-    echo "  gpg.conf: no-autostart added"
-  fi
-
-  # Written whole on every run, because --configure is the file's only source.
-  # Without it the Windows agent runs its out-of-the-box cache (10 minutes /
-  # 2 hours); the card should only need its PIN once.
-  win_agent_conf="$(wslpath -u "$(wslvar APPDATA)")/gnupg/gpg-agent.conf"
-  mkdir -p "$(dirname "$win_agent_conf")"
-  cat > "$win_agent_conf" <<EOF
-default-cache-ttl $CACHE_TTL_HARDWARE
-max-cache-ttl $CACHE_TTL_HARDWARE
-EOF
-  echo "  Windows gpg-agent cache: ${CACHE_TTL_HARDWARE}s (agent lifetime, in practice)"
-  echo "  config: $win_agent_conf"
-
-  if gpg --list-keys "$GPG_FINGERPRINT" >/dev/null 2>&1; then
-    echo "  public key already present"
-    # Trust is per machine and does not travel with the key.
-    printf '%s:6:\n' "$GPG_FINGERPRINT" | gpg --no-options --quiet --import-ownertrust
-    echo "  marked ultimately trusted"
-  else
-    import_pubkey_from_card
-  fi
-
-  # Reaches the Windows agent through the bridge and makes it re-read
-  # gpg-agent.conf without stopping it. A kill would stop it, and nothing
-  # restarts it; see docs/yubikey.md.
-  gpg-connect-agent --no-autostart reloadagent /bye 2>/dev/null || true
-  echo "  Agent reloaded."
+  ensure_conf_line "$GPG_CONF" no-autostart
+  remove_cron
+  configure_windows_agent_conf
+  configure_run_entry
+  linux_configure_key
 
   echo ""
+  if [ "$blocked" -ne 0 ]; then
+    echo "Not finished: the steps marked BLOCKED or ERROR above were not done." >&2
+    exit 1
+  fi
   echo "Done. Signing uses the Windows pinentry; the PIN prompt appears there."
 }
 
-# A kill from WSL reaches the Windows agent through the bridge, and nothing
-# restarts it there, so this starts it again itself. The bridge reads the
-# socket file on every connection, so it needs no restart.
+# A kill from WSL reaches the Windows agent through the bridge. The bridge reads
+# the socket file on every connection, so it needs no restart.
 reset_agent() {
   echo "Restarting the Windows gpg-agent..."
   gpgconf --kill gpg-agent
 
-  # Waited out so --launch does not find the old agent still exiting.
-  win_socket="$(wslpath -u "$(wslvar LOCALAPPDATA)")/gnupg/S.gpg-agent"
+  # Waited out so the start does not find the old agent still exiting.
+  local_appdata=$(gpg_bridge_win_dir LOCALAPPDATA) || {
+    echo "ERROR: could not read LOCALAPPDATA from Windows" >&2
+    exit 1
+  }
+  win_socket="$local_appdata/gnupg/S.gpg-agent"
   waited=0
   while [ -e "$win_socket" ] && [ "$waited" -lt 50 ]; do
     sleep 0.1
@@ -251,10 +188,107 @@ reset_agent() {
     exit 1
   fi
 
-  # The Windows gpgconf, on PATH because WSL appends the Windows PATH to an
-  # interactive shell's.
-  gpgconf.exe --launch gpg-agent
+  start_agent
   echo "Done. Next sign will prompt for the PIN again."
+}
+
+# systemd --user, read without changing it.
+doctor_systemd() {
+  if ! out=$(systemctl --user is-system-running 2>&1); then
+    case "$out" in
+      degraded) ;;
+      *'Failed to connect'*)
+        check_unknown "gpg-bridge service and the masked gpg-agent units" "systemctl --user: $out"
+        return 0 ;;
+      *)
+        check_bad "systemd --user is not running ($out)"
+        return 0 ;;
+    esac
+  fi
+
+  unmasked=$(gpg_bridge_unmasked_units)
+  if [ -z "$unmasked" ]; then
+    check_ok "packaged gpg-agent units masked"
+  else
+    check_bad "not masked: $unmasked" "run: gpg-bridge-install --apply"
+  fi
+  if gpg_bridge_service_enabled; then
+    check_ok "$GPG_BRIDGE_SERVICE enabled"
+  else
+    check_bad "$GPG_BRIDGE_SERVICE not enabled" "run: gpg-bridge-install --apply"
+  fi
+  if gpg_bridge_service_active; then
+    check_ok "$GPG_BRIDGE_SERVICE active"
+  else
+    check_bad "$GPG_BRIDGE_SERVICE not active" "see: systemctl --user status $GPG_BRIDGE_SERVICE"
+  fi
+}
+
+doctor_checks() {
+  linux_doctor_checks
+  check_conf_line "$GPG_CONF" no-autostart "run: gpg-setup.sh --configure"
+  if crontab -l 2>/dev/null | grep -q 'gpgconf --kill gpg-agent'; then
+    check_bad "cron still kills gpg-agent daily" "run: gpg-setup.sh --configure"
+  else
+    check_ok "no daily gpg-agent kill in cron"
+  fi
+
+  echo ""
+  echo "Bridge"
+  for cmd in socat wslvar wslpath systemctl sha256sum; do
+    check_command "$cmd"
+  done
+  doctor_systemd
+
+  echo ""
+  echo "Windows"
+  win_gpgconf=$(wslpath -u "$GPG_BRIDGE_WIN_GPGCONF")
+  if [ -f "$win_gpgconf" ]; then
+    check_ok "$GPG_BRIDGE_WIN_GPGCONF exists"
+  else
+    check_bad "$GPG_BRIDGE_WIN_GPGCONF not found" "install GnuPG for Windows (Gpg4win) to its default location"
+  fi
+  conhost=$(gpg_bridge_system32 "$GPG_BRIDGE_CONHOST")
+  if [ -f "$conhost" ]; then
+    check_ok "$GPG_BRIDGE_CONHOST exists"
+  else
+    check_bad "$conhost not found"
+  fi
+
+  if ! relay=$(gpg_bridge_relay_path); then
+    check_unknown "the relay, the startup entry and the Windows gpg-agent.conf" \
+      "Windows interop is not available here: wslvar could not read USERPROFILE"
+    return 0
+  fi
+  case $(gpg_bridge_relay_state "$relay") in
+    ok)       check_ok "relay $relay, SHA-256 matches" ;;
+    missing)  check_bad "relay $relay not found" "run: gpg-bridge-install --apply" ;;
+    mismatch) check_bad "relay $relay SHA-256 does not match" "run: gpg-bridge-install --apply" ;;
+  esac
+
+  status=0
+  err=$(gpg_bridge_run_entry 2>&1 >/dev/null) || status=$?
+  case "$status" in
+    0)
+      current=$(gpg_bridge_run_entry)
+      if [ "$current" = "$GPG_BRIDGE_RUN_DATA" ]; then
+        check_ok "startup entry $GPG_BRIDGE_RUN_KEY\\$GPG_BRIDGE_RUN_VALUE"
+      else
+        check_bad "startup entry differs: $current" "run: gpg-setup.sh --configure"
+      fi ;;
+    1) check_bad "no startup entry $GPG_BRIDGE_RUN_KEY\\$GPG_BRIDGE_RUN_VALUE" "run: gpg-setup.sh --configure" ;;
+    *) check_unknown "the startup entry" "reg.exe: $err" ;;
+  esac
+
+  appdata=$(gpg_bridge_win_dir APPDATA) || appdata=''
+  win_agent_conf="$appdata/gnupg/gpg-agent.conf"
+  if [ -z "$appdata" ]; then
+    check_unknown "the Windows gpg-agent.conf" "could not read APPDATA from Windows"
+  elif [ -f "$win_agent_conf" ] && [ "$(cat "$win_agent_conf")" = "$(windows_agent_conf_text)" ]; then
+    check_ok "Windows gpg-agent.conf caches for ${CACHE_TTL_HARDWARE}s"
+  else
+    check_bad "$win_agent_conf does not hold the cache settings" "run: gpg-setup.sh --configure"
+  fi
 }
 
 schedule() {
@@ -267,9 +301,27 @@ schedule() {
   exit 1
 }
 
+usage() {
+  echo "Usage: $(basename "$0") <command>"
+  echo ""
+  echo "Commands:"
+  echo "  --test-sign    Test signing with the key on the card, through the bridge"
+  echo "  --test-sign --hardware"
+  echo "                 The same thing. The card is the only key reachable here"
+  echo "  --configure    Configure this distro and Windows to sign with the card"
+  echo "  --configure --hardware"
+  echo "                 The same thing. There is no on-disk key mode under WSL"
+  echo "  --doctor       Check what is installed and configured, changing nothing"
+  echo "  --reset        Restart the Windows gpg-agent"
+  echo "                 (next sign prompts for the PIN)"
+  echo "  --schedule     Not applicable under WSL; explains why"
+  exit 1
+}
+
 case "${1:-}" in
   --test-sign)  shift; test_sign "$@" ;;
   --configure)  shift; configure "$@" ;;
+  --doctor)     doctor WSL ;;
   --reset)      reset_agent ;;
   --schedule)   schedule ;;
   *)            usage ;;
