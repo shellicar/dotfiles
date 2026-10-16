@@ -9,8 +9,8 @@ REPO=$(cd "$TESTS/.." && pwd)
 
 describe "a merged branch that was never pushed reads merged, tracks no remote branch"
 
-# A branch with no upstream has no remote to be gone, so it is not "gone", and
-# without this it read as a merged branch whose remote was left behind.
+# A branch with no upstream has no remote that could be gone or still there, so
+# neither of the other two messages applies.
 #
 #   main   A - B - C
 #   topic        \ T1    content landed in main as C
@@ -27,8 +27,6 @@ ref_set refs/heads/topic T1
 guard_path
 # shellcheck source=../../home/common/lib/git-common.sh
 . "$REPO/home/common/lib/git-common.sh"
-
-branch_beyond_cap() { return 1; }
 
 # No upstream configured: the fake's default git_config_says answers nothing.
 

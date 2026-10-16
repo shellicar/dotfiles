@@ -29,8 +29,6 @@ guard_path
 # shellcheck source=../../home/common/lib/git-common.sh
 . "$REPO/home/common/lib/git-common.sh"
 
-branch_beyond_cap() { return 1; }
-
 # topic tracks origin/topic.
 git_config_says() {
   case "$1" in
