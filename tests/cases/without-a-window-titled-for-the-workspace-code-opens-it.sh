@@ -9,7 +9,7 @@ REPO=$(cd "$TESTS/.." && pwd)
 
 describe "without a window titled for the workspace, code opens it"
 
-WS=/home/me/.vscode-tmux/weaver.code-workspace
+WS=$WORK/weaver.code-workspace
 
 # No VS Code window at all.
 FAKE_TITLES=''

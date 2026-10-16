@@ -14,12 +14,12 @@ describe "a VS Code window already titled for the workspace is left alone"
 FAKE_TITLES='weaver - main - claude-cli
 @shellicar - main - dotfiles
 Welcome - Visual Studio Code'
-run_open_workspace @shellicar /home/me/.vscode-tmux/shellicar.code-workspace
+run_open_workspace @shellicar "$WORK/shellicar.code-workspace"
 
 assert_eq "$OPEN_STATUS" 0
 assert_eq "$(code_ran_with)" ''
 
 FAKE_TITLES='weaver - main - claude-cli'
-run_open_workspace weaver /home/me/.vscode-tmux/weaver.code-workspace
+run_open_workspace weaver "$WORK/weaver.code-workspace"
 assert_eq "$OPEN_STATUS" 0
 assert_eq "$(code_ran_with)" ''

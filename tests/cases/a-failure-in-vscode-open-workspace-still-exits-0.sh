@@ -12,7 +12,7 @@ describe "a failure in vscode-open-workspace still exits 0"
 # The tmux focus hook ends with this command, and tmux puts the pane in view
 # mode on every focus when a run-shell exits non-zero. A failure is written to
 # stderr, which the hook sends to its log.
-WS=/home/me/.vscode-tmux/weaver.code-workspace
+WS=$WORK/weaver.code-workspace
 
 # The window check fails: the workspace is opened anyway.
 FAKE_CHECK_STATUS=1
