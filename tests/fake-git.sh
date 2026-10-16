@@ -70,16 +70,57 @@ lands() {
   printf '%s\n' "$1" >> "$LANDS"
 }
 
-# commit <id> [parent]
-commit() {
-  printf '%s\t%s\n' "$1" "${2:-}" >> "$PARENTS"
-}
-
-# committed <commit> <epoch>: the commit's committer time, as %ct prints it.
 TIMES=$WORK/times
 : > "$TIMES"
+
+# The clock the fake reads, as git reads the system's: NOW when the case or the
+# command under test has set it, the real time otherwise.
+fake_now() {
+  printf '%s\n' "${NOW:-$(date +%s)}"
+}
+
+# commit <id> [parent]: dated when it is made, as git dates one.
+commit() {
+  printf '%s\t%s\n' "$1" "${2:-}" >> "$PARENTS"
+  printf '%s\t%s\n' "$1" "$(fake_now)" >> "$TIMES"
+}
+
+# committed <commit> <epoch>: gives the commit that committer time instead.
 committed() {
   printf '%s\t%s\n' "$1" "$2" >> "$TIMES"
+}
+
+commit_time() {
+  awk -F"$TAB" -v c="$1" '$1 == c { t = $2 } END { print t }' "$TIMES"
+}
+
+# How long ago <epoch> was at <now>, in git's wording for %cr (show_date_relative
+# in git's date.c): each unit is rounded to the nearest before moving up to the
+# next, and between one and five years the months are kept.
+relative_date() {
+  awk -v t="$1" -v now="$2" '
+    function say(n, unit) { return n " " unit (n == 1 ? "" : "s") }
+    BEGIN {
+      if (now < t) { print "in the future"; exit }
+      d = now - t
+      if (d < 90) { print say(d, "second") " ago"; exit }
+      d = int((d + 30) / 60)
+      if (d < 90) { print say(d, "minute") " ago"; exit }
+      d = int((d + 30) / 60)
+      if (d < 36) { print say(d, "hour") " ago"; exit }
+      d = int((d + 12) / 24)
+      if (d < 14) { print say(d, "day") " ago"; exit }
+      if (d < 70) { print say(int((d + 3) / 7), "week") " ago"; exit }
+      if (d < 365) { print say(int((d + 15) / 30), "month") " ago"; exit }
+      if (d < 1825) {
+        m = int((d * 12 * 2 + 365) / (365 * 2))
+        y = int(m / 12); m = m % 12
+        if (m) print say(y, "year") ", " say(m, "month") " ago"
+        else print say(y, "year") " ago"
+        exit
+      }
+      print say(int((d + 183) / 365), "year") " ago"
+    }'
 }
 
 parent_of() {
@@ -303,17 +344,13 @@ git_says() (
       esac ;;
     "for-each-ref --format=%(refname:short) refs/heads/"|"for-each-ref --format %(refname:short) refs/heads/")
       cut -f1 "$REFS" | sed -n 's@^refs/heads/@@p' ;;
+    # The tip's time, and how long before the fake's clock that was.
     "rev-list --no-commit-header -1 --format=%cr "*)
-      printf '5 days ago\n' ;;
-    # The tip's time. Every real commit has one, so a commit the case gave no
-    # time fails rather than inventing one.
+      c=$(commit_of "$(last_word "$@")") || return 128
+      relative_date "$(commit_time "$c")" "$(fake_now)" ;;
     "rev-list --no-commit-header -1 --format=%ct "*)
       c=$(commit_of "$(last_word "$@")") || return 128
-      t=$(awk -F"$TAB" -v c="$c" '$1 == c { print $2 }' "$TIMES" | tail -1)
-      # TODO(claude): undecided: whether a commit with no time given fails, or
-      # gets a default time. Fails for now.
-      [ -n "$t" ] || fail "the case gave no committed time for $c: git $*"
-      printf '%s\n' "$t" ;;
+      commit_time "$c" ;;
     # A worktree's HEAD is the branch checked out in it.
     "-C "*" rev-list --count HEAD.."*)
       wt=$(nth_word 2 "$@")
