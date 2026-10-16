@@ -1,0 +1,52 @@
+#!/bin/sh
+# vscode-open-workspace <name> <workspace-file>
+#
+# Opens <workspace-file> in Windows VS Code unless a VS Code window whose title
+# starts with "<name> - " is already open. The workspace file sets that title.
+#
+# Running `code` on a workspace that is already open makes its window flash, and
+# the tmux focus hook calls this on every pane switch, hence the check first.
+#
+# Always exits 0: the hook's exit status is this command's, and tmux puts the
+# pane in view mode on every focus when a run-shell exits non-zero. Failures go
+# to stderr, which the hook sends to its log.
+
+NL='
+'
+
+if [ $# -ne 2 ]; then
+  echo "usage: vscode-open-workspace <name> <workspace-file>" >&2
+  exit 0
+fi
+NAME=$1
+WS_FILE=$2
+
+# Every top-level window belonging to a Code process, one title per line.
+# VS Code keeps all its windows under one main process, so a process's
+# MainWindowTitle (Get-Process, tasklist /v) shows only one of them.
+# UIAutomation is loaded rather than Add-Type C# for EnumWindows, which Windows
+# PowerShell compiles again in every new process.
+# The output has CRLF line ends; the prefix match below is unaffected.
+# The name is matched here in sh, so it never has to be quoted for PowerShell.
+# shellcheck disable=SC2016 # the $ names are PowerShell's
+LIST_TITLES='
+$ids = @((Get-Process Code -ErrorAction SilentlyContinue).Id)
+if ($ids.Count -eq 0) { exit 0 }
+Add-Type -AssemblyName UIAutomationClient
+$auto = [System.Windows.Automation.AutomationElement]
+$auto::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition) |
+  Where-Object { $ids -contains $_.Current.ProcessId } |
+  ForEach-Object { $_.Current.Name }
+'
+
+if TITLES=$(powershell.exe -NoProfile -NonInteractive -Command "$LIST_TITLES"); then
+  case "$NL$TITLES" in
+    *"$NL$NAME - "*) exit 0 ;;
+  esac
+else
+  # TODO(claude): undecided: whether a failed window check opens the workspace or skips it. Opens for now, as the macOS command does.
+  echo "vscode-open-workspace: could not list VS Code windows; opening $WS_FILE" >&2
+fi
+
+code "$WS_FILE" || echo "vscode-open-workspace: code $WS_FILE failed" >&2
+exit 0
