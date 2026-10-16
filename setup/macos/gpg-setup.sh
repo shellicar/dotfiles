@@ -7,6 +7,11 @@ LIB="$(dirname "$0")/../../home/common/lib/yubikeys.sh"
 # shellcheck source=/dev/null
 . "$LIB"
 
+# start_agent, the gpg.conf helpers and the --doctor checks.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../gpg-common.sh
+. "$(dirname "$0")/../gpg-common.sh"
+
 # --- Configuration ---
 GPG_AGENT_CONF="$HOME/.gnupg/gpg-agent.conf"
 GPG_CONF="$HOME/.gnupg/gpg.conf"
@@ -45,7 +50,8 @@ usage() {
   echo "                 As above, plus scdaemon's keep-chv-on-timeout, for a"
   echo "                 card whose sig slot has a touch policy"
   echo "  --schedule     Set up daily cron to kill gpg-agent (default 6am)"
-  echo "  --reset        Kill gpg-agent now (next sign prompts)"
+  echo "  --doctor       Check what is installed and configured, changing nothing"
+  echo "  --reset        Restart gpg-agent (next sign prompts)"
   exit 1
 }
 
@@ -219,8 +225,9 @@ remove_cron() {
 }
 
 reset_agent() {
-  echo "Killing gpg-agent..."
+  echo "Restarting gpg-agent..."
   gpgconf --kill gpg-agent
+  start_agent
   echo "Done. Next sign will prompt for passphrase."
 }
 
@@ -332,12 +339,14 @@ EOF
   echo ""
 
   # --- gpg.conf ---
-  if [ ! -f "$GPG_CONF" ] || ! grep -q "no-tty" "$GPG_CONF" 2>/dev/null; then
-    # Without a final newline the option would join the file's last line.
-    if [ -s "$GPG_CONF" ] && [ -n "$(tail -c 1 "$GPG_CONF")" ]; then
-      echo >> "$GPG_CONF"
-    fi
-    echo "no-tty" >> "$GPG_CONF"
+  # The PIN is asked for only in pinentry-mac, never in a terminal.
+  ensure_conf_line "$GPG_CONF" no-tty
+  # gpg starts its own agent whenever it needs one, unless this turns it off.
+  if has_conf_line "$GPG_CONF" no-autostart; then
+    remove_conf_line "$GPG_CONF" no-autostart
+    echo "  gpg.conf: no-autostart removed"
+  else
+    echo "  gpg.conf: autostart not turned off"
   fi
 
   # Reload agent
@@ -347,12 +356,62 @@ EOF
   echo "Done. First sign will prompt for passphrase -- save it to the '$KEYCHAIN_NAME' keychain."
 }
 
+# Installed and configured, read without changing anything and without the agent
+# or the card.
+# TODO(claude): undecided: whether --doctor judges against the on-disk or the
+# hardware mode. It checks what both modes write, and reports the cache TTL it
+# finds without judging it.
+doctor() {
+  echo "GPG signing check (macOS)"
+  echo ""
+  echo "Installed"
+  for cmd in gpg gpgconf gpg-connect-agent gpg-card pinentry-mac ykman; do
+    check_command "$cmd" "run: ./setup.sh"
+  done
+
+  echo ""
+  echo "Configured"
+  pinentry=$(command -v pinentry-mac 2>/dev/null || true)
+  if [ -z "$pinentry" ]; then
+    check_bad "no pinentry-program to check: pinentry-mac is not installed"
+  elif has_conf_line "$GPG_AGENT_CONF" "pinentry-program $pinentry"; then
+    check_ok "$GPG_AGENT_CONF uses $pinentry"
+  else
+    check_bad "$GPG_AGENT_CONF does not set pinentry-program $pinentry" "run: gpg-setup.sh --configure --hardware"
+  fi
+  ttl=$( { grep '^default-cache-ttl ' "$GPG_AGENT_CONF" 2>/dev/null || true; } | head -1 | cut -d' ' -f2)
+  if [ -n "$ttl" ]; then
+    check_ok "gpg-agent cache ${ttl}s"
+  else
+    check_bad "$GPG_AGENT_CONF sets no cache TTL" "run: gpg-setup.sh --configure --hardware"
+  fi
+  check_conf_line "$GPG_CONF" no-tty "run: gpg-setup.sh --configure --hardware"
+  if has_conf_line "$GPG_CONF" no-autostart; then
+    check_bad "$GPG_CONF has no-autostart, so gpg will not start its agent" "run: gpg-setup.sh --configure --hardware"
+  else
+    check_ok "gpg starts its own agent (no no-autostart in gpg.conf)"
+  fi
+  if [ -f "$KEYCHAIN_PATH" ] && security list-keychains -d user | grep -q "$KEYCHAIN_NAME"; then
+    check_ok "keychain $KEYCHAIN_NAME in the search list"
+  else
+    check_bad "keychain $KEYCHAIN_PATH missing or not in the search list" "run: gpg-setup.sh --configure --hardware"
+  fi
+  if [ "$(defaults read org.gpgtools.common KeychainPath 2>/dev/null || true)" = "$KEYCHAIN_PATH" ]; then
+    check_ok "pinentry-mac saves to the $KEYCHAIN_NAME keychain"
+  else
+    check_bad "org.gpgtools.common KeychainPath is not $KEYCHAIN_PATH" "run: gpg-setup.sh --configure --hardware"
+  fi
+  check_public_key "$GPG_FINGERPRINT"
+  doctor_verdict
+}
+
 # --- Main ---
 case "${1:-}" in
   --generate)   generate_key ;;
   --test-sign)  test_sign "${2:-}" ;;
   --configure)  shift; configure_agent "$@" ;;
   --schedule)   schedule_reset ;;
+  --doctor)     doctor ;;
   --reset)      reset_agent ;;
   *)            usage ;;
 esac
