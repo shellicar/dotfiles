@@ -1,15 +1,26 @@
 #!/bin/sh
 #
-# ff: find under $HOME, skipping the directories that swamp the results.
+# ff: find under the current directory, skipping the directories that swamp the
+# results. ff --help prints the usage and the options.
 #
-#   ff                    every entry under $HOME
+#   ff                    every entry under the current directory
 #   ff -name '*.ts'       the same, narrowed by any find expression
 #   ff -type d -name src  directories only
+#   ff --worktrees -name '*.ts'
+#                         the same, searching Claude Code worktrees too
+#
+# ff's options come first. They end at --, or at the first argument that is not
+# one of them; everything from there is the find expression. Any other argument
+# starting with -- before that is an error (exit 64, with the usage line on
+# stderr), so a mistyped --worktree does not reach find as an expression. After
+# the expression has started, --worktrees and --help go to find: it rejects
+# --worktrees, and GNU find answers --help with its own help.
 #
 # Two kinds of thing are pruned, which is why some are matched by -name and some
 # by -path. Library, node_modules, .git, .cache, .Trash and the four toolchain
-# caches recur at any depth, so they are matched by name wherever they turn up.
-# The last three are single fixed locations, and a bare -name TV would prune any
+# caches recur at any depth, so they are matched by name wherever they turn up,
+# and so is the photo library, by its *.photoslibrary suffix. Desktop and
+# Movies/TV are single fixed locations, and a bare -name TV would prune any
 # directory called TV anywhere in a repo, so those are matched by exact path.
 #
 # The toolchain caches are downloaded content, never authored, so a hit inside
@@ -20,6 +31,18 @@
 # in, each one puts an "Operation not permitted" line on stderr AND makes find
 # exit 1, so the command reported failure on every successful run. Pruning is
 # what makes the exit status mean something again.
+#
+# Claude Code puts its worktrees in .claude/worktrees under the directory it was
+# started in, each a full checkout of the repo, so every hit in a repo comes back
+# once per worktree. Every .claude/worktrees below the starting directory is
+# pruned, at any depth, and the home directory's own is no exception. The
+# patterns are anchored to $PWD: -name worktrees would also prune any folder of
+# a repo called worktrees, and a bare */.claude/worktrees would prune the
+# starting directory itself when ff is run from inside one. Anchored, the
+# starting directory is never pruned, so running ff from .claude/worktrees
+# searches the worktrees with no rule that detects it. -path reads *, ?, [
+# and \ in $PWD as pattern characters, so started from a path holding a bracket
+# expression such as [1], or a backslash, the worktrees are not pruned.
 #
 # The trailing -print is required, not decoration. find supplies its own -print
 # only when the expression names no action at all, and that default wraps the
@@ -38,6 +61,45 @@
 # With no arguments the group would be empty, which find rejects, so -true fills it.
 # -true is not a POSIX primary but both BSD and GNU find have it.
 
+usage_line='ff [--help] [--worktrees] [--] [find expression]'
+
+usage() {
+  cat <<EOF
+ff: find under the current directory, skipping the directories that swamp the results
+
+$usage_line
+
+--worktrees  also search Claude Code worktrees, which are skipped by default
+--           ends the options; everything after it is the find expression
+--help       prints this usage and exits
+EOF
+}
+
+worktrees=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --worktrees) worktrees=true; shift ;;
+    --help) usage; exit 0 ;;
+    --) shift; break ;;
+    --*)
+      printf 'ff: unknown option %s\n%s\n' "$1" "$usage_line" >&2
+      exit 64 ;;
+    *) break ;;
+  esac
+done
+
 [ $# -eq 0 ] && set -- -true
 
-find "$PWD" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" \) -prune -o \( "$@" \) -print
+# The positional parameters are the one list that keeps each argument whole, so
+# the end of the prune group, and the worktree entries when they apply, are put
+# in front of the expression there, and the find command is written once.
+if [ "$worktrees" = true ]; then
+  set -- \) -prune -o \( "$@"
+else
+  # Without its trailing /, a start of / gives /.claude/worktrees, which matches
+  # what find prints, rather than //.claude/worktrees, which matches nothing.
+  start=${PWD%/}
+  set -- -o -path "$start/.claude/worktrees" -o -path "$start/*/.claude/worktrees" \) -prune -o \( "$@"
+fi
+
+find "$PWD" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" "$@" \) -print
