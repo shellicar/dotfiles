@@ -1,10 +1,22 @@
 #!/bin/sh
 #
-# ff: find under $HOME, skipping the directories that swamp the results.
+# ff: find under the current directory, skipping the directories that swamp the
+# results.
 #
-#   ff                    every entry under $HOME
+#   ff [--worktrees] [--] [find expression]
+#
+#   ff                    every entry under the current directory
 #   ff -name '*.ts'       the same, narrowed by any find expression
 #   ff -type d -name src  directories only
+#   ff --worktrees -name '*.ts'
+#                         the same, searching Claude Code worktrees too
+#
+# Options come first. --worktrees stops Claude Code worktrees being pruned. --
+# ends the options, and so does the first argument that is not one; everything
+# from there is the find expression. Any other argument starting with -- before
+# that is an error (exit 64), so a mistyped --worktree does not reach find as an
+# expression. A --worktrees after the expression has started goes to find, which
+# rejects it.
 #
 # Two kinds of thing are pruned, which is why some are matched by -name and some
 # by -path. Library, node_modules, .git, .cache, .Trash and the four toolchain
@@ -20,6 +32,17 @@
 # in, each one puts an "Operation not permitted" line on stderr AND makes find
 # exit 1, so the command reported failure on every successful run. Pruning is
 # what makes the exit status mean something again.
+#
+# Claude Code puts its worktrees in .claude/worktrees under the directory it was
+# started in, each a full checkout of the repo, so every hit in a repo comes back
+# once per worktree. Every .claude/worktrees below the starting directory is
+# pruned, at any depth, and the home directory's own is no exception. The
+# patterns are anchored to $PWD: -name worktrees would also prune .git/worktrees
+# and any folder of a repo called worktrees, and a bare */.claude/worktrees would
+# prune the starting directory itself when ff is run from inside one. Anchored,
+# the starting directory is never pruned, so running ff from .claude/worktrees
+# searches the worktrees with no rule that detects it. -path reads *, ? and [ in
+# $PWD as wildcards, so a starting path holding them can match the wrong folder.
 #
 # The trailing -print is required, not decoration. find supplies its own -print
 # only when the expression names no action at all, and that default wraps the
@@ -38,6 +61,25 @@
 # With no arguments the group would be empty, which find rejects, so -true fills it.
 # -true is not a POSIX primary but both BSD and GNU find have it.
 
+worktrees=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --worktrees) worktrees=true; shift ;;
+    --) shift; break ;;
+    --*) printf 'ff: unknown option %s\n' "$1" >&2; exit 64 ;;
+    *) break ;;
+  esac
+done
+
 [ $# -eq 0 ] && set -- -true
 
-find "$PWD" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" \) -prune -o \( "$@" \) -print
+# The positional parameters are the one list that keeps each argument whole, so
+# the end of the prune group, and the worktree entries when they apply, are put
+# in front of the expression there, and the find command is written once.
+if [ "$worktrees" = true ]; then
+  set -- \) -prune -o \( "$@"
+else
+  set -- -o -path "$PWD/.claude/worktrees" -o -path "$PWD/*/.claude/worktrees" \) -prune -o \( "$@"
+fi
+
+find "$PWD" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" "$@" \) -print
