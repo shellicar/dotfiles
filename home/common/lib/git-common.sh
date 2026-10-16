@@ -1483,7 +1483,7 @@ why_it_failed() {
 # nothing said about it.
 #
 # The fifth argument is the icon the caller's plan showed for this action; every
-# line about the branch carries it, and with none given the lines have no icon.
+# result line about the action carries it, and with none given they have no icon.
 run_update() {
   local act=$1 b=$2 wt=$3 stash=${4:-no} icon=${5:-} stashed=no rf=''
   [ "$act" = rebase ] && rf=$(rebase_from "$b")

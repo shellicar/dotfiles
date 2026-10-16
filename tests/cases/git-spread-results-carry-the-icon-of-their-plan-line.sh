@@ -9,8 +9,9 @@ describe "git spread: the result lines for a worktree carry the icon its plan li
 
 # A dirty worktree behind main, with --stash: the plan says it will be
 # fast-forwarded after a stash, and the run does that and puts the work back.
-# The icon on the plan line is read from the output itself, so the case does
-# not depend on which icon git spread picks, only that it is the same one.
+# The icon on the plan line is read from the output itself, and the result line
+# is checked against that. The check on the icon's value only confirms the plan
+# line was found and is the fast-forward one.
 
 git_says() {
   case "$*" in
@@ -56,7 +57,7 @@ result=$(run_it 2>&1)
 icon=$(printf '%s\n' "$plan" | grep ' \[fix/foo\]: will ' | cut -d' ' -f1)
 assert_eq "$icon" '⏩'
 
-actual=$(printf '%s\n' "$result" | grep 'fix/foo\|↳')
+actual=$(printf '%s\n' "$result" | grep -e 'fix/foo' -e '↳')
 expected="  ✅ $icon fix/foo fast-forwarded
      ↳ working tree restored"
 assert_eq "$actual" "$expected"
