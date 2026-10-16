@@ -70,9 +70,57 @@ lands() {
   printf '%s\n' "$1" >> "$LANDS"
 }
 
-# commit <id> [parent]
+TIMES=$WORK/times
+: > "$TIMES"
+
+# The clock the fake reads, as git reads the system's: NOW when the case or the
+# command under test has set it, the real time otherwise.
+fake_now() {
+  printf '%s\n' "${NOW:-$(date +%s)}"
+}
+
+# commit <id> [parent]: dated when it is made, as git dates one.
 commit() {
   printf '%s\t%s\n' "$1" "${2:-}" >> "$PARENTS"
+  printf '%s\t%s\n' "$1" "$(fake_now)" >> "$TIMES"
+}
+
+# committed <commit> <epoch>: gives the commit that committer time instead.
+committed() {
+  printf '%s\t%s\n' "$1" "$2" >> "$TIMES"
+}
+
+commit_time() {
+  awk -F"$TAB" -v c="$1" '$1 == c { t = $2 } END { print t }' "$TIMES"
+}
+
+# How long ago <epoch> was at <now>, in git's wording for %cr (show_date_relative
+# in git's date.c): each unit is rounded to the nearest before moving up to the
+# next, and between one and five years the months are kept.
+relative_date() {
+  awk -v t="$1" -v now="$2" '
+    function say(n, unit) { return n " " unit (n == 1 ? "" : "s") }
+    BEGIN {
+      if (now < t) { print "in the future"; exit }
+      d = now - t
+      if (d < 90) { print say(d, "second") " ago"; exit }
+      d = int((d + 30) / 60)
+      if (d < 90) { print say(d, "minute") " ago"; exit }
+      d = int((d + 30) / 60)
+      if (d < 36) { print say(d, "hour") " ago"; exit }
+      d = int((d + 12) / 24)
+      if (d < 14) { print say(d, "day") " ago"; exit }
+      if (d < 70) { print say(int((d + 3) / 7), "week") " ago"; exit }
+      if (d < 365) { print say(int((d + 15) / 30), "month") " ago"; exit }
+      if (d < 1825) {
+        m = int((d * 12 * 2 + 365) / (365 * 2))
+        y = int(m / 12); m = m % 12
+        if (m) print say(y, "year") ", " say(m, "month") " ago"
+        else print say(y, "year") " ago"
+        exit
+      }
+      print say(int((d + 183) / 365), "year") " ago"
+    }'
 }
 
 parent_of() {
@@ -236,7 +284,10 @@ git_says() (
       onto=$(nth_word 4 "$@")
       cur=$(cat "$HEAD_REF")
       [ -n "$cur" ] || return 1
-      ref_set "$cur" "$(replayed "$onto" "$(ref_of "$cur")")"
+      new=$(replayed "$onto" "$(ref_of "$cur")")
+      # Dated when the rebase runs, as git dates the commits it replays.
+      printf '%s\t%s\n' "$new" "$(fake_now)" >> "$TIMES"
+      ref_set "$cur" "$new"
       return 0 ;;
     "rebase --abort")
       return 0 ;;
@@ -296,8 +347,17 @@ git_says() (
       esac ;;
     "for-each-ref --format=%(refname:short) refs/heads/"|"for-each-ref --format %(refname:short) refs/heads/")
       cut -f1 "$REFS" | sed -n 's@^refs/heads/@@p' ;;
+    # The tip's time, and how long before the fake's clock that was.
     "rev-list --no-commit-header -1 --format=%cr "*)
-      printf '5 days ago\n' ;;
+      c=$(commit_of "$(last_word "$@")") || return 128
+      t=$(commit_time "$c")
+      [ -n "$t" ] || fail "the fake made commit $c without a date: git $*"
+      relative_date "$t" "$(fake_now)" ;;
+    "rev-list --no-commit-header -1 --format=%ct "*)
+      c=$(commit_of "$(last_word "$@")") || return 128
+      t=$(commit_time "$c")
+      [ -n "$t" ] || fail "the fake made commit $c without a date: git $*"
+      printf '%s\n' "$t" ;;
     # A worktree's HEAD is the branch checked out in it.
     "-C "*" rev-list --count HEAD.."*)
       wt=$(nth_word 2 "$@")
@@ -343,8 +403,19 @@ git_says() (
       done | awk 'END { print NR }' ;;
     "rev-list --merges "*)
       return 0 ;;
+    # <a> ^<b>: commits reachable from a and not from b, the same set as b..a.
+    # Either side naming nothing fails as git does, with 128. range() cannot be
+    # left to do it: it reads an unknown excluded ref as excluding nothing.
+    "rev-list --count "*" ^"*)
+      [ $# -eq 4 ] || fail "the fake does not model: git $*"
+      case "$3" in -*) fail "the fake does not model: git $*" ;; esac
+      tip=$(commit_of "$3") || return 128
+      exclude=$(commit_of "${4#^}") || return 128
+      range "$exclude" "$tip" | awk 'END { print NR }' ;;
+    # A last word with no .. is a form the fake does not model.
     "rev-list --count "*)
       spec=$(last_word "$@")
+      case "$spec" in *..*) ;; *) fail "the fake does not model: git $*" ;; esac
       # awk, not grep -c: grep exits non-zero on no matches, and a count of
       # zero is an answer, not a failure.
       range "${spec%%..*}" "${spec##*..}" | awk 'END { print NR }' ;;
