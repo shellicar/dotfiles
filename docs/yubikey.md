@@ -420,8 +420,10 @@ that is the Windows agent.
 **`gpg-setup.sh --doctor` checks the setup without changing it.** It reads what is
 installed and configured for signing on that OS, without the agent or the card, prints
 each check as ok, PROBLEM (with the command that fixes it) or UNCHECKED (when it could
-not look), and exits 0 only when everything is right. `--test-sign` is the check that
-uses the card.
+not look), and exits 0 only when everything is right. Like `--configure`, it takes
+`--hardware` on macOS to check the card-only setup rather than the on-disk one; WSL and
+Linux accept it and have only the one setup. `--test-sign` is the check that uses the
+card.
 
 **The agent's cache and the card's own state are separate gates, and either one prompts.**
 `gpg-agent`'s `default-cache-ttl` governs only how long the agent holds the passphrase.

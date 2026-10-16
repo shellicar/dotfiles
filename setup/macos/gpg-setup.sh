@@ -50,7 +50,9 @@ usage() {
   echo "                 As above, plus scdaemon's keep-chv-on-timeout, for a"
   echo "                 card whose sig slot has a touch policy"
   echo "  --schedule     Set up daily cron to kill gpg-agent (default 6am)"
-  echo "  --doctor       Check what is installed and configured, changing nothing"
+  echo "  --doctor       Check what --configure set up, changing nothing"
+  echo "  --doctor --hardware"
+  echo "                 Check what --configure --hardware set up, changing nothing"
   echo "  --reset        Restart gpg-agent (next sign prompts)"
   exit 1
 }
@@ -370,15 +372,31 @@ EOF
 }
 
 # Installed and configured, read without changing anything and without the agent
-# or the card.
-# TODO(claude): undecided: whether --doctor judges against the on-disk or the
-# hardware mode. It checks what both modes write, and reports the cache TTL it
-# finds without judging it.
+# or the card. Checks what --configure writes, or with --hardware what
+# --configure --hardware writes.
 doctor() {
-  echo "GPG signing check (macOS)"
+  hardware=0
+  for arg in "$@"; do
+    case "$arg" in
+      --hardware) hardware=1 ;;
+      *)          echo "ERROR: unknown option: $arg" >&2; exit 64 ;;
+    esac
+  done
+
+  if [ "$hardware" -eq 1 ]; then
+    fix="run: gpg-setup.sh --configure --hardware"
+    ttl_want="$CACHE_TTL_HARDWARE"
+    echo "GPG signing check (macOS, hardware)"
+  else
+    fix="run: gpg-setup.sh --configure"
+    ttl_want="$CACHE_TTL"
+    echo "GPG signing check (macOS, on-disk keys)"
+  fi
   echo ""
   echo "Installed"
-  for cmd in gpg gpgconf gpg-connect-agent gpg-card pinentry-mac ykman; do
+  tools='gpg gpgconf gpg-connect-agent pinentry-mac'
+  [ "$hardware" -eq 0 ] || tools="$tools gpg-card ykman"
+  for cmd in $tools; do
     check_command "$cmd" "run: ./setup.sh"
   done
 
@@ -390,31 +408,39 @@ doctor() {
   elif has_conf_line "$GPG_AGENT_CONF" "pinentry-program $pinentry"; then
     check_ok "$GPG_AGENT_CONF uses $pinentry"
   else
-    check_bad "$GPG_AGENT_CONF does not set pinentry-program $pinentry" "run: gpg-setup.sh --configure --hardware"
+    check_bad "$GPG_AGENT_CONF does not set pinentry-program $pinentry" "$fix"
   fi
-  ttl=$( { grep '^default-cache-ttl ' "$GPG_AGENT_CONF" 2>/dev/null || true; } | head -1 | cut -d' ' -f2)
-  if [ -n "$ttl" ]; then
-    check_ok "gpg-agent cache ${ttl}s"
+  if has_conf_line "$GPG_AGENT_CONF" "default-cache-ttl $ttl_want" \
+      && has_conf_line "$GPG_AGENT_CONF" "max-cache-ttl $ttl_want"; then
+    check_ok "gpg-agent cache ${ttl_want}s"
   else
-    check_bad "$GPG_AGENT_CONF sets no cache TTL" "run: gpg-setup.sh --configure --hardware"
+    check_bad "$GPG_AGENT_CONF does not set the cache TTL to ${ttl_want}s" "$fix"
   fi
-  check_conf_line "$GPG_CONF" no-tty "run: gpg-setup.sh --configure --hardware"
+  check_conf_line "$GPG_CONF" no-tty "$fix"
   if has_conf_line "$GPG_CONF" no-autostart; then
-    check_bad "$GPG_CONF has no-autostart, so gpg will not start its agent" "run: gpg-setup.sh --configure --hardware"
+    check_bad "$GPG_CONF has no-autostart, so gpg will not start its agent" "$fix"
   else
     check_ok "gpg starts its own agent (no no-autostart in gpg.conf)"
   fi
   if [ -f "$KEYCHAIN_PATH" ] && security list-keychains -d user | grep -q "$KEYCHAIN_NAME"; then
     check_ok "keychain $KEYCHAIN_NAME in the search list"
   else
-    check_bad "keychain $KEYCHAIN_PATH missing or not in the search list" "run: gpg-setup.sh --configure --hardware"
+    check_bad "keychain $KEYCHAIN_PATH missing or not in the search list" "$fix"
   fi
   if [ "$(defaults read org.gpgtools.common KeychainPath 2>/dev/null || true)" = "$KEYCHAIN_PATH" ]; then
     check_ok "pinentry-mac saves to the $KEYCHAIN_NAME keychain"
   else
-    check_bad "org.gpgtools.common KeychainPath is not $KEYCHAIN_PATH" "run: gpg-setup.sh --configure --hardware"
+    check_bad "org.gpgtools.common KeychainPath is not $KEYCHAIN_PATH" "$fix"
   fi
-  check_public_key "$GPG_FINGERPRINT"
+
+  if [ "$hardware" -eq 1 ]; then
+    if crontab -l 2>/dev/null | grep -q 'gpgconf --kill gpg-agent'; then
+      check_bad "cron still kills gpg-agent daily" "$fix"
+    else
+      check_ok "no daily gpg-agent kill in cron"
+    fi
+    check_public_key "$GPG_FINGERPRINT" "$fix"
+  fi
   doctor_verdict
 }
 
@@ -424,7 +450,7 @@ case "${1:-}" in
   --test-sign)  test_sign "${2:-}" ;;
   --configure)  shift; configure_agent "$@" ;;
   --schedule)   schedule_reset ;;
-  --doctor)     doctor ;;
+  --doctor)     shift; doctor "$@" ;;
   --reset)      reset_agent ;;
   *)            usage ;;
 esac
