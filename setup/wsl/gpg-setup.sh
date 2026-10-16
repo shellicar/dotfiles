@@ -319,6 +319,8 @@ usage() {
   echo "  --configure --hardware"
   echo "                 The same thing. There is no on-disk key mode under WSL"
   echo "  --doctor       Check what is installed and configured, changing nothing"
+  echo "  --doctor --hardware"
+  echo "                 The same thing"
   echo "  --reset        Restart the Windows gpg-agent"
   echo "                 (next sign prompts for the PIN)"
   echo "  --schedule     Not applicable under WSL; explains why"
@@ -328,7 +330,7 @@ usage() {
 case "${1:-}" in
   --test-sign)  shift; test_sign "$@" ;;
   --configure)  shift; configure "$@" ;;
-  --doctor)     doctor WSL ;;
+  --doctor)     shift; doctor WSL "$@" ;;
   --reset)      reset_agent ;;
   --schedule)   schedule ;;
   *)            usage ;;

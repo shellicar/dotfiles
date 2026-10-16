@@ -96,8 +96,8 @@ gpg_bridge_service_enabled() {
   [ "$(systemctl --user is-enabled "$GPG_BRIDGE_SERVICE" 2>/dev/null || true)" = enabled ]
 }
 
-# is-system-running exits non-zero for "degraded" too, which only means a user
-# unit failed, as gpg-bridge.service does once the key has been undocked a while.
+# is-system-running exits non-zero for "degraded" too, which only means some
+# user unit has failed.
 gpg_bridge_systemd_running() {
   manager=$(systemctl --user is-system-running 2>/dev/null || true)
   case "$manager" in
@@ -214,7 +214,9 @@ gpg_bridge_install() {
   done
 
   # An active unit proves nothing: socat stays up when the Windows side is broken.
-  if gpg --card-status >/dev/null 2>&1; then
+  # --no-autostart, because no-autostart is not in gpg.conf until --configure
+  # runs, and a socket not up yet would otherwise get a keyless local agent.
+  if gpg --no-autostart --card-status >/dev/null 2>&1; then
     echo "card reachable through the bridge"
   else
     echo "$tool: bridge up but the card did not answer" >&2

@@ -202,12 +202,23 @@ linux_doctor_checks() {
   echo ""
   echo "Configured"
   check_conf_line "$GPG_CONF" no-tty "run: gpg-setup.sh --configure"
-  check_public_key "$GPG_FINGERPRINT"
+  check_public_key "$GPG_FINGERPRINT" "run: gpg-setup.sh --configure"
 }
 doctor_checks() { linux_doctor_checks; }
 
+# $1 names the OS in the heading; the rest are the command's options.
 doctor() {
-  echo "GPG signing check ($1)"
+  label="$1"
+  shift
+  for arg in "$@"; do
+    case "$arg" in
+      # Accepted so the macOS command line works here; the card is the only mode.
+      --hardware) ;;
+      *) echo "ERROR: unknown option: $arg" >&2; exit 64 ;;
+    esac
+  done
+
+  echo "GPG signing check ($label)"
   echo ""
   doctor_checks
   doctor_verdict
@@ -229,7 +240,7 @@ linux_usage() {
 case "${1:-}" in
   --test-sign)  shift; test_sign "$@" ;;
   --configure)  shift; configure "$@" ;;
-  --doctor)     doctor Linux ;;
+  --doctor)     shift; doctor Linux "$@" ;;
   --reset)      reset_agent ;;
   *)            linux_usage ;;
 esac

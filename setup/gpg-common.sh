@@ -88,18 +88,18 @@ check_conf_line() {
 }
 
 # The key is in the keyring and marked ultimately trusted. Reads the keyring
-# only; the agent and the card are not used.
+# only; the agent and the card are not used. $2 is the command that fixes it.
 check_public_key() {
   if gpg --list-keys "$1" >/dev/null 2>&1; then
     check_ok "public key $1 in the keyring"
   else
-    check_bad "public key $1 is not in the keyring" "run: gpg-setup.sh --configure, with the key in"
+    check_bad "public key $1 is not in the keyring" "$2, with the key in"
     return 0
   fi
   if gpg --export-ownertrust 2>/dev/null | grep -q "^$1:6:"; then
     check_ok "public key marked ultimately trusted"
   else
-    check_bad "public key is not marked ultimately trusted" "run: gpg-setup.sh --configure"
+    check_bad "public key is not marked ultimately trusted" "$2"
   fi
 }
 
