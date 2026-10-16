@@ -37,12 +37,13 @@
 # started in, each a full checkout of the repo, so every hit in a repo comes back
 # once per worktree. Every .claude/worktrees below the starting directory is
 # pruned, at any depth, and the home directory's own is no exception. The
-# patterns are anchored to $PWD: -name worktrees would also prune .git/worktrees
-# and any folder of a repo called worktrees, and a bare */.claude/worktrees would
-# prune the starting directory itself when ff is run from inside one. Anchored,
-# the starting directory is never pruned, so running ff from .claude/worktrees
-# searches the worktrees with no rule that detects it. -path reads *, ? and [ in
-# $PWD as wildcards, so a starting path holding them can match the wrong folder.
+# patterns are anchored to $PWD: -name worktrees would also prune any folder of
+# a repo called worktrees, and a bare */.claude/worktrees would prune the
+# starting directory itself when ff is run from inside one. Anchored, the
+# starting directory is never pruned, so running ff from .claude/worktrees
+# searches the worktrees with no rule that detects it. -path reads *, ?, [
+# and \ in $PWD as pattern characters, so started from a path holding a bracket
+# expression such as [1], or a backslash, the worktrees are not pruned.
 #
 # The trailing -print is required, not decoration. find supplies its own -print
 # only when the expression names no action at all, and that default wraps the
