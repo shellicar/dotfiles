@@ -8,10 +8,9 @@ TESTS=$(cd "$(dirname "$0")/.." && pwd)
 
 describe "the fake refuses a rev-list --count form it does not model instead of answering 0"
 
-# A form the fake cannot read once answered 0, and a test relying on that 0
-# stayed green while the code it covered was wrong. Each form here is one the
-# fake does not model: a single rev, a flag before the ^ form, and the ^ form
-# with a third rev.
+# A form the fake cannot read must fail rather than answer 0, which would read
+# as a real distance. Each form here is one the fake does not model: a single
+# rev, a flag before the ^ form, and the ^ form with a third rev.
 #
 #   main   A - M
 commit A

@@ -4,11 +4,11 @@
 # repository and in the fake, asks both the same questions, and fails on any
 # answer that differs: output and exit status both.
 #
-# It covers the forms the fake answers from its own model rather than from a
-# string a case gives it: rev-list --count <a> ^<b>, including a side that names
-# nothing; a commit's time (%ct); how long ago that was (%cr), across every unit
-# git uses and either side of each boundary between them; and the time of a
-# commit the fake's rebase makes.
+# It covers these forms only: rev-list --count <a> ^<b>, including a side that
+# names nothing; a commit's time (%ct); how long ago that was (%cr), across every
+# unit git uses and either side of each boundary between them; and the time of a
+# commit the fake's rebase makes. The fake's other forms, such as merge-base,
+# a..b counts, for-each-ref and --not, are not checked against git here.
 #
 # A form added to the fake belongs here too, or nothing checks it against git.
 set -eu
