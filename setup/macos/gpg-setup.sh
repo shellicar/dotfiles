@@ -246,9 +246,6 @@ configure_agent() {
   done
 
   if [ "$hardware" -eq 1 ]; then
-    # Checked before anything is written, so a run without a card leaves the
-    # machine as it was rather than half configured.
-    require_one_card
     CACHE_TTL="$CACHE_TTL_HARDWARE"
   fi
 
@@ -333,7 +330,6 @@ EOF
       fi
     fi
 
-    import_pubkey_from_card
     remove_cron
   fi
   echo ""
@@ -349,9 +345,26 @@ EOF
     echo "  gpg.conf: autostart not turned off"
   fi
 
-  # Reload agent
-  gpg-connect-agent reloadagent /bye 2>/dev/null || true
-  echo "  Agent reloaded."
+  # A running agent re-reads its configuration; one that is not running reads it
+  # when it starts.
+  if gpg-connect-agent --no-autostart reloadagent /bye >/dev/null 2>&1; then
+    echo "  Agent reloaded."
+  else
+    echo "  Agent not running; it reads the configuration when it starts."
+  fi
+
+  # Last, because it is the only step that can need the card. A key already in
+  # the keyring is only re-marked as trusted, without the card.
+  if [ "$hardware" -eq 1 ]; then
+    if gpg --no-options --list-keys "$GPG_FINGERPRINT" >/dev/null 2>&1; then
+      echo "  public key already present"
+      printf '%s:6:\n' "$GPG_FINGERPRINT" | gpg --no-options --quiet --import-ownertrust
+      echo "  marked ultimately trusted"
+    else
+      require_one_card
+      import_pubkey_from_card
+    fi
+  fi
   echo ""
   echo "Done. First sign will prompt for passphrase -- save it to the '$KEYCHAIN_NAME' keychain."
 }
