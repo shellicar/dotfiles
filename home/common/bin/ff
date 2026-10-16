@@ -5,7 +5,11 @@
 #
 #   ff [--worktrees] [--] [find expression]
 #
-#   ff                    every entry under the current directory
+#   --worktrees  stops Claude Code worktrees being pruned
+#   --           ends the options; everything after it is the find expression
+#   --help       prints this usage and exits
+#
+#   ff                 every entry under the current directory
 #   ff -name '*.ts'       the same, narrowed by any find expression
 #   ff -type d -name src  directories only
 #   ff --worktrees -name '*.ts'
@@ -13,15 +17,18 @@
 #
 # Options come first. --worktrees stops Claude Code worktrees being pruned. --
 # ends the options, and so does the first argument that is not one; everything
-# from there is the find expression. Any other argument starting with -- before
-# that is an error (exit 64), so a mistyped --worktree does not reach find as an
-# expression. A --worktrees after the expression has started goes to find, which
-# rejects it.
+# from there is the find expression. --help prints the usage lines above, taken
+# from this comment, so the two cannot differ. Any other argument starting with
+# -- before that is an error (exit 64, with the usage line on stderr), so a
+# mistyped --worktree does not reach find as an expression. After the
+# expression has started, --worktrees and --help go to find: it rejects
+# --worktrees, and GNU find answers --help with its own help.
 #
 # Two kinds of thing are pruned, which is why some are matched by -name and some
 # by -path. Library, node_modules, .git, .cache, .Trash and the four toolchain
-# caches recur at any depth, so they are matched by name wherever they turn up.
-# The last three are single fixed locations, and a bare -name TV would prune any
+# caches recur at any depth, so they are matched by name wherever they turn up,
+# and so is the photo library, by its *.photoslibrary suffix. Desktop and
+# Movies/TV are single fixed locations, and a bare -name TV would prune any
 # directory called TV anywhere in a repo, so those are matched by exact path.
 #
 # The toolchain caches are downloaded content, never authored, so a hit inside
@@ -66,8 +73,12 @@ worktrees=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --worktrees) worktrees=true; shift ;;
+    --help) sed -n '/^#   ff \[/,/^#   --help/p' "$0" | sed 's/^# *//'; exit 0 ;;
     --) shift; break ;;
-    --*) printf 'ff: unknown option %s\n' "$1" >&2; exit 64 ;;
+    --*)
+      printf 'ff: unknown option %s\n' "$1" >&2
+      sed -n '/^#   ff \[/p' "$0" | sed 's/^# *//' >&2
+      exit 64 ;;
     *) break ;;
   esac
 done

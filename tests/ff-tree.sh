@@ -1,3 +1,4 @@
+#!/bin/sh
 # Sourced by the ff cases, after harness.sh.
 #
 # ff only calls find, so its cases use a real directory tree rather than a fake.
