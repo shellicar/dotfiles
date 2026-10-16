@@ -125,8 +125,13 @@ import_pubkey_from_card() {
 
 # --- Commands ---
 
+# What must hold before a test signature means anything, beyond the card.
+# Nothing on Linux.
+test_sign_check() { :; }
+
 linux_test_sign() {
   require_one_card
+  test_sign_check
 
   echo "Testing sign with $GPG_FINGERPRINT..."
   if echo "banana" | gpg --no-options --local-user "$GPG_FINGERPRINT" --clearsign >/dev/null 2>&1; then

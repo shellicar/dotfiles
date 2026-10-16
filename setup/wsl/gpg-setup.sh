@@ -42,14 +42,17 @@ require_agent() {
   fi
 }
 
-test_sign() {
-  # Without no-autostart, gpg silently starts a keyless local agent instead
-  # of reaching the card through the bridge.
+# Without no-autostart, gpg silently starts a keyless local agent instead of
+# reaching the card through the bridge.
+test_sign_check() {
   if ! has_conf_line "$GPG_CONF" no-autostart; then
     echo "ERROR: gpg.conf does not have no-autostart set" >&2
     echo "  run gpg-setup.sh --configure first" >&2
     exit 1
   fi
+}
+
+test_sign() {
   if ! linux_test_sign; then
     echo "  if the key is present but signing fails, the PIN prompt appears on Windows" >&2
     exit 1
@@ -89,7 +92,11 @@ configure_windows_agent_conf() {
   echo "  config: $win_agent_conf"
 
   # Makes a running agent re-read gpg-agent.conf without stopping it. An agent
-  # that is not running reads it when it starts.
+  # that is not running reads it when it starts. Through the bridge, this
+  # connection also starts the agent when it is down.
+  # TODO(claude): undecided: whether --configure reloads the agent after changing
+  # gpg-agent.conf, which uses the agent outside the key step. It reloads for now,
+  # and only when the file changed.
   if gpg-connect-agent --no-autostart reloadagent /bye >/dev/null 2>&1; then
     echo "  Windows gpg-agent reloaded"
   else
