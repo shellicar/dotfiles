@@ -5,9 +5,8 @@
 # reason on fnm's line in linux.rc.sh.
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv bash)"
 
-# ZScaler certs (Linux)
-export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
-export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+# The system bundle. certs.sh points Node and Python requests at it.
+CA_BUNDLE_OS=/etc/ssl/certs/ca-certificates.crt
 
 # pnpm, the native one, not corepack's. PNPM_HOME holds pnpm, in PNPM_BIN, and
 # its global installs, whichever Node version is active.

@@ -19,6 +19,7 @@ case "$phase" in
   env)
     . "$DOTFILES/env.sh"
     [ -f "$DOTFILES/os/$os.env.sh" ] && . "$DOTFILES/os/$os.env.sh"
+    . "$DOTFILES/certs.sh"
     . "$DOTFILES/path.sh"
     ;;
   interactive)

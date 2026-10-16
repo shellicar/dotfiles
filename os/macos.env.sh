@@ -13,6 +13,6 @@ case ":$PATH:" in
   *) export PATH="$HOME/.cargo/bin:$PATH" ;;
 esac
 
-# ZScaler certs (macOS)
-export NODE_EXTRA_CA_CERTS="$HOMEBREW_PREFIX/etc/ca-certificates/cert.pem"
-export REQUESTS_CA_BUNDLE="$HOMEBREW_PREFIX/etc/ca-certificates/cert.pem"
+# Homebrew's bundle carries the keychain's trusted certs, Zscaler's included.
+# certs.sh points Node and Python requests at it.
+CA_BUNDLE_OS="$HOMEBREW_PREFIX/etc/ca-certificates/cert.pem"
