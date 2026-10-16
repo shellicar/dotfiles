@@ -17,6 +17,10 @@ set -eu
 # shellcheck source=../lib.sh
 . /scenario/lib.sh
 
+# set -e ends the scenario at the first command that fails, which says nothing
+# on its own.
+trap 'st=$?; [ "$st" = 0 ] || printf "FAIL the-fake-git-answers-as-git-does stopped with status %s\n" "$st" >&2' EXIT
+
 # The clock both sides read: GIT_TEST_DATE_NOW for git, NOW for the fake.
 CLOCK=1800000000
 # When the rebase runs, an hour before the clock.
@@ -44,8 +48,12 @@ i=3600; while [ "$i" -le 172800 ]; do printf '%s\n' "$i"; i=$((i + 3600)); done 
 i=1; while [ "$i" -le 400 ]; do printf '%s\n' $((i * 86400)); i=$((i + 3)); done >> "$DELTAS"
 i=400; while [ "$i" -le 2500 ]; do printf '%s\n' $((i * 86400)); i=$((i + 15)); done >> "$DELTAS"
 
+# The scenario's own names stay clear of the ones harness.sh and fake-git.sh
+# set: sourcing them inside the subshell below would replace any it shares.
+#
 #   main      A - B - C - D
-#   f              \ F1 - F2
+#   f              \ F1 - F2 - F3   3 of its own to main's 2, so a count
+#                                   read the wrong way round differs
 #   feature    \ X               rebased onto main as rebased
 #   d<n>       \ one commit per delta, dated that long before the clock
 GRAPH=$ROOT/graph
@@ -56,6 +64,7 @@ C B $((CLOCK - 700000))
 D C $((CLOCK - 600000))
 F1 B $((CLOCK - 500000))
 F2 F1 $((CLOCK - 400000))
+F3 F2 $((CLOCK - 350000))
 X A $((CLOCK - 300000))
 EOF
 n=0
@@ -64,11 +73,11 @@ while read -r d; do
   printf 'd%s A %s\n' "$n" $((CLOCK - d)) >> "$GRAPH"
 done < "$DELTAS"
 
-REFS=$ROOT/refs
+REF_LIST=$ROOT/refs
 {
-  printf 'refs/heads/main D\nrefs/heads/f F2\nrefs/heads/feature X\n'
+  printf 'refs/heads/main D\nrefs/heads/f F3\nrefs/heads/feature X\n'
   i=1; while [ "$i" -le "$n" ]; do printf 'refs/heads/d%s d%s\n' "$i" "$i"; i=$((i + 1)); done
-} > "$REFS"
+} > "$REF_LIST"
 
 QUESTIONS=$ROOT/questions
 {
@@ -124,9 +133,10 @@ while read -r name parent when; do
 done < "$GRAPH"
 while read -r ref name; do
   git update-ref "$ref" "$(cat "$IDS/$name")"
-done < "$REFS"
-git switch -q -c rebased refs/heads/feature
-GIT_COMMITTER_DATE="$REBASED_AT +0000" git rebase -q --onto main "$(cat "$IDS/A")"
+done < "$REF_LIST"
+git switch -q -c rebased refs/heads/feature || fail 'git refused: switch -q -c rebased refs/heads/feature'
+GIT_COMMITTER_DATE="$REBASED_AT +0000" git rebase -q --onto main "$(cat "$IDS/A")" ||
+  fail 'git refused: rebase -q --onto main A'
 
 real_git() { GIT_TEST_DATE_NOW=$CLOCK git "$@"; }
 ASK=real_git ask > "$ROOT/real.answers"
@@ -147,17 +157,19 @@ ASK=real_git ask > "$ROOT/real.answers"
   done < "$GRAPH"
   while read -r ref name; do
     ref_set "$ref" "$name"
-  done < "$REFS"
+  done < "$REF_LIST"
   NOW=$REBASED_AT
-  git_says switch -q -c rebased refs/heads/feature
-  git_says rebase -q --onto main A
+  git_says switch -q -c rebased refs/heads/feature ||
+    fail 'the fake refused: switch -q -c rebased refs/heads/feature'
+  git_says rebase -q --onto main A ||
+    fail 'the fake refused: rebase -q --onto main A'
   NOW=$CLOCK
   ASK=git_says ask
-) > "$ROOT/fake.answers"
+) > "$ROOT/fake.answers" || fail 'the fake could not be set up; its reason is above'
 
 total=$(wc -l < "$ROOT/real.answers")
 if ! diff "$ROOT/real.answers" "$ROOT/fake.answers" > "$ROOT/differences"; then
-  printf '  the fake (+) answered differently from git (-):\n'
+  printf '  git (<) and the fake (>) answered differently:\n'
   sed 's/^/    /' "$ROOT/differences"
   fail "the fake does not answer as git does"
 fi
