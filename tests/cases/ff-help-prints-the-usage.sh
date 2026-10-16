@@ -9,10 +9,14 @@ REPO=$(cd "$TESTS/.." && pwd)
 
 describe "ff --help prints the usage"
 
-help=$(cd "$FF_ROOT" && HOME=$WORK/home "$REPO/home/common/bin/ff" --help 2>/dev/null)
 assert_eq "$(ff_status --help)" 0
-assert_contains "$help" "ff [--worktrees] [--] [find expression]"
-assert_contains "$help" "--worktrees  stops Claude Code worktrees being pruned"
-assert_contains "$help" "--           ends the options"
-# The usage goes out before find runs, so no path from the tree is printed.
-assert_not_contains "$help" "$FF_ROOT"
+
+# The whole of stdout, so nothing from find comes after the usage.
+help=$(cd "$FF_ROOT" && HOME=$WORK/home "$REPO/home/common/bin/ff" --help 2>/dev/null)
+assert_eq "$help" "ff: find under the current directory, skipping the directories that swamp the results
+
+ff [--help] [--worktrees] [--] [find expression]
+
+--worktrees  also search Claude Code worktrees, which are skipped by default
+--           ends the options; everything after it is the find expression
+--help       prints this usage and exits"
