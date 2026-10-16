@@ -79,7 +79,10 @@ done
 if [ "$worktrees" = true ]; then
   set -- \) -prune -o \( "$@"
 else
-  set -- -o -path "$PWD/.claude/worktrees" -o -path "$PWD/*/.claude/worktrees" \) -prune -o \( "$@"
+  # Without its trailing /, a start of / gives /.claude/worktrees, which matches
+  # what find prints, rather than //.claude/worktrees, which matches nothing.
+  start=${PWD%/}
+  set -- -o -path "$start/.claude/worktrees" -o -path "$start/*/.claude/worktrees" \) -prune -o \( "$@"
 fi
 
 find "$PWD" \( -name Library -o -name node_modules -o -name .git -o -name .cache -o -name .Trash -o -name .npm -o -name .cargo -o -name .rustup -o -name .espressif -o -name '*.photoslibrary' -o -path "$HOME/Desktop" -o -path "$HOME/Movies/TV" "$@" \) -print
