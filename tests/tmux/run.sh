@@ -1,11 +1,14 @@
 #!/bin/sh
-# Runs tmux-snapshot against a real tmux, one case per fresh container.
+# Runs tmux-snapshot against a real tmux, and checks how tmux itself behaves
+# where a command depends on it, one case per fresh container.
 #
 # Separate from tests/run.sh, which fakes tmux and can only show what the
 # command decides. This shows what tmux does with it: that a restore rebuilds
-# what a save recorded, and how tmux treats the arguments the command passes
-# ('-s ""', ids as targets, names holding ':' or '.'). The container is what
-# makes it safe: every server it starts, and every one it kills, is in there.
+# what a save recorded, how tmux treats the arguments the command passes
+# ('-s ""', ids as targets, names holding ':' or '.'), and that run-shell waits
+# on whatever holds its stdin, which vscode-open-workspace relies on. The
+# container is what makes it safe: every server it starts, and every one it
+# kills, is in there.
 #
 # Needs docker. A missing docker, or an image that will not build, exits 64; it
 # never exits 0 for a run that did not happen.

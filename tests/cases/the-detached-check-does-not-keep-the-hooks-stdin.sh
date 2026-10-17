@@ -9,8 +9,9 @@ REPO=$(cd "$TESTS/.." && pwd)
 
 describe "the detached check does not keep the hook's stdin"
 
-# tmux's run-shell gives the job one socket as both stdin and stdout, and
-# counts the job finished only once nothing holds it. The hook script moves
+# tmux's run-shell gives the job a socket as stdin, and does not return while
+# anything still holds it (tests/tmux/cases/run-shell-waits-for-whatever-holds-
+# its-stdin.sh checks this against the real tmux). The hook script moves
 # stdout to its log but leaves stdin alone, so a copy that kept the hook's stdin
 # would make tmux wait for the whole check, and for anything code leaves running.
 # The setsid stand-in passes its stdin on, as util-linux's does.
