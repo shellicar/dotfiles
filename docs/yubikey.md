@@ -413,9 +413,17 @@ there is a window with only one key holding them.
 ## Operating notes
 
 **One key plugged in at a time.** `scdaemon` binds to a single card, so two present at
-once means signing requests can address the wrong one and stall. `gpgconf --kill
-gpg-agent` clears a stale binding. Under WSL use `gpg-setup.sh --reset` instead, since a
-bare kill stops the Windows agent and nothing restarts it.
+once means signing requests can address the wrong one and stall. `gpg-setup.sh --reset`
+clears a stale binding on every OS: it stops the agent and starts it again. Under WSL
+that is the Windows agent.
+
+**`gpg-setup.sh --doctor` checks the setup without changing it.** It reads what is
+installed and configured for signing on that OS, without the agent or the card, prints
+each check as ok, PROBLEM (with the command that fixes it) or UNCHECKED (when it could
+not look), and exits 0 only when everything is right. Like `--configure`, it takes
+`--hardware` on macOS to check the card-only setup rather than the on-disk one; WSL and
+Linux accept it and have only the one setup. `--test-sign` is the check that uses the
+card.
 
 **The agent's cache and the card's own state are separate gates, and either one prompts.**
 `gpg-agent`'s `default-cache-ttl` governs only how long the agent holds the passphrase.
@@ -431,8 +439,8 @@ passphrase per signature and the agent cache stops mattering entirely.
 caching at all, which is the opposite of what it reads as. 400 days stands in for
 forever, since the agent dies at logout long before it elapses.
 
-**`gpg.conf` carries `no-tty`**, which is right for signing through pinentry and blocks
-`--card-edit` outright. `--no-options` skips the config for one invocation.
+**`gpg.conf` carries `no-tty` on every OS**, so a PIN is only ever asked for in the
+configured pinentry window, never in a terminal. It also blocks `--card-edit` outright. `--no-options` skips the config for one invocation.
 
 **Resets are per application.** `ykman openpgp reset --force` and `ykman fido reset
 --force` are separate, and there is no command that resets the whole key. The `card-edit`
@@ -455,13 +463,53 @@ the handshake. Its data reaches Linux over stdio through WSL interop rather than
 and `socat` supplies the real AF_UNIX socket gpg opens. `gpg-bridge` in `home/wsl/bin`
 runs that pair; `gpg-bridge.service` keeps it up.
 
-**Setting up a WSL machine**, with the key in the dock and the Windows gpg-agent running:
+**Setting up a WSL machine** needs GnuPG for Windows installed at `C:\Program Files\GnuPG`
+and the key in the dock:
 
-1. `./setup.sh` runs `gpg-bridge-install --apply`. Running it again by hand is harmless:
-   it reports what is already in place.
-2. `gpg-setup.sh --configure` imports the public key from the card.
-3. If the card's certificate slot is empty, export the public key on Windows and import it
-   here instead, with the commands `gpg-bridge-install --apply` prints.
+1. `./setup.sh` installs: it runs `gpg-bridge-install --apply`, which puts the relay in
+   place, masks the packaged agent sockets and enables `gpg-bridge.service`. Running it
+   again by hand is harmless: it reports what is already in place.
+2. `gpg-setup.sh --configure` configures both sides: `no-tty` and `no-autostart` in
+   `gpg.conf`, the Windows agent's cache in `%APPDATA%\gnupg\gpg-agent.conf`, the Windows
+   startup entry, and the public key, read from the card. The key is the only step that
+   needs the card, and is skipped when the key is already in the keyring. A step that
+   cannot be done says what blocked it, and running it again finishes the rest.
+3. `gpg-setup.sh --doctor` should then report everything right.
+
+If the card's certificate slot is empty, export the public key on Windows and import it
+here instead:
+
+```sh
+# On Windows
+gpg --export --armor B92C14F32704628ADC98CA92A9B6327CEDF47732 > C:\pub.asc
+# Here
+gpg --import "$(wslpath -u 'C:\pub.asc')"
+printf '%s:6:\n' B92C14F32704628ADC98CA92A9B6327CEDF47732 | gpg --import-ownertrust
+```
+
+**Starting the Windows agent is defined once**, in `home/wsl/lib/gpg-bridge.sh`:
+
+```
+conhost.exe --headless "C:\Program Files\GnuPG\bin\gpgconf.exe" --launch gpg-agent
+```
+
+`--launch` starts the agent and does nothing when it is already running, and
+`conhost.exe --headless` runs it without opening a console window. Two things use it, so
+nothing has to be started by hand after a restart:
+
+- **At logon**, the startup entry `gpg-agent` under
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which `--configure` writes.
+- **On every connection**, `gpg-bridge` runs it before relaying, the way gpg starts its
+  own agent on macOS and Linux. The Windows socket file outlives a stopped agent, so its
+  presence says nothing about whether the agent is up.
+
+`--reset` uses it too, after stopping the agent. On macOS and Linux the same definition
+is `gpgconf --launch gpg-agent`, in `setup/gpg-common.sh`.
+
+**The scripts are split by what they apply to.** `setup/gpg-common.sh` is shared by every
+OS. `setup/linux/gpg-setup.sh` holds the standard Linux parts that WSL uses, and is not a
+complete Linux setup. `setup/wsl/gpg-setup.sh` sources it and adds only what is WSL
+specific.
 
 **Undoing it** hands the socket back to the packaged agent and removes what setup put on
 the Windows side:
@@ -471,6 +519,7 @@ systemctl --user disable --now gpg-bridge.service
 systemctl --user unmask gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket
 systemctl --user enable --now gpg-agent.socket gpg-agent-extra.socket gpg-agent-ssh.socket gpg-agent-browser.socket
 sed -i '/^no-autostart$/d' ~/.gnupg/gpg.conf
+reg.exe delete 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' /v gpg-agent /f
 rm "$(wslpath -u "$(wslvar APPDATA)")/gnupg/gpg-agent.conf"
 rm "$(wslpath -u "$(wslvar USERPROFILE)")/bin/npiperelay.exe"
 ```
@@ -498,11 +547,10 @@ bridge reads as a stopped bridge. `dirmngr` and `keyboxd` stay local: they're th
 and public keyring services, still legitimately local.
 
 **`gpgconf --kill gpg-agent` run from WSL kills the Windows agent too**, since the socket
-it addresses is served by the Windows process, not a separate local one. Nothing restarts
-the Windows agent afterwards, so signing from WSL stops until it is started again on
-Windows. That is why `gpg-setup.sh --configure` reloads it with `gpg-connect-agent
-reloadagent`, which re-reads `gpg-agent.conf` without stopping it, and `--reset` kills it
-and starts it again with the Windows `gpgconf.exe --launch gpg-agent`.
+it addresses is served by the Windows process, not a separate local one. The bridge starts
+it again on the next connection. `gpg-setup.sh --configure` reloads it with
+`gpg-connect-agent reloadagent` instead, which re-reads `gpg-agent.conf` without stopping
+it.
 
 **Only the agent is shared; the keyring stays local.** Pointing `GNUPGHOME` at the Windows
 home instead looks tidier and is a trap: `pubring.kbx` and `trustdb.gpg` are lock
