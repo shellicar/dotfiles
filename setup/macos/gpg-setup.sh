@@ -422,6 +422,9 @@ doctor() {
   else
     check_ok "gpg starts its own agent (no no-autostart in gpg.conf)"
   fi
+  # The keychain's lock timeout is not checked: reading it with
+  # `security show-keychain-info` asks for the keychain password in a terminal,
+  # and fails over SSH with "User interaction is not allowed".
   if [ -f "$KEYCHAIN_PATH" ] && security list-keychains -d user | grep -q "$KEYCHAIN_NAME"; then
     check_ok "keychain $KEYCHAIN_NAME in the search list"
   else
