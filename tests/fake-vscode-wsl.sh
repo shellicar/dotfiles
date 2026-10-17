@@ -22,7 +22,8 @@
 # $CHECK_LOG each time it runs, so a case asserts on what ran.
 #
 # setsid stands in for util-linux's: with -f it starts the program and returns
-# at once; without it the program runs in its place, so the caller waits for it.
+# at once, passing its stdin on; without it the program runs in its place, so
+# the caller waits for it.
 # It writes its arguments to $SETSID_LOG.
 
 command -v flock > /dev/null 2>&1 || fail "flock is not installed, which this case and the command need"
@@ -81,7 +82,10 @@ cat > "$STANDINS/setsid" <<'SHIM'
 printf '%s\n' "$*" >> "$SETSID_LOG"
 if [ "$1" = -f ]; then
   shift
-  "$@" &
+  # A bare & would give the program /dev/null as stdin, as a non-interactive sh
+  # does; util-linux's setsid -f passes its own stdin on.
+  exec 3<&0
+  "$@" <&3 3<&- &
   exit 0
 fi
 exec "$@"

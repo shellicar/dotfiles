@@ -30,6 +30,8 @@ NAME=$1
 WS_FILE=$2
 
 # The first call: start the copy and return. The variable marks the copy.
+# stdin is run-shell's socket, which tmux waits on until nothing holds it, so
+# the copy gets /dev/null instead.
 if [ -z "${VSCODE_OPEN_WORKSPACE_DETACHED:-}" ]; then
   VSCODE_OPEN_WORKSPACE_DETACHED=1 setsid -f "$0" "$NAME" "$WS_FILE" < /dev/null >> "$LOG" 2>&1 ||
     echo "vscode-open-workspace: could not start the detached check" >&2
