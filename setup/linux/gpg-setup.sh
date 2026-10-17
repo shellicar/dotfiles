@@ -231,6 +231,8 @@ linux_usage() {
   echo "  --test-sign    Test signing with the key on the card"
   echo "  --configure    Configure this machine to sign with the card"
   echo "  --doctor       Check what is installed and configured, changing nothing"
+  echo "  --doctor --hardware"
+  echo "                 The same thing"
   echo "  --reset        Restart gpg-agent (next sign prompts for the PIN)"
   exit 1
 }
