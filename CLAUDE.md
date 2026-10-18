@@ -170,8 +170,11 @@ not written down here: it moves with every line added and the classes do not.
 It exits 64 when it cannot lint at all —
 never 0 for "did not actually run". Targets are
 found with `file`, not by extension, because most scripts here are commands on
-`PATH` with no extension. Nothing in `setup/` installs shellcheck, so it falls
-back to the `koalaman/shellcheck` container when the binary is absent.
+`PATH` with no extension. shellcheck comes from Homebrew on every OS, through
+the shared `setup/Brewfile`, and without it `./test.sh` exits 64. Homebrew
+installs the latest release, so two machines can run different versions;
+`./test.sh` prints the one it ran with, so a finding seen on one machine and
+not another can be traced to it.
 
 The scripts are POSIX `sh`, and the environments span BSD and GNU coreutils, so a
 GNU-only flag to `sed` or `date` passes on Linux and fails on the Mac.
