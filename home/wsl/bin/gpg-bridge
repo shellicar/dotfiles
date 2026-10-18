@@ -3,6 +3,10 @@
 # gpg-bridge: serve this distro's gpg-agent socket from the Windows gpg-agent
 # that holds the YubiKey. Run by gpg-bridge.service.
 #
+#   gpg-bridge             listen on the agent socket
+#   gpg-bridge --connect   one connection: start the Windows agent if it is
+#                          down, then relay. socat runs this per connection.
+#
 # The Windows agent listens on Windows' 127.0.0.1, which WSL cannot reach, so
 # npiperelay.exe runs on the Windows side, does the Assuan nonce handshake (-a),
 # and carries the data to socat over stdio. See docs/yubikey.md.
@@ -11,8 +15,25 @@
 
 set -eu
 
+DIR=$(cd "$(dirname "$0")" && pwd)
+
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/gpg-bridge.sh
+. "$DIR/../lib/gpg-bridge.sh"
+
+# stdout is the client's connection, so nothing but the relay writes to it.
+# The Windows socket file outlives a stopped agent, so its presence says
+# nothing; starting the agent is a no-op when it is already up.
+# TODO(claude): undecided: whether the agent is started on every connection, or
+# only when the relay fails to connect. Every connection for now, which adds a
+# Windows process launch to each one.
+if [ "${1:-}" = --connect ]; then
+  gpg_bridge_start_agent >&2 || echo "gpg-bridge: could not start the Windows gpg-agent" >&2
+  exec "$RELAY_EXE" -ei -ep -a "$RELAY_SOCKET"
+fi
+
 # wslvar costs about 200ms, so it runs once at start, not per connection.
-RELAY_EXE="${GPG_BRIDGE_RELAY:-$(wslpath -u "$(wslvar USERPROFILE)")/bin/npiperelay.exe}"
+RELAY_EXE="${GPG_BRIDGE_RELAY:-$(gpg_bridge_relay_path || true)}"
 
 if [ ! -x "$RELAY_EXE" ]; then
   echo "gpg-bridge: relay not found or not executable: $RELAY_EXE" >&2
@@ -21,20 +42,17 @@ if [ ! -x "$RELAY_EXE" ]; then
 fi
 
 # npiperelay wants forward slashes.
-# shellcheck disable=SC1003  # '\\' is one backslash for tr, not an escaped quote
-win_local=$(wslvar LOCALAPPDATA | tr '\\' '/')
-RELAY_SOCKET="${win_local}/gnupg/S.gpg-agent"
-
-# On Windows the socket is a regular file holding a port and nonce, so -S would fail.
-socket_file=$(wslpath -u "$RELAY_SOCKET")
-if [ ! -e "$socket_file" ]; then
-  echo "gpg-bridge: Windows agent socket not found: $socket_file" >&2
+if ! win_local=$(gpg_bridge_win_var LOCALAPPDATA); then
+  echo "gpg-bridge: could not read LOCALAPPDATA from Windows" >&2
   exit 1
 fi
+# shellcheck disable=SC1003  # '\\' is one backslash for tr, not an escaped quote
+RELAY_SOCKET="$(printf '%s' "$win_local" | tr '\\' '/')/gnupg/S.gpg-agent"
 
 # socat splits an EXEC command on spaces even inside quotes, so the paths reach
-# the relay through the environment of a SYSTEM shell.
-export RELAY_EXE RELAY_SOCKET
+# each connection through the environment of a SYSTEM shell.
+GPG_BRIDGE_SELF="$DIR/$(basename "$0")"
+export RELAY_EXE RELAY_SOCKET GPG_BRIDGE_SELF
 
 # gpg refuses to use a socket directory it did not create with the right mode.
 gpgconf --create-socketdir >/dev/null 2>&1 || true
@@ -44,4 +62,4 @@ socket=$(gpgconf --list-dirs agent-socket)
 # unlink-early clears a socket left by an unclean exit.
 # shellcheck disable=SC2016  # expanded by socat's shell, not this one
 exec socat "UNIX-LISTEN:${socket},fork,unlink-early" \
-  'SYSTEM:exec "$RELAY_EXE" -ei -ep -a "$RELAY_SOCKET",nofork'
+  'SYSTEM:exec "$GPG_BRIDGE_SELF" --connect,nofork'
