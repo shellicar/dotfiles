@@ -91,16 +91,18 @@ fake_listing() { # tmux's arguments
 }
 
 fake_listing_raw() {
-  local fmt id name idx wname layout pidx path cmd pid
+  local all fmt id name idx wname layout pidx path cmd pid
   [ "$1" = -L ] && shift 2
   case $1 in list-sessions | list-windows | list-panes) ;; *) return 2 ;; esac
   if [ -z "$FAKE_SESSIONS" ]; then
     echo "no server running on /tmp/tmux-1000/fake" >&2
     return 1
   fi
+  # The arguments are joined into all before the prefix is stripped: bash
+  # applies ${*#prefix} to each argument on its own, and dash to the joined one.
   case "$*" in
     "list-sessions -F "*)
-      fmt=${*#list-sessions -F }
+      all=$*; fmt=${all#list-sessions -F }
       while IFS=$FUS read -r id name; do
         [ -n "$id" ] || continue
         fake_render "$fmt" session_id "$id" session_name "$name"
@@ -109,7 +111,7 @@ $FAKE_SESSIONS
 EOF
       ;;
     "list-windows -a -F "*)
-      fmt=${*#list-windows -a -F }
+      all=$*; fmt=${all#list-windows -a -F }
       while IFS=$FUS read -r id idx; do
         [ -n "$id" ] || continue
         fake_render "$fmt" session_id "$id" session_name "$(fake_session_name "$id")" window_index "$idx"
@@ -118,7 +120,7 @@ $FAKE_WINDOWS
 EOF
       ;;
     "list-panes -a -F "*)
-      fmt=${*#list-panes -a -F }
+      all=$*; fmt=${all#list-panes -a -F }
       while IFS=$FUS read -r id idx wname layout pidx path cmd pid; do
         [ -n "$id" ] || continue
         fake_render "$fmt" session_name "$(fake_session_name "$id")" window_index "$idx" \
