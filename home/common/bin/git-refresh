@@ -260,8 +260,6 @@ EOF
   # underneath, so --no-show-signature keeps log.showSignature from running gpg
   # on every entry and printing its lines among them. Only asked where derive
   # reads it, an empty Claude Code subagent branch.
-  # TODO(claude): undecided: whether the reflog is read for every branch or only
-  # for the ones derive uses it on. Only those for now.
   #
   # Three outcomes, kept apart: the seconds, when the oldest line reads
   # name@{seconds}; none, when the read succeeded and printed nothing, which is
