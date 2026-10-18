@@ -310,7 +310,7 @@ A target's two halves are tied. An update starts wherever its own removal starts
 command never proposes maintaining a branch it is proposing to delete, and taking the
 removal masks the update entirely.
 
-One exception, intended to be temporary: an empty branch named `worktree-agent-*`,
+One exception: an empty branch named `worktree-agent-*`,
 which Claude Code makes for a subagent, starts with its removal ticked once the branch
 was created 7 or more days ago and its worktree holds no ignored files. The creation
 time is the oldest entry in the branch's reflog, not its tip's commit date. A branch
