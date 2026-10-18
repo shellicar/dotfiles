@@ -70,6 +70,29 @@ lands() {
   printf '%s\n' "$1" >> "$LANDS"
 }
 
+# branch_created <ref> <epoch>: the time of the oldest entry in the branch's
+# reflog. A branch given none has no reflog.
+CREATED=$WORK/created
+: > "$CREATED"
+branch_created() {
+  printf '%s\t%s\n' "$1" "$2" >> "$CREATED"
+}
+
+# reflog_says <ref> <exit status> <output>: what reading the branch's reflog
+# prints and exits with, in place of the answer branch_created gives. For a
+# reflog git cannot read, or prints in a form the command does not expect.
+REFLOG_SAYS=$WORK/reflog-says
+: > "$REFLOG_SAYS"
+reflog_says() {
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$REFLOG_SAYS"
+}
+
+# What git config --get core.logAllRefUpdates answers, empty for unset, and
+# what rev-parse --is-bare-repository answers. git init writes true into a
+# repository with a working tree, so that is what one answers untouched.
+FAKE_LOG_REF_UPDATES=true
+FAKE_BARE=false
+
 TIMES=$WORK/times
 : > "$TIMES"
 
@@ -347,6 +370,27 @@ git_says() (
       esac ;;
     "for-each-ref --format=%(refname:short) refs/heads/"|"for-each-ref --format %(refname:short) refs/heads/")
       cut -f1 "$REFS" | sed -n 's@^refs/heads/@@p' ;;
+    # The oldest entry only, printed as git prints a selector under
+    # --date=unix: the short name, then the entry's time. A branch with no
+    # reflog prints nothing and succeeds; a branch that does not exist fails,
+    # as git does for each.
+    "reflog --no-show-signature --date=unix --format=%gd refs/heads/"*)
+      ref=$(last_word "$@")
+      said=$(awk -F"$TAB" -v r="$ref" '$1 == r { print $2 "\t" $3; exit }' "$REFLOG_SAYS")
+      if [ -n "$said" ]; then
+        printf '%s\n' "${said#*"$TAB"}"
+        return "${said%%"$TAB"*}"
+      fi
+      awk -F"$TAB" -v r="$ref" '$1 == r { found = 1 } END { exit !found }' "$REFS" || return 128
+      at=$(awk -F"$TAB" -v r="$ref" '$1 == r { print $2; exit }' "$CREATED")
+      [ -n "$at" ] || return 0
+      printf '%s@{%s}\n' "${ref#refs/heads/}" "$at" ;;
+    # FAKE_LOG_REF_UPDATES is the setting's value, empty for unset.
+    "config --get core.logAllRefUpdates")
+      [ -n "$FAKE_LOG_REF_UPDATES" ] || return 1
+      printf '%s\n' "$FAKE_LOG_REF_UPDATES" ;;
+    "rev-parse --is-bare-repository")
+      printf '%s\n' "$FAKE_BARE" ;;
     # The tip's time, and how long before the fake's clock that was.
     "rev-list --no-commit-header -1 --format=%cr "*)
       c=$(commit_of "$(last_word "$@")") || return 128

@@ -310,6 +310,17 @@ A target's two halves are tied. An update starts wherever its own removal starts
 command never proposes maintaining a branch it is proposing to delete, and taking the
 removal masks the update entirely.
 
+One exception: an empty branch named `worktree-agent-*`,
+which Claude Code makes for a subagent, starts with its removal ticked once the branch
+was created 7 or more days ago and its worktree holds no ignored files. The creation
+time is the oldest entry in the branch's reflog, not its tip's commit date. A branch
+with no reflog counts as old where git logs ref updates (`core.logAllRefUpdates` on,
+which is also what unset means outside a bare repository), because its reflog has
+then expired, and as of unknown age, so unticked, where git does not. A reflog that
+cannot be read, or prints something other than a date, is of unknown age too. Only the
+removal starts ticked; the update still starts where the empty class starts it, off, so
+unticking the removal does not tick the update.
+
 `--plan` prints the same list and stops, which is also what happens with no terminal.
 `--base`, `--branch`, `--depth`, `--old`, `--no-fetch` and `-v` behave as they do in
 `git cleanup`.

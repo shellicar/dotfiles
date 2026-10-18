@@ -6,8 +6,12 @@
 #
 # It covers these forms only: rev-list --count <a> ^<b>, including a side that
 # names nothing; a commit's time (%ct); how long ago that was (%cr), across every
-# unit git uses and either side of each boundary between them; and the time of a
-# commit the fake's rebase makes. The fake's other forms, such as merge-base,
+# unit git uses and either side of each boundary between them; the time of a
+# commit the fake's rebase makes; a branch's reflog, for a branch with one
+# entry, with none, and with no branch at all; and core.logAllRefUpdates and
+# --is-bare-repository as an untouched repository answers them. The fake prints
+# only a reflog's oldest entry, so a branch with several is not asked about.
+# The fake's other forms, such as merge-base,
 # a..b counts, for-each-ref and --not, are not checked against git here.
 #
 # A form added to the fake belongs here too, or nothing checks it against git.
@@ -25,6 +29,8 @@ trap 'st=$?; [ "$st" = 0 ] || printf "FAIL the-fake-git-answers-as-git-does stop
 CLOCK=1800000000
 # When the rebase runs, an hour before the clock.
 REBASED_AT=1799996400
+# When the branch logged is created, a day before the clock.
+LOGGED_AT=1799913600
 
 mkdir -p "$ROOT"
 IDS=$ROOT/ids
@@ -89,7 +95,12 @@ QUESTIONS=$ROOT/questions
     'rev-list --count nosuch ^f' \
     'rev-list --no-commit-header -1 --format=%ct f' \
     'rev-list --no-commit-header -1 --format=%ct rebased' \
-    'rev-list --no-commit-header -1 --format=%cr rebased'
+    'rev-list --no-commit-header -1 --format=%cr rebased' \
+    'reflog --no-show-signature --date=unix --format=%gd refs/heads/logged' \
+    'reflog --no-show-signature --date=unix --format=%gd refs/heads/nolog' \
+    'reflog --no-show-signature --date=unix --format=%gd refs/heads/nosuch' \
+    'config --get core.logAllRefUpdates' \
+    'rev-parse --is-bare-repository'
   i=1
   while [ "$i" -le "$n" ]; do
     printf 'rev-list --no-commit-header -1 --format=%%ct d%s\n' "$i"
@@ -138,6 +149,10 @@ git switch -q -c rebased refs/heads/feature || fail 'git refused: switch -q -c r
 GIT_COMMITTER_DATE="$REBASED_AT +0000" git rebase -q --onto main "$(cat "$IDS/A")" ||
   fail 'git refused: rebase -q --onto main A'
 
+# logged has one reflog entry, made at LOGGED_AT; nolog has none.
+GIT_COMMITTER_DATE="$LOGGED_AT +0000" git update-ref refs/heads/logged "$(cat "$IDS/D")"
+git -c core.logAllRefUpdates=false update-ref refs/heads/nolog "$(cat "$IDS/D")"
+
 real_git() { GIT_TEST_DATE_NOW=$CLOCK git "$@"; }
 ASK=real_git ask > "$ROOT/real.answers"
 
@@ -163,6 +178,9 @@ ASK=real_git ask > "$ROOT/real.answers"
     fail 'the fake refused: switch -q -c rebased refs/heads/feature'
   git_says rebase -q --onto main A ||
     fail 'the fake refused: rebase -q --onto main A'
+  ref_set refs/heads/logged D
+  branch_created refs/heads/logged "$LOGGED_AT"
+  ref_set refs/heads/nolog D
   NOW=$CLOCK
   ASK=git_says ask
 ) > "$ROOT/fake.answers" || fail 'the fake could not be set up; its reason is above'

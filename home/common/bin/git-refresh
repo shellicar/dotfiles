@@ -55,6 +55,11 @@ EVALUATE_OLD=false
 ONLY_BRANCHES=''
 WALK_DEPTH=50
 MAX_DISTANCE=100; MAX_AGE_DAYS=30
+# How long after it was created an empty Claude Code subagent branch has to be
+# before its removal starts ticked. A finished subagent can be resumed while its
+# session lives, and its worktree is its working folder, so a recent one may
+# still be wanted.
+AGENT_IDLE_DAYS=7
 ADO_RESOURCE=499b84ac-1321-427f-aa17-267ca6975798
 
 # Constants, not state: they belong outside the phases so sourcing this file
@@ -157,9 +162,21 @@ fi
 # holding a detached commit are listed here and filtered there.
 step 'reading branches and worktrees ...'
 
+# Whether git writes a reflog for a branch here, which is what a missing
+# creation date means: the reflog expired, or there never was one. Read once,
+# on the assumption that the setting has always been what it is now. git init
+# writes true into a repository with a working tree; unset means on except in a
+# bare repository.
+case $(git config --get core.logAllRefUpdates 2>/dev/null) in
+  true|yes|on|1|always) LOGS_REF_UPDATES=yes ;;
+  '') LOGS_REF_UPDATES=yes
+      [ "$(git rev-parse --is-bare-repository 2>/dev/null)" = true ] && LOGS_REF_UPDATES=no ;;
+  *) LOGS_REF_UPDATES=no ;;
+esac
+
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
 # its detail, ignored, meta, unpushed, stash, other authors, merged pull
-# request, commits the rebase replays, merge edits the rebase drops
+# request, commits the rebase replays, merge edits the rebase drops, created
 BFACTS=''
 # name, worktree, head, in main, merged PR, open PR, closed PR, block, refs,
 # ignored, meta
@@ -235,7 +252,37 @@ EOF
       fi
     fi
   fi
-  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$TAB$owner$TAB$pr$TAB$replays$TAB$drops$NL"
+
+  # When the branch was created, as epoch seconds, read from the reflog's oldest
+  # entry. Not the tip's date: an empty branch's tip is a commit of main, which
+  # can be far older than the branch. %gd with --date=unix prints the entry's
+  # own time as name@{seconds}; %ct would print the commit's. reflog is git log
+  # underneath, so --no-show-signature keeps log.showSignature from running gpg
+  # on every entry and printing its lines among them. Only asked where derive
+  # reads it, an empty Claude Code subagent branch.
+  #
+  # Three outcomes, kept apart: the seconds, when the oldest line reads
+  # name@{seconds}; none, when the read succeeded and printed nothing, which is
+  # a branch with no reflog; and -, unknown, when the read failed or printed
+  # something else.
+  created=-
+  case "$class:$b" in
+    empty:worktree-agent-*)
+      if entries=$(git reflog --no-show-signature --date=unix --format=%gd "refs/heads/$b" 2>/dev/null); then
+        if [ -z "$entries" ]; then
+          created=none
+        else
+          oldest=$(printf '%s\n' "$entries" | tail -1)
+          case "$oldest" in
+            *@\{*\})
+              created=${oldest##*@\{}; created=${created%\}}
+              case "$created" in ''|*[!0-9]*) created=- ;; esac ;;
+          esac
+        fi
+      fi
+      ;;
+  esac
+  BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$TAB$owner$TAB$pr$TAB$replays$TAB$drops$TAB$created$NL"
 done
 
 # With --branch the run is about the branches you named, so a worktree with no
@@ -332,11 +379,11 @@ derive() {
   NOTED=''
   DOOMED=' '
 
-  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash owner pr replays drops; do
+  while IFS="$TAB" read -r name wt class ahead n why behind block uact udetail ign meta unpushed stash owner pr replays drops created; do
     [ -z "$name" ] && continue
     [ "$wt" = - ] && wt=''
-    # A record that stops short of the last three fields has none of them.
-    pr=${pr:-no}; replays=${replays:--}; drops=${drops:--}
+    # A record that stops short of the last four fields has none of them.
+    pr=${pr:-no}; replays=${replays:--}; drops=${drops:--}; created=${created:--}
 
     # The trunk is here for its update and nothing else. Left to the verdict it
     # reads as "empty", being an ancestor of itself with nothing ahead, and would
@@ -348,7 +395,8 @@ derive() {
     # empty is unticked here, the way git cleanup holds it behind --empty. The
     # default is what decides, because pressing r on arrival is the ordinary way
     # to run this: a class the other command makes you ask for cannot be ticked
-    # already in this one.
+    # already in this one. There is one exception, below, for old Claude Code
+    # subagent branches.
     [ "$name" = "$MAIN" ] || case "$class" in
       merged)  removal="remove $name"; def=on ;;
       empty)   removal="remove $name"; def=off ;;
@@ -358,6 +406,36 @@ derive() {
     # one the branch is offered its rebase below instead, and kept.
     [ "$name" != "$MAIN" ] && [ "$class" = review ] && [ "$pr" = yes ] &&
       { removal="rescue $n off $name, then remove it"; def=off; }
+    # The exception. An empty branch named
+    # worktree-agent-*, which only Claude Code makes, for a subagent, starts
+    # ticked once it was created AGENT_IDLE_DAYS or more ago and its worktree, if
+    # it has one, holds no ignored files for the removal to take silently. A
+    # branch with no reflog counts as old where git logs ref updates, since the
+    # reflog has then expired (git gc drops entries after 90 days by default),
+    # and as unknown, so not old, where it does not. A reflog that could not be
+    # read or did not parse is unknown too. A dirty or locked worktree is still
+    # blocked below, whatever this decides.
+    #
+    # Only the removal's default changes. def is still the class's default and
+    # the update below still reads it, so unticking this removal does not tick
+    # the update that comes back in its place.
+    rdef=$def
+    rwhy=$why
+    agent=no
+    case "$name" in worktree-agent-*) agent=yes ;; esac
+    old=no
+    age="created ${AGENT_IDLE_DAYS}+ days ago"
+    case "$created" in
+      none)
+        [ "${LOGS_REF_UPDATES:-no}" = yes ] && { old=yes; age='with an expired reflog'; } ;;
+      ''|*[!0-9]*) ;;
+      *) [ $((NOW - created)) -ge $((AGENT_IDLE_DAYS * 86400)) ] && old=yes ;;
+    esac
+    if [ "$class" = empty ] && [ "$name" != "$MAIN" ] && [ "$agent" = yes ] &&
+       [ "$ign" = - ] && [ "$old" = yes ]; then
+      rdef=on
+      rwhy="$why, agent branch $age"
+    fi
     # What the class offers, kept because the update's default follows it even
     # when the removal cannot run.
     offered=$removal
@@ -372,10 +450,10 @@ derive() {
         block_op "${name}R"
         emit "${name}R" skip "$k" "$removal" "$wt" "$why, $block" "$ign" "$n" "$class" "$meta"
       else
-        note_default "${name}R" "$def"
+        note_default "${name}R" "$rdef"
         st=off; has "${name}R" "$SELECTED" && st=on
         [ "$st" = on ] && doom_branch "$name"
-        emit "${name}R" "$st" "$k" "$removal" "$wt" "$why" "$ign" "$n" "$class" "$meta"
+        emit "${name}R" "$st" "$k" "$removal" "$wt" "$rwhy" "$ign" "$n" "$class" "$meta"
       fi
     fi
 
@@ -429,9 +507,10 @@ derive() {
       block_op "${name}U"
       emit "${name}U" skip "$uact" "$act" "$wt" "skipped, the removal above takes it" - - "$ucls" "$meta" "$stash"
     else
-      # The update starts where the removal starts. A branch the command is
-      # offering to delete is not one it also proposes to maintain, whether or
-      # not you take the removal.
+      # The update starts where the class starts the removal. A branch the
+      # command is offering to delete is not one it also proposes to maintain,
+      # whether or not you take the removal. That is def, not rdef: an agent
+      # branch whose removal starts ticked still gets an update that starts off.
       #
       # And an update that has to move your uncommitted work out of the way
       # starts off whatever else is true, which is git spread's default.
