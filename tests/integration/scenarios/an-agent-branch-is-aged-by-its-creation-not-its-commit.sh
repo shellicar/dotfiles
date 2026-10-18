@@ -49,13 +49,13 @@ removal_row() {
 
 row=$(removal_row worktree-agent-old)
 case "$row" in
-  '[x]'*'agent worktree created 7+ days ago'*) printf '  ok   worktree-agent-old starts ticked, aged 7+ days\n' ;;
+  '[x]'*'agent branch created 7+ days ago'*) printf '  ok   worktree-agent-old starts ticked, aged 7+ days\n' ;;
   *) fail "worktree-agent-old: expected its removal ticked and aged 7+ days, got [$row]" ;;
 esac
 
 row=$(removal_row worktree-agent-new)
 case "$row" in
-  '[ ]'*'agent worktree created'*) fail "worktree-agent-new: aged 7+ days though created 1 day ago: [$row]" ;;
+  '[ ]'*'agent branch created'*) fail "worktree-agent-new: aged 7+ days though created 1 day ago: [$row]" ;;
   '[ ]'*) printf '  ok   worktree-agent-new starts unticked\n' ;;
   *) fail "worktree-agent-new: expected its removal unticked, got [$row]" ;;
 esac

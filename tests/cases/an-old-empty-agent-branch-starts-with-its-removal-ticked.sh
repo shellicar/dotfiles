@@ -48,7 +48,7 @@ row() {
   printf '%s' "$ROWS" | awk -F"$TAB" -v op="$1" '$1 == op { print $2 "|" $3 "|" $6; exit }'
 }
 
-expected='on|remove|never diverged from main, agent worktree created 7+ days ago'
+expected='on|remove|never diverged from main, agent branch created 7+ days ago'
 actual=$(row worktree-agent-abcR)
 assert_eq "${actual:-<no removal row>}" "$expected"
 

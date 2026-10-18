@@ -78,6 +78,12 @@ branch_created() {
   printf '%s\t%s\n' "$1" "$2" >> "$CREATED"
 }
 
+# What git config --get core.logAllRefUpdates answers, empty for unset, and
+# what rev-parse --is-bare-repository answers. git init writes true into a
+# repository with a working tree, so that is what one answers untouched.
+FAKE_LOG_REF_UPDATES=true
+FAKE_BARE=false
+
 TIMES=$WORK/times
 : > "$TIMES"
 
@@ -356,13 +362,21 @@ git_says() (
     "for-each-ref --format=%(refname:short) refs/heads/"|"for-each-ref --format %(refname:short) refs/heads/")
       cut -f1 "$REFS" | sed -n 's@^refs/heads/@@p' ;;
     # The oldest entry only, printed as git prints a selector under
-    # --date=unix: the short name, then the entry's time. No reflog fails the
-    # way git does.
+    # --date=unix: the short name, then the entry's time. A branch with no
+    # reflog prints nothing and succeeds; a branch that does not exist fails,
+    # as git does for each.
     "reflog --no-show-signature --date=unix --format=%gd refs/heads/"*)
       ref=$(last_word "$@")
+      awk -F"$TAB" -v r="$ref" '$1 == r { found = 1 } END { exit !found }' "$REFS" || return 128
       at=$(awk -F"$TAB" -v r="$ref" '$1 == r { print $2; exit }' "$CREATED")
-      [ -n "$at" ] || return 128
+      [ -n "$at" ] || return 0
       printf '%s@{%s}\n' "${ref#refs/heads/}" "$at" ;;
+    # FAKE_LOG_REF_UPDATES is the setting's value, empty for unset.
+    "config --get core.logAllRefUpdates")
+      [ -n "$FAKE_LOG_REF_UPDATES" ] || return 1
+      printf '%s\n' "$FAKE_LOG_REF_UPDATES" ;;
+    "rev-parse --is-bare-repository")
+      printf '%s\n' "$FAKE_BARE" ;;
     # The tip's time, and how long before the fake's clock that was.
     "rev-list --no-commit-header -1 --format=%cr "*)
       c=$(commit_of "$(last_word "$@")") || return 128

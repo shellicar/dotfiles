@@ -7,14 +7,16 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../fake-git.sh
 . "$TESTS/fake-git.sh"
 
-describe "git refresh leaves an empty subagent branch unticked when it has no reflog to date it"
+describe "git refresh reads an unset core.logAllRefUpdates as off in a bare repository"
 
-# Without a reflog there is no creation date, and an unknown age is not an old
-# one. The tip's date is no substitute: the tip is a commit of main.
+# Unset, core.logAllRefUpdates is off in a bare repository, so git keeps no
+# reflog there and a missing creation date says nothing about the age.
 #
 #   main                A - B - C
 #   worktree-agent-abc      B      (never diverged, worktree /wt/agent, no reflog)
 NOW=$(date +%s)
+FAKE_LOG_REF_UPDATES=
+FAKE_BARE=true
 
 commit A
 commit B A

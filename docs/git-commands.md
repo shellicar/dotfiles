@@ -313,7 +313,10 @@ removal masks the update entirely.
 One exception, intended to be temporary: an empty branch named `worktree-agent-*`,
 which Claude Code makes for a subagent, starts with its removal ticked once the branch
 was created 7 or more days ago and its worktree holds no ignored files. The creation
-time is the oldest entry in the branch's reflog, not its tip's commit date. Only the
+time is the oldest entry in the branch's reflog, not its tip's commit date. A branch
+with no reflog counts as old where git logs ref updates (`core.logAllRefUpdates` on,
+which is also what unset means outside a bare repository), because its reflog has
+then expired, and as of unknown age, so unticked, where git does not. Only the
 removal starts ticked; the update still starts where the empty class starts it, off, so
 unticking the removal does not tick the update.
 
