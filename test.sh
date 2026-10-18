@@ -17,9 +17,10 @@
 # an && list, so both a missing binary and a genuine finding exited 0. Nothing
 # here had ever actually been linted on a machine without it installed.
 #
-# The linter is declared in setup/macos/Brewfile and setup/linux/packages, so a
-# bootstrapped machine has it, and its absence is a real error rather than a
-# reason to reach for a container.
+# The linter is declared in setup/Brewfile, for every OS, so a bootstrapped
+# machine has it, and its absence is a real error rather than a reason to reach
+# for a container. Homebrew installs the latest release, so the version is
+# printed: a finding on one machine and not another may be the version.
 #
 # gcc output format, not the default tty: one line per finding instead of six.
 # The caller here is usually an agent, and the compact form is what it can scan
@@ -36,6 +37,7 @@ set -eu
 cd "$(dirname "$0")"
 
 command -v shellcheck >/dev/null 2>&1 || { echo "shellcheck is not installed: brew install shellcheck" >&2; exit 64; }
+printf 'linting with shellcheck %s\n' "$(shellcheck --version | sed -n 's/^version: //p')"
 
 # Built as positional parameters so the paths stay quoted, and via a here-doc
 # rather than a pipe so the loop is not a subshell and the list survives it.

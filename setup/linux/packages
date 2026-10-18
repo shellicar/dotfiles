@@ -8,7 +8,6 @@ jq
 vim
 gnupg
 xclip
-shellcheck
 
 # cargo needs a C linker to link, and rustup doesn't ship one.
 build-essential

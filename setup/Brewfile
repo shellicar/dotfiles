@@ -5,3 +5,4 @@ brew "fnm"        # Node version manager
 brew "tmux"       # .tmux.conf and the prompt status hooks
 brew "go"         # toolchain
 brew "rclone"     # azure-files-sync
+brew "shellcheck" # ./test.sh
