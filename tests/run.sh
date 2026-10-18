@@ -1,13 +1,20 @@
 #!/bin/sh
-# Runs every case in tests/cases, once under each shell below. Quiet on success;
-# a failure prints the case, the shell it failed under, and why. Exit 1 means a
-# case failed, 64 means the run could not happen.
+# Runs every case in tests/cases, once under each shell below. On success it
+# prints two lines: the shells it ran under and the count. A failure also prints
+# the case, the shell it failed under, and why. Exit 1 means a case failed, 64
+# means the run could not happen.
 #
 # The shells: sh, whatever this machine has, and bash in POSIX mode. On macOS sh
 # is bash 3.2 in POSIX mode, so there the first run is the Mac's own shell. On
 # Linux sh is usually dash, and the bash run is the nearest stand-in for the Mac
 # that the machine has: a newer bash, so it can pass where bash 3.2 would fail.
-# The summary names each shell and its version, so a run claims only what it ran.
+# The summary names each shell, by its version where it has one and otherwise by
+# its path, so a run claims only what it ran.
+#
+# The shell is the one the case file runs under, and what it sources. A case
+# that starts the command it tests as a program, by its path or with sh, tests
+# that command under sh only, in both runs: by its path it runs under its
+# shebang, which is /bin/sh for every command here but azure-files-sync.
 set -u
 
 TESTS=$(cd "$(dirname "$0")" && pwd)
@@ -16,11 +23,17 @@ export TESTS REPO
 
 [ -d "$TESTS/cases" ] || { echo "no cases directory" >&2; exit 64; }
 
-# What each shell is, for the summary. sh has no version flag, so it is named
-# by the file it resolves to.
-sh_path=$(command -v sh)
-sh_real=$(readlink -f "$sh_path" 2>/dev/null) || sh_real=$sh_path
-SHELLS_RAN="sh ($sh_real)"
+# What each shell is, for the summary. An sh that is bash says its version;
+# any other sh, dash for one, has no version to ask, so it is named by the file
+# it resolves to.
+sh_version=$(sh -c 'printf %s "${BASH_VERSION:-}"')
+if [ -n "$sh_version" ]; then
+  SHELLS_RAN="sh (bash $sh_version)"
+else
+  sh_path=$(command -v sh)
+  sh_real=$(readlink -f "$sh_path" 2>/dev/null) || sh_real=$sh_path
+  SHELLS_RAN="sh ($sh_real)"
+fi
 # TODO(claude): undecided: what happens when bash is missing. The run goes on
 # under sh alone and the summary says bash was not run.
 if command -v bash >/dev/null 2>&1; then
