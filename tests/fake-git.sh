@@ -78,6 +78,15 @@ branch_created() {
   printf '%s\t%s\n' "$1" "$2" >> "$CREATED"
 }
 
+# reflog_says <ref> <exit status> <output>: what reading the branch's reflog
+# prints and exits with, in place of the answer branch_created gives. For a
+# reflog git cannot read, or prints in a form the command does not expect.
+REFLOG_SAYS=$WORK/reflog-says
+: > "$REFLOG_SAYS"
+reflog_says() {
+  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$REFLOG_SAYS"
+}
+
 # What git config --get core.logAllRefUpdates answers, empty for unset, and
 # what rev-parse --is-bare-repository answers. git init writes true into a
 # repository with a working tree, so that is what one answers untouched.
@@ -367,6 +376,11 @@ git_says() (
     # as git does for each.
     "reflog --no-show-signature --date=unix --format=%gd refs/heads/"*)
       ref=$(last_word "$@")
+      said=$(awk -F"$TAB" -v r="$ref" '$1 == r { print $2 "\t" $3; exit }' "$REFLOG_SAYS")
+      if [ -n "$said" ]; then
+        printf '%s\n' "${said#*"$TAB"}"
+        return "${said%%"$TAB"*}"
+      fi
       awk -F"$TAB" -v r="$ref" '$1 == r { found = 1 } END { exit !found }' "$REFS" || return 128
       at=$(awk -F"$TAB" -v r="$ref" '$1 == r { print $2; exit }' "$CREATED")
       [ -n "$at" ] || return 0

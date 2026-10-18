@@ -262,12 +262,26 @@ EOF
   # reads it, an empty Claude Code subagent branch.
   # TODO(claude): undecided: whether the reflog is read for every branch or only
   # for the ones derive uses it on. Only those for now.
+  #
+  # Three outcomes, kept apart: the seconds, when the oldest line reads
+  # name@{seconds}; none, when the read succeeded and printed nothing, which is
+  # a branch with no reflog; and -, unknown, when the read failed or printed
+  # something else.
   created=-
   case "$class:$b" in
     empty:worktree-agent-*)
-      created=$(git reflog --no-show-signature --date=unix --format=%gd "refs/heads/$b" 2>/dev/null | tail -1)
-      created=${created##*@\{}; created=${created%\}}
-      case "$created" in ''|*[!0-9]*) created=- ;; esac
+      if entries=$(git reflog --no-show-signature --date=unix --format=%gd "refs/heads/$b" 2>/dev/null); then
+        if [ -z "$entries" ]; then
+          created=none
+        else
+          oldest=$(printf '%s\n' "$entries" | tail -1)
+          case "$oldest" in
+            *@\{*\})
+              created=${oldest##*@\{}; created=${created%\}}
+              case "$created" in ''|*[!0-9]*) created=- ;; esac ;;
+          esac
+        fi
+      fi
       ;;
   esac
   BFACTS="$BFACTS$b$TAB${wt:--}$TAB$class$TAB$ahead$TAB$n$TAB$why$TAB$behind$TAB$block$TAB$uact$TAB$udetail$TAB$ign$TAB$meta$TAB$unpushed$TAB$stash$TAB$owner$TAB$pr$TAB$replays$TAB$drops$TAB$created$NL"
@@ -398,10 +412,11 @@ derive() {
     # worktree-agent-*, which only Claude Code makes, for a subagent, starts
     # ticked once it was created AGENT_IDLE_DAYS or more ago and its worktree, if
     # it has one, holds no ignored files for the removal to take silently. A
-    # missing creation date counts as old where git logs ref updates, since the
+    # branch with no reflog counts as old where git logs ref updates, since the
     # reflog has then expired (git gc drops entries after 90 days by default),
-    # and as unknown, so not old, where it does not. A dirty or locked worktree
-    # is still blocked below, whatever this decides.
+    # and as unknown, so not old, where it does not. A reflog that could not be
+    # read or did not parse is unknown too. A dirty or locked worktree is still
+    # blocked below, whatever this decides.
     #
     # Only the removal's default changes. def is still the class's default and
     # the update below still reads it, so unticking this removal does not tick
@@ -413,8 +428,9 @@ derive() {
     old=no
     age="created ${AGENT_IDLE_DAYS}+ days ago"
     case "$created" in
-      ''|*[!0-9]*)
+      none)
         [ "${LOGS_REF_UPDATES:-no}" = yes ] && { old=yes; age='with an expired reflog'; } ;;
+      ''|*[!0-9]*) ;;
       *) [ $((NOW - created)) -ge $((AGENT_IDLE_DAYS * 86400)) ] && old=yes ;;
     esac
     if [ "$class" = empty ] && [ "$name" != "$MAIN" ] && [ "$agent" = yes ] &&
