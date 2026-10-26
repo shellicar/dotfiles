@@ -8,5 +8,4 @@ brew "gnupg"
 brew "pinentry-mac" # gpg-agent's pinentry-program
 brew "ykman"        # gpg-setup.sh --hardware, and ykwhich
 brew "git-lfs"
-brew "shellcheck" # ./test.sh
 brew "flock"      # the git commands run one at a time per repository with it
