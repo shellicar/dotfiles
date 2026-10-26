@@ -197,15 +197,17 @@ that differ on the two sides, and `keep-local` / `keep-remote`. Run it after
 changing `azure-files-sync` or `home/common/lib/azure-files-sync.sh`. A missing
 rclone exits 64; it never skips.
 
-`tests/tmux/run.sh` tests `tmux-snapshot` against a real tmux, and is not part
-of `./test.sh` either. It needs docker: each case runs in a fresh container
+`tests/tmux/run.sh` tests `tmux-snapshot` against a real tmux, and checks how
+tmux itself behaves where a command depends on it. It is not part of
+`./test.sh` either. It needs docker: each case runs in a fresh container
 built from `tests/tmux/Dockerfile` (alpine with tmux, no Node), with the repo
 mounted read-only, so the servers it starts and kills are never yours. It
 prints the tmux version it ran against. It covers save, kill and restore round
 trips, sessions named `""`, names holding `:` or `.`, a newline in a pane's
 cwd or `@status` (pane records end with the ASCII record separator, not a
 newline), a US or RS inside a value (saved as `_`), the `@snapshot-error`
-mark and the status bar segment, and the old JSON files being left alone. The
+mark and the status bar segment, the old JSON files being left alone, and
+`run-shell` waiting on whatever holds its stdin. The
 unit cases in `tests/cases/` fake tmux with `tests/fake-tmux.sh`; anything about
 how tmux itself treats an argument belongs here instead. Run it after changing
 `tmux-snapshot` or `home/common/lib/tmux-snapshot.sh`. A missing docker, or an

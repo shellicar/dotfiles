@@ -1,0 +1,100 @@
+#!/bin/sh
+# vscode-open-workspace <name> <workspace-file>
+#
+# Opens <workspace-file> in Windows VS Code unless a VS Code window whose title
+# starts with "<name> - " is already open. The workspace file sets that title.
+#
+# Running `code` on a workspace that is already open makes its window flash, and
+# the tmux focus hook calls this on every pane switch, hence the check first.
+#
+# The check takes about half a second, and the hook's run-shell waits for this
+# command, so the call from the hook only starts a detached copy of itself and
+# returns. The copy does the check and the open. No `&` and no `run-shell -b`:
+# each would be another process under tmux on every focus. `setsid -f` is the
+# one fork, and it exits at once.
+#
+# Always exits 0: the hook's exit status is this command's, and tmux puts the
+# pane in view mode on every focus when a run-shell exits non-zero. Failures go
+# to stderr, which ends up in the hook's log.
+
+NL='
+'
+# The tests set VSCODE_OPEN_WORKSPACE_LOG so they never write the hook's log.
+LOG=${VSCODE_OPEN_WORKSPACE_LOG:-/tmp/tmux-vscode-workspace.log}
+
+if [ $# -ne 2 ]; then
+  echo "usage: vscode-open-workspace <name> <workspace-file>" >&2
+  exit 0
+fi
+NAME=$1
+WS_FILE=$2
+
+# The first call: start the copy and return. The variable marks the copy.
+# stdin is run-shell's socket, which tmux waits on until nothing holds it, so
+# the copy gets /dev/null instead.
+if [ -z "${VSCODE_OPEN_WORKSPACE_DETACHED:-}" ]; then
+  VSCODE_OPEN_WORKSPACE_DETACHED=1 setsid -f "$0" "$NAME" "$WS_FILE" < /dev/null >> "$LOG" 2>&1 ||
+    echo "vscode-open-workspace: could not start the detached check" >&2
+  exit 0
+fi
+unset VSCODE_OPEN_WORKSPACE_DETACHED
+
+# One check at a time per workspace file: a check already running covers this
+# focus too. The lock is flock(1) on <workspace-file>.lock, held on descriptor 9
+# for the life of this shell. The kernel releases it when the last process
+# holding the descriptor exits, however it exits, so nothing releases it here
+# and no lock is left behind. Without flock nothing is checked: running
+# unlocked would let every focus start its own check.
+#
+# flock, not a folder holding a pid checked with kill -0: in Claude Code's
+# sandbox each command runs in its own pid namespace, where kill -0 cannot see
+# a live holder, so a held lock reads as dead (see take_run_lock in
+# home/common/lib/git-common.sh).
+#
+# Every program started below gets 9>&-. One that inherited the descriptor and
+# outlived this shell would hold the lock for good: `code` run from WSL can
+# start the VS Code server in WSL, which keeps running.
+if ! command -v flock > /dev/null 2>&1; then
+  echo "vscode-open-workspace: needs flock, to run one window check at a time" >&2
+  exit 0
+fi
+LOCK=$WS_FILE.lock
+# A failed redirection on a plain exec ends a non-interactive shell before the
+# || is reached, under dash and bash --posix alike. With command it returns
+# instead, and the group's 2>/dev/null keeps the shell's own error out without
+# redirecting stderr for good, as exec's own 2> would.
+{ command exec 9>> "$LOCK"; } 2> /dev/null || {
+  echo "vscode-open-workspace: cannot open the lock $LOCK for writing" >&2
+  exit 0
+}
+flock -n 9 || exit 0
+
+# Every top-level window belonging to a Code process, one title per line.
+# VS Code keeps all its windows under one main process, so a process's
+# MainWindowTitle (Get-Process, tasklist /v) shows only one of them.
+# UIAutomation is loaded rather than Add-Type C# for EnumWindows, which Windows
+# PowerShell compiles again in every new process.
+# The output has CRLF line ends; the prefix match below is unaffected.
+# The name is matched here in sh, so it never has to be quoted for PowerShell.
+# shellcheck disable=SC2016 # the $ names are PowerShell's
+LIST_TITLES='
+$ids = @((Get-Process Code -ErrorAction SilentlyContinue).Id)
+if ($ids.Count -eq 0) { exit 0 }
+Add-Type -AssemblyName UIAutomationClient
+$auto = [System.Windows.Automation.AutomationElement]
+$auto::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition) |
+  Where-Object { $ids -contains $_.Current.ProcessId } |
+  ForEach-Object { $_.Current.Name }
+'
+
+# A failed check opens the workspace anyway, as the macOS command does.
+if TITLES=$(powershell.exe -NoProfile -NonInteractive -Command "$LIST_TITLES" 9>&-); then
+  case "$NL$TITLES" in
+    *"$NL$NAME - "*) exit 0 ;;
+  esac
+else
+  echo "vscode-open-workspace: could not list VS Code windows; opening $WS_FILE" >&2
+fi
+
+code "$WS_FILE" 9>&- || echo "vscode-open-workspace: code $WS_FILE failed" >&2
+exit 0
