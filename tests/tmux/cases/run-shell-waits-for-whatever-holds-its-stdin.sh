@@ -27,18 +27,30 @@ esac
 # it is given another, so the held case passes the command's own stdin through
 # descriptor 3. stdout and stderr go to /dev/null in both, so stdin is the only
 # thing the left-behind sleep can hold.
-elapsed() { # <run-shell command>: seconds until run-shell returns
-  start=$(date +%s)
+#
+# Timed with /proc/uptime, not date: the wall clock date reads can be stepped
+# backwards mid-run, and once read 3s for a run-shell that waited the full 4s.
+# Uptime only moves forward. Linux prints it with two decimals, so dropping
+# the dot gives hundredths of a second.
+uptime_cs() {
+  read -r up _ < /proc/uptime
+  echo "${up%.*}${up#*.}"
+}
+seconds() { # <hundredths>
+  printf '%d.%02ds' $(($1 / 100)) $(($1 % 100))
+}
+elapsed() { # <run-shell command>: hundredths of a second until run-shell returns
+  start=$(uptime_cs)
   tm run-shell "$1"
-  echo $(($(date +%s) - start))
+  echo $(($(uptime_cs) - start))
 }
 
 held=$(elapsed 'exec 3<&0; sleep 4 <&3 3<&- > /dev/null 2>&1 & exit 0')
-[ "$held" -ge 3 ] || fail "run-shell returned after ${held}s while a process held its stdin; expected about 4s"
-ok "run-shell waited ${held}s for a process holding its stdin"
+[ "$held" -ge 350 ] || fail "run-shell returned after $(seconds "$held") while a process held its stdin; expected about 4s"
+ok "run-shell waited $(seconds "$held") for a process holding its stdin"
 
 free=$(elapsed 'sleep 4 < /dev/null > /dev/null 2>&1 & exit 0')
-[ "$free" -le 1 ] || fail "run-shell took ${free}s when the process had /dev/null as stdin; expected at once"
-ok "run-shell returned in ${free}s when the process had /dev/null as stdin"
+[ "$free" -le 100 ] || fail "run-shell took $(seconds "$free") when the process had /dev/null as stdin; expected at once"
+ok "run-shell returned in $(seconds "$free") when the process had /dev/null as stdin"
 
 echo 'PASS run-shell-waits-for-whatever-holds-its-stdin'
