@@ -643,11 +643,9 @@ save_server() {
 
   # A lone pane is an empty server just started, or a crash that left nothing.
   # Saving it would overwrite the last good snapshot with nothing worth
-  # restoring. Not a failure: @snapshot-error is left as it is.
-  # TODO(claude): a server that stays single-pane never records
-  # @snapshot-last-save, so the status bar shows it stale once it is older than
-  # the threshold. This follows from #71 as written (the refusal is kept as a
-  # failsafe backstop). Surfaced to the SC rather than worked around here.
+  # restoring. Not a failure: @snapshot-error is left as it is. A whole-server
+  # single pane is refused as a failsafe backstop; the status bar's staleness
+  # gate mirrors this predicate so such a server is never flagged.
   if [ "$(count_records "$raw")" -eq 1 ]; then
     note "server '$TS_LABEL' has a single pane (fresh/empty), not saving"
     return 0
@@ -758,16 +756,18 @@ sweep_watchdog() { # <seconds> <function> [args...]
 }
 
 tmux_snapshot_sweep() { # <interval> <grace> <save timeout>
-  local interval grace timeout now label
+  local interval grace timeout label
   interval=$1 grace=$2 timeout=$3
-  now=$(date +%s)
   # TODO(claude): undecided: whether the watchdog wraps the whole per-server step
   # (read, gates, save) or only the save. The whole step for now: an alive but
   # wedged server hangs the display-message read first, and that would stall the
   # sweep as surely as a wedged save. #71 names only the save.
   server_labels | while IFS= read -r label; do
     [ -n "$label" ] || continue
-    sweep_watchdog "$timeout" sweep_server "$label" "$now" "$interval" "$grace"
+    # now is read per server, not once before the loop: a run of wedged servers
+    # spends a watchdog timeout each, and a stale now would eat the throttle's
+    # grace and skip a later server sitting at the one-interval boundary.
+    sweep_watchdog "$timeout" sweep_server "$label" "$(date +%s)" "$interval" "$grace"
   done
 }
 
