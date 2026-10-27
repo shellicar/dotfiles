@@ -84,11 +84,9 @@ logic: extract it here instead.
 - `azure-files-sync`: keep local folders and Azure Files shares in step, both
   ways, as set in `${XDG_CONFIG_HOME:-~/.config}/azure-files-sync/`
 - `gitversion` — GitVersion wrapper
-- `tmux-snapshot` — capture and rehydrate a tmux server's layout. Autosave is
-  `.local/bin/tmux-snapshot-sweep` (off PATH, in the Map), run every few minutes
-  by a `systemd --user` timer on WSL and a launchd LaunchAgent on macOS; a stopped
-  autosave surfaces as a `SNAPSHOT STALE` segment in the status bar, by the
-  absence of a recent save rather than a reported error
+- `tmux-snapshot` — capture and rehydrate a tmux server's layout.
+  `tmux-snapshot-sweep` (`.local/bin`, off PATH) is the autosave machinery the
+  OS scheduler runs.
 
 `docs/git-commands.md` is the documentation: the model they share, what each one
 decides, and what stops it. A script's comments are for someone who did not write
