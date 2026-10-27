@@ -1,0 +1,14 @@
+[Unit]
+Description=Save every live tmux server's layout (tmux-snapshot sweep)
+Documentation=file:%h/dotfiles/home/common/lib/tmux-snapshot.sh
+
+[Service]
+Type=oneshot
+# A systemd --user job does not inherit the tmux server's PATH, so tmux
+# (Homebrew) is put on PATH here or the sweep finds no tmux and saves nothing.
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/dotfiles/.local/bin/tmux-snapshot-sweep
+# Backstop below one interval: the sweep watchdogs each server, but if that
+# watchdog itself failed a stuck run must not block the next tick. For Type=oneshot
+# the start timeout is otherwise infinite.
+TimeoutStartSec=120

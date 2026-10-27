@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the tmux-snapshot sweep every 5 minutes
+
+[Timer]
+# Clock-anchored, every INTERVAL. INTERVAL = 300s (5 min) in
+# .local/bin/tmux-snapshot-sweep; keep this cadence in step with it.
+# AccuracySec=1s because systemd's default 1-minute window is looser than the
+# sweep's grace, which would let the throttle skip a tick.
+OnCalendar=*:0/5
+AccuracySec=1s
+# Run a tick missed while the machine was asleep or off.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

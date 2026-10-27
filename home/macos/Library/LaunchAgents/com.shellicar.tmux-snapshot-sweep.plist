@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  tmux-snapshot sweep: save every live tmux server's layout, clock-anchored
+  every INTERVAL. INTERVAL = 300s (5 min) in .local/bin/tmux-snapshot-sweep;
+  the StartCalendarInterval minutes below must stay in step with it. A single
+  {Minute: 5} would fire once an hour, so every five-minute mark is listed.
+
+  launchd does no $HOME or ~ expansion in a path, so the sweep is run through
+  /bin/sh -c with an exec. A launchd agent does not inherit the tmux server's
+  PATH, so tmux (Homebrew, /opt/homebrew/bin) is put on PATH here or the sweep
+  finds no tmux and saves nothing.
+
+  WRITTEN FOR macOS BUT NOT TESTED HERE (no macOS in this environment). Loaded by
+  setup/macos/setup.sh. On a Mac, check after a re-login that
+    launchctl print gui/$(id -u)/com.shellicar.tmux-snapshot-sweep
+  shows the agent loaded, and that the sweep runs: a non-trivial server gets a
+  snapshot within about two intervals and its @snapshot-last-save advances.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.shellicar.tmux-snapshot-sweep</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>exec "$HOME/dotfiles/.local/bin/tmux-snapshot-sweep"</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Minute</key><integer>35</integer></dict>
+    <dict><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Minute</key><integer>55</integer></dict>
+  </array>
+</dict>
+</plist>

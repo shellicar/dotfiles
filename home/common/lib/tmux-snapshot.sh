@@ -1,7 +1,9 @@
 #!/bin/sh
 #
 # tmux-snapshot's logic, sourced by home/common/bin/tmux-snapshot, which parses
-# the arguments into LABEL, LABEL_SET, ALL and APPLY and calls tmux_snapshot_main.
+# the arguments into LABEL, LABEL_SET, ALL and APPLY and calls tmux_snapshot_main;
+# and by .local/bin/tmux-snapshot-sweep, which the OS scheduler runs to call
+# tmux_snapshot_sweep (see the ── sweep ── section).
 #
 # A snapshot records, per pane, the session/window/pane identity, the exact
 # window layout, the cwd, the foreground command, an allowlisted launcher (when
@@ -39,8 +41,10 @@ PARK=999999 # parking index for the throwaway window new-session spawns
 # args) are never resurrected. Space-separated.
 LAUNCHERS='start-v2.mjs'
 
-# tmux keeps one socket per server here; the socket filename is the label.
-SERVER_DIR=/tmp/tmux-$(id -u)
+# tmux keeps one socket per server here; the socket filename is the label. tmux
+# puts it under TMUX_TMPDIR when that is set, so `save -a`, the status view and
+# the sweep look where the running servers actually are.
+SERVER_DIR=${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)
 PROC_ROOT=/proc
 
 # Colour only when stdout is a terminal, so piped output stays clean.
@@ -640,6 +644,10 @@ save_server() {
   # A lone pane is an empty server just started, or a crash that left nothing.
   # Saving it would overwrite the last good snapshot with nothing worth
   # restoring. Not a failure: @snapshot-error is left as it is.
+  # TODO(claude): a server that stays single-pane never records
+  # @snapshot-last-save, so the status bar shows it stale once it is older than
+  # the threshold. This follows from #71 as written (the refusal is kept as a
+  # failsafe backstop). Surfaced to the SC rather than worked around here.
   if [ "$(count_records "$raw")" -eq 1 ]; then
     note "server '$TS_LABEL' has a single pane (fresh/empty), not saving"
     return 0
@@ -652,6 +660,11 @@ save_server() {
   ts_tmux set-option -su @snapshot-error 2>/dev/null
   summarize "$panes"
   note "wrote $(count_records "$panes") panes to $SNAP_FILE"
+  # The epoch of this save, kept as a server option so it survives the scheduler
+  # being stopped and restarted. The sweep's throttle reads it to decide whether
+  # a server is due, and the status bar reads it to show staleness. Set last, and
+  # only on a save that actually wrote, so an unset value means "never saved".
+  ts_tmux set-option -s @snapshot-last-save "$(date +%s)" 2>/dev/null
 }
 
 cmd_save() {
@@ -674,6 +687,88 @@ EOF
   fi
   resolve_target
   save_server
+}
+
+# ── sweep ──────────────────────────────────────────────────────────────────────
+#
+# The sweep is what the OS scheduler runs, every INTERVAL. It is stateless: it
+# looks at the live servers and the record each carries, decides which are due,
+# and saves them. Nothing persists between runs but the @snapshot-last-save each
+# save writes, so a run that dies costs one tick and the next run self-heals.
+# The scheduler (home/wsl/.config/systemd/user, home/macos LaunchAgent) is what
+# respawns it; the sweep carries no supervision of its own.
+#
+# INTERVAL and GRACE are the sweep command's (.local/bin/tmux-snapshot-sweep),
+# passed in, so that command is their single source of truth.
+
+# Whether a server is due to be saved, from epoch seconds alone. Pure, so the
+# gate is tested without a clock.
+#   first-save hold: a server younger than INTERVAL has nothing worth saving yet.
+#   throttle: a save newer than INTERVAL - GRACE means not due. The grace absorbs
+#     a save's duration and the timer's jitter, so a tick one interval after the
+#     last save still saves (now - last is a hair under INTERVAL, not over it);
+#     without it the cadence would halve. An unset or unreadable last-save is due.
+sweep_should_save() { # <now> <start_time> <last_save> <interval> <grace>
+  local now start last interval grace
+  now=$1 start=$2 last=$3 interval=$4 grace=$5
+  [ "$((now - start))" -ge "$interval" ] || return 1
+  case $last in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  [ "$((now - last))" -ge "$((interval - grace))" ]
+}
+
+# Reads one server's start_time and @snapshot-last-save in a single call, and
+# saves it when both gates pass. A dead or stale socket makes tmux exit non-zero
+# (it says "no server running" and starts nothing), so it is skipped. Both
+# values are integers, so they are read space-separated, away from US and the
+# 3.5 escaping has_separator guards against.
+sweep_server() { # <label> <now> <interval> <grace>
+  local now interval grace out start last
+  TS_LABEL=$1 now=$2 interval=$3 grace=$4
+  out=$(ts_tmux display-message -p '#{start_time} #{@snapshot-last-save}' 2>/dev/null) || return 0
+  start=${out%% *}
+  last=${out#* }
+  # A non-numeric start_time means tmux answered something unexpected; leave the
+  # server alone rather than treat garbage as an age.
+  # TODO(claude): undecided: how a non-numeric start_time is treated. Skipped for
+  # now (a non-numeric last-save counts as never-saved, which sweep_should_save
+  # already treats as due).
+  case $start in '' | *[!0-9]*) return 0 ;; esac
+  sweep_should_save "$now" "$start" "$last" "$interval" "$grace" || return 0
+  save_server >/dev/null 2>&1 || true
+}
+
+# Runs a function in the background and kills it after <seconds>, so one wedged
+# server cannot stall the sweep. timeout(1) is not on stock macOS, so this is the
+# POSIX stand-in: a backgrounded job and a sleeper that kills it. Functions (and
+# the faked tmux in tests) survive the subshell; a child process would not.
+sweep_watchdog() { # <seconds> <function> [args...]
+  local secs pid killer
+  secs=$1
+  shift
+  "$@" &
+  pid=$!
+  ( sleep "$secs"; kill "$pid" 2>/dev/null ) &
+  killer=$!
+  wait "$pid" 2>/dev/null
+  kill "$killer" 2>/dev/null
+  wait "$killer" 2>/dev/null
+  return 0
+}
+
+tmux_snapshot_sweep() { # <interval> <grace> <save timeout>
+  local interval grace timeout now label
+  interval=$1 grace=$2 timeout=$3
+  now=$(date +%s)
+  # TODO(claude): undecided: whether the watchdog wraps the whole per-server step
+  # (read, gates, save) or only the save. The whole step for now: an alive but
+  # wedged server hangs the display-message read first, and that would stall the
+  # sweep as surely as a wedged save. #71 names only the save.
+  server_labels | while IFS= read -r label; do
+    [ -n "$label" ] || continue
+    sweep_watchdog "$timeout" sweep_server "$label" "$now" "$interval" "$grace"
+  done
 }
 
 # ── restore ──────────────────────────────────────────────────────────────────
