@@ -3,14 +3,21 @@
 # pure tmux format (no #(), so no socket and no shell-out): it shows once the
 # last save is older than the threshold, is empty while the save is current, and
 # before the first save falls back to #{start_time} so a new server is not
-# flagged. Because it needs no socket, the server keeps rendering it even after
-# its socket is deleted; the last step shows that against a real attached client.
+# flagged. It is gated on the server being non-trivial, mirroring save's own
+# single-pane refusal: a trivial server (one window, one pane) is never saved, so
+# an always-old time must not warn. Because the segment needs no socket, the
+# server keeps rendering it even after its socket is deleted; the last step shows
+# that against a real attached client.
 set -u
 # The path exists only inside the container, where run.sh mounts it.
 # shellcheck source=../lib.sh
 . /case/lib.sh
 
 new_session main edit /work/a
+# A second pane makes this session non-trivial, so the warning is not suppressed.
+tm split-window -h -t main:0 -c /work/b
+# A separate single-pane, single-window session: trivial, so never warned.
+tm new-session -d -s solo -x 270 -y 85 -c /work/a
 settle
 
 # status-right exactly as .tmux.conf sets it, plus a 1s redraw so a capture is
@@ -24,22 +31,25 @@ tm set -g status-interval 1
 case $(tm show -gv status-right) in *'#('*) fail "status-right shells out with #()" ;; esac
 ok "the segment is a pure format (no #() shell-out)"
 
-shown() { tm display-message -p -t main:0 "$(tm show -gv status-right)"; }
+shown() { tm display-message -p -t "$1" "$(tm show -gv status-right)"; }
 
-# A save well past the threshold (now - 1000 > 600): stale.
+# A save well past the threshold (now - 1000 > 600): the non-trivial session is
+# stale, the trivial one is not warned even though the same old save applies.
 tm set-option -s @snapshot-last-save "$(( $(date +%s) - 1000 ))"
-case $(shown) in *'SNAPSHOT STALE'*) ;; *) fail "an old save does not show stale: $(shown)" ;; esac
-ok "an old save shows: $(shown)"
+case $(shown main:0.0) in *'SNAPSHOT STALE'*) ;; *) fail "an old save does not show stale on a non-trivial server: $(shown main:0.0)" ;; esac
+ok "an old save shows on a non-trivial server: $(shown main:0.0)"
+case $(shown solo:0.0) in *'SNAPSHOT STALE'*) fail "an old save shows stale on a trivial (single-pane) server: $(shown solo:0.0)" ;; esac
+ok "an old save does not warn a trivial single-pane server"
 
 # A current save (now): not stale.
 tm set-option -s @snapshot-last-save "$(date +%s)"
-case $(shown) in *'SNAPSHOT STALE'*) fail "a current save shows stale: $(shown)" ;; esac
+case $(shown main:0.0) in *'SNAPSHOT STALE'*) fail "a current save shows stale: $(shown main:0.0)" ;; esac
 ok "a current save shows nothing stale"
 
 # No save yet: falls back to #{start_time}, and the server has just started, so
 # it is not flagged.
 tm set-option -su @snapshot-last-save
-case $(shown) in *'SNAPSHOT STALE'*) fail "a just-started server with no save shows stale: $(shown)" ;; esac
+case $(shown main:0.0) in *'SNAPSHOT STALE'*) fail "a just-started server with no save shows stale: $(shown main:0.0)" ;; esac
 ok "an unset save falls back to start_time and is not flagged"
 
 # Rendering after the socket is deleted. A client must stay attached, so an outer

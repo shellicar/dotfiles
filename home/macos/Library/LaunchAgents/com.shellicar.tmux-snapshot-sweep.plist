@@ -11,8 +11,11 @@
   PATH, so tmux (Homebrew, /opt/homebrew/bin) is put on PATH here or the sweep
   finds no tmux and saves nothing.
 
-  WRITTEN FOR macOS BUT NOT TESTED HERE (no macOS in this environment). Loaded by
-  setup/macos/setup.sh. On a Mac, check after a re-login that
+  setup/macos/setup.sh loads this on a fresh machine. Load it by hand once with:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.shellicar.tmux-snapshot-sweep.plist
+
+  WRITTEN FOR macOS BUT NOT TESTED HERE (no macOS in this environment). On a Mac,
+  check after a re-login that
     launchctl print gui/$(id -u)/com.shellicar.tmux-snapshot-sweep
   shows the agent loaded, and that the sweep runs: a non-trivial server gets a
   snapshot within about two intervals and its @snapshot-last-save advances.

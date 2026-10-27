@@ -1,3 +1,5 @@
+# setup/wsl/setup.sh enables this on a fresh machine. Enable it by hand once with:
+#   systemctl --user daemon-reload && systemctl --user enable --now tmux-snapshot-sweep.timer
 [Unit]
 Description=Run the tmux-snapshot sweep every 5 minutes
 
