@@ -1,7 +1,9 @@
 #!/bin/sh
 #
 # tmux-snapshot: save a tmux server's layout, and restore it after a crash or a
-# restart. tmux-snapshot-watch runs `save` every few minutes, unattended.
+# restart. The autosave is .local/bin/tmux-snapshot-sweep, run on a timer by the
+# OS scheduler (see the ── sweep ── section in the library); this command is the
+# hand-run front door.
 #
 #   tmux-snapshot                            what there is to restore, per label
 #   tmux-snapshot [-L label | -a] save       save this server, -L's, or every one
@@ -10,6 +12,14 @@
 #
 # Restore is a dry run unless --apply is given. A failed save sets the server's
 # @snapshot-error option, which the status bar shows; a successful one unsets it.
+# A save records the server's @snapshot-last-save (epoch), which the sweep's
+# throttle and the status bar's staleness segment both read.
+#
+# RECOVERY is manual, never automatic. A server whose socket was deleted but
+# whose process is alive answers nothing the sweep enumerates, so it stops being
+# saved; nothing recreates the socket on its own. Recover it with
+# `kill -USR1 <pid>` on the server's process (the middle field of $TMUX,
+# socket,pid,session), which makes tmux recreate its socket.
 #
 # DECISION: POSIX sh. The command runs periodically and unattended, and has to
 # work then. It was Node before, and `#!/usr/bin/env node` runs whichever Node

@@ -49,13 +49,16 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   `git-common.sh` holds every decision the git commands make: which branches are
   merged, what a detached worktree is, how to bring the trunk in, so a command
   in `bin/` is argument parsing and a call to `main`. `tmux-snapshot.sh` is the
-  same for `tmux-snapshot`: saving, the restore plan, the status view.
+  same for `tmux-snapshot`: saving, the restore plan, the status view, and the
+  sweep (the autosave logic that `.local/bin/tmux-snapshot-sweep` drives).
   `yubikeys.sh` holds the three serials.
 - `tests/` — behavioural tests for the above. No repository is built: `git` is a
   shell function backed by a fake commit graph, so a case states a situation
   directly instead of committing its way to one.
 - `home/{common,<os>}/`, `os/`, `setup/<os>/`, `.gitconfig.d/`, `.vscode/`
-- `.local/bin/` — not linked into `$HOME`; called by repo path
+- `.local/bin/` — not linked into `$HOME`; called by repo path. Holds
+  `tmux-snapshot-sweep`, the autosave the OS scheduler runs on a timer (kept off
+  PATH because it is machinery, not a command the user runs)
 - `docs/yubikey.md`: hardware-backed signing and auth decisions, and their reasoning
 - `docs/git-commands.md`: what the git commands decide, how, and what stops them
 
@@ -81,8 +84,9 @@ logic: extract it here instead.
 - `azure-files-sync`: keep local folders and Azure Files shares in step, both
   ways, as set in `${XDG_CONFIG_HOME:-~/.config}/azure-files-sync/`
 - `gitversion` — GitVersion wrapper
-- `tmux-snapshot`, `tmux-snapshot-watch` — capture and rehydrate a tmux server's
-  layout
+- `tmux-snapshot` — capture and rehydrate a tmux server's layout.
+  `tmux-snapshot-sweep` (`.local/bin`, off PATH) is the autosave machinery the
+  OS scheduler runs.
 
 `docs/git-commands.md` is the documentation: the model they share, what each one
 decides, and what stops it. A script's comments are for someone who did not write
@@ -205,11 +209,16 @@ prints the tmux version it ran against. It covers save, kill and restore round
 trips, sessions named `""`, names holding `:` or `.`, a newline in a pane's
 cwd or `@status` (pane records end with the ASCII record separator, not a
 newline), a US or RS inside a value (saved as `_`), the `@snapshot-error`
-mark and the status bar segment, and the old JSON files being left alone. The
-unit cases in `tests/cases/` fake tmux with `tests/fake-tmux.sh`; anything about
-how tmux itself treats an argument belongs here instead. Run it after changing
-`tmux-snapshot` or `home/common/lib/tmux-snapshot.sh`. A missing docker, or an
-image that will not build, exits 64; it never skips.
+mark and the status bar segment, the old JSON files being left alone, and the
+sweep against a real server (saving a due server, holding a too-new one, the
+throttle across a restart, and the `SNAPSHOT STALE` segment showing, clearing,
+and still rendering after the socket is deleted). The unit cases in
+`tests/cases/` fake tmux with `tests/fake-tmux.sh`, including the sweep's gate
+logic (first-save hold, throttle with its grace, liveness skip, unset handling);
+anything about how tmux itself treats an argument belongs here instead. Run it
+after changing `tmux-snapshot`, `tmux-snapshot-sweep` or
+`home/common/lib/tmux-snapshot.sh`. A missing docker, or an image that will not
+build, exits 64; it never skips.
 
 A case in `tests/cases/` builds no repository. It sources the library, replaces
 `git` with a shell function backed by a fake commit graph, and asserts on what

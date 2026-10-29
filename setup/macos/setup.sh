@@ -45,3 +45,12 @@ cat "$DOTFILES/setup/Brewfile" "$DIR/Brewfile" | brew bundle --file=-
 
 # 5. Link the configs into $HOME.
 "$DOTFILES/install.sh"
+
+# 6. Autosave every tmux server's layout on a timer, replacing the old in-tmux
+#    watcher. The LaunchAgent is linked into ~/Library/LaunchAgents by install.sh
+#    above. bootout first so a re-run reloads a changed plist.
+#    NOT TESTED HERE (no macOS in this environment); see the plist's header for
+#    the checks to run on a Mac.
+agent="$HOME/Library/LaunchAgents/com.shellicar.tmux-snapshot-sweep.plist"
+launchctl bootout "gui/$(id -u)" "$agent" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$agent"

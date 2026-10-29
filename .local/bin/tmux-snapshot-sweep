@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+# tmux-snapshot-sweep: save every live tmux server that is due, once. The OS
+# scheduler runs it every INTERVAL (a systemd --user timer on WSL, a launchd
+# LaunchAgent on macOS); it is not a command the user runs, so it lives here in
+# .local/bin, off PATH (install.sh does not link this tree into $HOME), and the
+# units invoke it by this repo path. tmux-snapshot stays the only snapshot
+# command on PATH.
+#
+# DECISION: the OS scheduler owns the cadence, not a daemon. The old
+# tmux-snapshot-watch was one unsupervised process per server, launched by
+# run-shell from .tmux.conf; nothing respawned it when it died and nothing
+# showed that it had, and it silently stopped saving for days. A stateless sweep
+# on a timer survives a crash (the scheduler respawns it) and self-heals (each
+# run reads the world afresh), and needs no lock: neither systemd nor launchd
+# starts a second copy of a run still going. This rules out any in-process
+# supervision, and makes the absence of a recent save, not a reported error, the
+# signal that saving has stopped (the status bar reads @snapshot-last-save).
+#
+# DECISION: INTERVAL and GRACE live here, the one place that holds them. The
+# scheduler needs the cadence in its own syntax and cannot read this file, so
+# each unit repeats INTERVAL with a comment pointing back here; keep them in
+# step. GRACE is a few tens of seconds, above a normal save's duration: the
+# throttle treats a server as due once its last save is INTERVAL - GRACE old, so
+# a tick one interval after the last save still saves instead of skipping to the
+# next. The status bar's staleness threshold is 2 * INTERVAL (a literal in
+# .tmux.conf).
+#
+# POSIX sh. The logic is in home/common/lib/tmux-snapshot.sh, found by repo path
+# because this tree is not symlinked; this file is the constants and a call in.
+
+set -u
+
+DIR=$(cd "$(dirname "$0")" && pwd)
+
+INTERVAL=300    # seconds between sweeps; keep the unit timers in step
+GRACE=30        # throttle slack, below INTERVAL and above a save's duration
+SAVE_TIMEOUT=10 # a per-server step is killed after this, so one wedge cannot stall the sweep
+
+LIB=$DIR/../../home/common/lib/tmux-snapshot.sh
+if [ ! -r "$LIB" ]; then
+  echo "tmux-snapshot-sweep: cannot read its library at $LIB" >&2
+  exit 1
+fi
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../home/common/lib/tmux-snapshot.sh
+. "$LIB"
+command -v tmux_snapshot_sweep >/dev/null 2>&1 || {
+  echo "tmux-snapshot-sweep: $LIB does not define tmux_snapshot_sweep" >&2
+  exit 1
+}
+
+tmux_snapshot_sweep "$INTERVAL" "$GRACE" "$SAVE_TIMEOUT"

@@ -164,6 +164,23 @@ fake_option_is_set() { # <name>
   grep -q "^$1$FUS" "$FAKE_OPTIONS"
 }
 
+# Answers the sweep's one read, `display-message -p '<format>'`, and returns 2
+# for anything else so a case can chain it after fake_listing/fake_option. A
+# server with no sessions is a dead socket: it fails as tmux does (exit 1, which
+# the sweep reads as skip). #{start_time} renders from FAKE_START_TIME and
+# #{@snapshot-last-save} from the options file, so a save's record round-trips
+# into the next read.
+FAKE_START_TIME='1000000000'
+fake_display() { # tmux's arguments
+  local fmt
+  [ "$1" = -u ] && shift
+  [ "$1" = -L ] && shift 2
+  case "$1 $2" in 'display-message -p') [ $# -eq 3 ] || return 2 ;; *) return 2 ;; esac
+  [ -n "$FAKE_SESSIONS" ] || { echo "no server running on /tmp/tmux-1000/fake" >&2; return 1; }
+  fmt=$3
+  fake_render "$fmt" start_time "$FAKE_START_TIME" @snapshot-last-save "$(fake_option_value @snapshot-last-save)"
+}
+
 # Fields separated by US, one line: what a plan step or a status row is.
 snap_line() {
   local IFS
