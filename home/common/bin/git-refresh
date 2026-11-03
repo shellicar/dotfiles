@@ -359,10 +359,10 @@ derive() {
     # one the branch is offered its rebase below instead, and kept.
     [ "$name" != "$MAIN" ] && [ "$class" = review ] && [ "$pr" = yes ] &&
       { removal="rescue $n off $name, then remove it"; def=off; }
-    # The exception. An empty branch named worktree-agent-*, which only Claude
-    # Code makes, for a subagent, starts ticked when its worktree, if it has
-    # one, holds no ignored files for the removal to take silently. A dirty or
-    # locked worktree is still blocked below, whatever this decides.
+    # The exception. An empty branch named worktree-agent-*, the name Claude
+    # Code gives a subagent's branch, starts ticked when its worktree, if it has
+    # one, holds no ignored files, which the removal would delete with it. A
+    # dirty or locked worktree is still blocked below, whatever this decides.
     #
     # Only the removal's default changes. def is still the class's default and
     # the update below still reads it, so unticking this removal does not tick
