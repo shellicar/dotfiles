@@ -311,7 +311,9 @@ command never proposes maintaining a branch it is proposing to delete, and takin
 removal masks the update entirely.
 
 One exception: an empty branch named `worktree-agent-*`, which Claude Code makes for a
-subagent, starts with its removal ticked unless its worktree holds ignored files. A
+subagent, starts with its removal ticked unless its worktree holds ignored files. It
+has no age condition, and relies on the lock to keep out a worktree an agent is still
+using. An earlier version waited 7 days (#65); #73 removed the wait. A
 lock or uncommitted changes still make the removal unavailable, as they do for any
 removal. Only the removal starts ticked; the update still starts where the empty class
 starts it, off, so unticking the removal does not tick the update.
