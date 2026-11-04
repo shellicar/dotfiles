@@ -318,6 +318,10 @@ lock or uncommitted changes still make the removal unavailable, as they do for a
 removal. Only the removal starts ticked; the update still starts where the empty class
 starts it, off, so unticking the removal does not tick the update.
 
+A removal whose worktree holds ignored files names them, ticked or not: at the end of
+its row in the picker, and on a line under its row in `--plan` and in the list printed
+before the run. A removal shown as unavailable names none, since it deletes nothing.
+
 `--plan` prints the same list and stops, which is also what happens with no terminal.
 `--base`, `--branch`, `--depth`, `--old`, `--no-fetch` and `-v` behave as they do in
 `git cleanup`.
