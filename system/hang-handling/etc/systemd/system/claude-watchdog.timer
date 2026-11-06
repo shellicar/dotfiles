@@ -1,6 +1,6 @@
 # Starts claude-watchdog.service 30 seconds after boot, then 5 seconds after
-# each time it was last started, to within 1 second. Enabling it hooks it
-# into timers.target, so it runs on every boot.
+# each start, to within 1 second. Enabling it hooks it into timers.target, so
+# it runs on every boot.
 
 [Unit]
 Description=Check for D-state claude processes

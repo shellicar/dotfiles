@@ -42,9 +42,9 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   the file's real path: `system/wsl-boot/etc/wsl.conf` is `/etc/wsl.conf`. Each
   feature's `platforms` file lists the OSes it applies to, one per line, in
   `get-os.sh`'s names. A file can hold `{{user}}` where the name of the user
-  installing it goes; it is filled in wherever the file is compared or
-  installed. Files here are installed by copying, and `install.sh` doesn't
-  touch any of it.
+  running `system.sh` goes, not `root` from its sudo; it is filled in wherever
+  the file is compared or installed. Files here are installed by copying, and
+  `install.sh` doesn't touch any of it.
 
 ## Map
 
