@@ -1,7 +1,7 @@
 # Runs /usr/local/sbin/claude-watchdog.sh once each time it is started, as
-# the user in User=, with CAP_SYS_PTRACE. claude-watchdog.timer starts it.
-# The watchdog logs every process stuck in the kernel (state D) for 60
-# seconds, and kills only Claude processes once one has been stuck that long.
+# the user in User=, with CAP_SYS_PTRACE. The watchdog logs every process
+# stuck in the kernel (state D) for 60 seconds, and kills only Claude
+# processes once one has been stuck that long.
 
 [Unit]
 Description=Kill D-state claude processes

@@ -40,11 +40,8 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   `system/<feature>/` holds everything for one feature, and a path inside it is
   the file's real path: `system/wsl-boot/etc/wsl.conf` is `/etc/wsl.conf`. Each
   feature's `platforms` file lists the OSes it applies to, one per line, in
-  `get-os.sh`'s names; it is the one place an OS is chosen by a file's content
-  rather than its path. `{{user}}` in a file stands for the name of the user
-  installing it. Files here are installed by copying, and `install.sh` doesn't
-  touch any of it.
-  <!-- TODO(claude): undecided: whether this invariant names {{user}}. Named for now. -->
+  `get-os.sh`'s names. Files here are installed by copying, and `install.sh`
+  doesn't touch any of it.
 
 ## Map
 
@@ -69,7 +66,7 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   `tmux-snapshot-sweep`, the autosave the OS scheduler runs on a timer (kept off
   PATH because it is machinery, not a command the user runs)
 - `system/<feature>/`: files outside `$HOME` (`/etc`, `/usr/local`) as they
-  should be on the machine, at their real paths. Nothing installs them yet.
+  should be on the machine, at their real paths
 - `docs/yubikey.md`: hardware-backed signing and auth decisions, and their reasoning
 - `docs/git-commands.md`: what the git commands decide, how, and what stops them
 
