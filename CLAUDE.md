@@ -17,9 +17,10 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
 
 ## Invariants — do not break these
 
-- **The path is the condition.** Per-OS behaviour is selected by filename
-  (`os/<os>.rc.sh`, `home/<os>/…`), never by runtime `if [ "$os" = macos ]`. To
-  change OS-specific behaviour, edit or add the OS-specific file.
+- **The path is the condition.** A script never branches on the OS at runtime
+  (`if [ "$os" = macos ]`); its per-OS behaviour is selected by which file is
+  used (`os/<os>.rc.sh`, `home/<os>/…`). To change OS-specific behaviour, edit or
+  add the OS-specific file.
 - **Overlays are optional; don't create empty ones.** e.g. `os/wsl.env.sh` exists
   but there is no `os/wsl.rc.sh`. A file exists only when it has content.
 - **`install.sh` is one-way and non-clobbering.** It symlinks `home/common` +
@@ -40,8 +41,10 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   `system/<feature>/` holds everything for one feature, and a path inside it is
   the file's real path: `system/wsl-boot/etc/wsl.conf` is `/etc/wsl.conf`. Each
   feature's `platforms` file lists the OSes it applies to, one per line, in
-  `get-os.sh`'s names. Files here are installed by copying, and `install.sh`
-  doesn't touch any of it.
+  `get-os.sh`'s names. A file can hold `{{user}}` where the name of the user
+  installing it goes; it is filled in wherever the file is compared or
+  installed. Files here are installed by copying, and `install.sh` doesn't
+  touch any of it.
 
 ## Map
 
