@@ -36,7 +36,7 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   `.config/git/hooks` so a hook added there is live without re-running anything.
 - **`.local/` is not linked, and does not need to be.** `.tmux.conf` calls its
   script by repo path, so nothing under it has to exist in `$HOME`.
-- **`system/` holds system files by feature, copied rather than linked.**
+- **`system/` holds system files by feature.**
   `system/<feature>/` holds everything for one feature, and a path inside it is
   the file's real path: `system/wsl-boot/etc/wsl.conf` is `/etc/wsl.conf`.
   `{{user}}` in a file stands for the username, not `root`. Files here are
