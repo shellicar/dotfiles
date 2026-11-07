@@ -57,8 +57,10 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   directly instead of committing its way to one.
 - `home/{common,<os>}/`, `os/`, `setup/<os>/`, `.gitconfig.d/`, `.vscode/`
 - `.local/bin/` — not linked into `$HOME`; called by repo path. Holds
-  `tmux-snapshot-sweep`, the autosave the OS scheduler runs on a timer (kept off
-  PATH because it is machinery, not a command the user runs)
+  `tmux-snapshot-sweep`, the autosave the OS scheduler runs on a timer, and
+  `tmux-last-pane`, which `.tmux.conf`'s Tab binding runs to go back to the
+  most recent pane that still exists (both kept off PATH because they are
+  machinery, not commands the user runs)
 - `docs/yubikey.md`: hardware-backed signing and auth decisions, and their reasoning
 - `docs/git-commands.md`: what the git commands decide, how, and what stops them
 
