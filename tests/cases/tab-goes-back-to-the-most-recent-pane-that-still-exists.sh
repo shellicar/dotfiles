@@ -14,6 +14,10 @@
 # history (absent means unset), the panes that exist, the pane the client is
 # on, and the message shown. It fails the way tmux does, with a line on stderr,
 # for a switch to a missing pane and for the failure flags below.
+# TODO(claude): undecided: whether the script is tested as a program with this
+# fake on PATH, or split into a sourced library so tests/fake-tmux.sh and the
+# harness's tmux function can answer it, as tmux-snapshot's cases do. A program
+# for now, which is also how run-shell runs it.
 set -u
 TESTS=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$TESTS/.." && pwd)

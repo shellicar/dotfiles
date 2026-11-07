@@ -36,7 +36,8 @@ exec >/dev/null 2>&1
 say() {
   # TODO(claude): undecided: whether the binding passes #{client_name} so the
   # message reaches the terminal that pressed the key when several are attached.
-  # Without -c, tmux shows it on the client it judges most recently active.
+  # Without -c, tmux shows it on the client it judges most recently active,
+  # while the current pane passed in is the one the key was pressed in.
   tmux display-message "$1"
   exit 0
 }
@@ -70,6 +71,7 @@ tmux set-option -g @pane-history "$kept"
 
 # TODO(claude): undecided: whether the binding passes #{client_name} so the
 # switch moves the terminal that pressed the key when several are attached.
-# Without -c, tmux switches the client it judges most recently active.
+# Without -c, tmux switches the client it judges most recently active, which
+# with several terminals attached may not be the one whose pane was passed in.
 tmux switch-client -t "$target" || say 'Tab: could not switch to the earlier pane'
 exit 0
