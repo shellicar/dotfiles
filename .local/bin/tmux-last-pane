@@ -1,0 +1,75 @@
+#!/bin/sh
+#
+# tmux-last-pane: go back to the most recent pane that still exists, in any
+# window or session. Bound to Tab in home/common/.tmux.conf, which runs it by
+# this repo path through run-shell and passes the current pane id:
+#
+#   tmux-last-pane <current pane id>
+#
+# The history is the global option @pane-history: pane ids, most recent first,
+# separated by spaces and padded with a space at each end (" %3 %2 %1 "). The
+# pane-focus-in hook in .tmux.conf keeps it, moving each newly focused pane to
+# the front; the padding is what lets that hook match " %1 " without touching
+# " %12 ". Closed panes stay in it until this script runs.
+#
+# What it does: reads the history and the panes that exist, writes the history
+# back without the closed ones, then switches to the first pane left that is not
+# the current one. The write comes before the switch because the switch fires
+# the focus hook, which reads the history. When there is nowhere to go, or a
+# step fails, it says so with display-message and still exits 0.
+#
+# It prints nothing, on any path, and always exits 0: run-shell shows a command's
+# output, or its failure, in view mode over the whole pane. Hence the exec below,
+# which sends everything the script and its tmux calls print to /dev/null;
+# command substitutions still capture their own output.
+#
+# The tmux calls take no -L/-S: run-shell sets $TMUX, so they reach the server
+# the key was pressed on.
+#
+# POSIX sh. Run only on WSL (tmux 3.7c in tests/tmux, and the unit case in
+# tests/cases). Not run on macOS; to confirm there, in a tmux on the Mac: focus
+# three panes in turn, close the middle one, press C-a Tab, and check that it
+# lands on the first with nothing covering the pane.
+
+exec >/dev/null 2>&1
+
+say() {
+  # TODO(claude): undecided: whether the binding passes #{client_name} so the
+  # message reaches the terminal that pressed the key when several are attached.
+  # Without -c, tmux shows it on the client it judges most recently active.
+  tmux display-message "$1"
+  exit 0
+}
+
+current=${1:-}
+
+# The ids are split on spaces below; -f keeps a stray glob character literal.
+set -f
+
+history=$(tmux show-options -gqv @pane-history) || history=''
+live=$(tmux list-panes -a -F '#{pane_id}') || say 'Tab: could not list the panes'
+
+NL='
+'
+kept=' '
+target=''
+for id in $history; do
+  # Whole lines against the live list, so %1 never matches %12.
+  case "$NL$live$NL" in *"$NL$id$NL"*) ;; *) continue ;; esac
+  # Whole entries against what is kept, so a duplicate is dropped.
+  case "$kept" in *" $id "*) continue ;; esac
+  kept="$kept$id "
+  [ -z "$target" ] && [ "$id" != "$current" ] && target=$id
+done
+
+# A refused write (a value too long for a command line) leaves the old history
+# in place; the switch goes ahead regardless.
+tmux set-option -g @pane-history "$kept"
+
+[ -n "$target" ] || say 'Tab: no earlier pane to go back to'
+
+# TODO(claude): undecided: whether the binding passes #{client_name} so the
+# switch moves the terminal that pressed the key when several are attached.
+# Without -c, tmux switches the client it judges most recently active.
+tmux switch-client -t "$target" || say 'Tab: could not switch to the earlier pane'
+exit 0
