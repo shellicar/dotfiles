@@ -1,4 +1,4 @@
-# Runs /usr/local/sbin/claude-watchdog.sh.
+# The Claude watchdog as a systemd service, for claude-watchdog.timer to start.
 
 [Unit]
 Description=Kill D-state claude processes
