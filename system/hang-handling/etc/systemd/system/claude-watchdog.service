@@ -1,0 +1,10 @@
+# The Claude watchdog as a systemd service, for claude-watchdog.timer to start.
+
+[Unit]
+Description=Kill D-state claude processes
+
+[Service]
+Type=oneshot
+User={{user}}
+AmbientCapabilities=CAP_SYS_PTRACE
+ExecStart=/usr/local/sbin/claude-watchdog.sh
