@@ -38,13 +38,14 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   script by repo path, so nothing under it has to exist in `$HOME`.
 - **`system/` holds system files by feature, copied rather than linked.**
   `system/<feature>/` holds everything for one feature, and a path inside it is
-  the file's real path: `system/wsl-boot/etc/wsl.conf` is `/etc/wsl.conf`.
-  Each feature's `platforms` file lists the OSes it applies to, and `system.sh`
-  uses only the features whose list names the OS it runs on.
-  A file can hold `{{user}}` where the name of the user running `system.sh`
-  goes, not `root` from its sudo; it is filled in wherever the file is compared
-  or installed. Files here are installed by copying, and `install.sh` doesn't
+  the file's real path: `system/wsl-boot/etc/wsl.conf` is `/etc/wsl.conf`. A
+  file can hold `{{user}}` where the name of the user running `system.sh` goes,
+  not `root` from its sudo; it is filled in wherever the file is compared or
+  installed. Files here are installed by copying, and `install.sh` doesn't
   touch any of it.
+  - Each feature's `platforms` file lists the OSes it applies to, one per line
+    in `get-os.sh`'s names, and `system.sh` uses only the features whose list
+    names the OS it runs on.
 
 ## Map
 
