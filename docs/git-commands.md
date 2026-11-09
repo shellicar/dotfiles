@@ -383,7 +383,24 @@ two refs' tips directly (read from GitLens 19.3.0's source), so a base that has 
 branch had deleted it. From the merge base, the list is what the branch adds, the way a
 pull request shows it.
 
-Opening VS Code is per platform: `vscode-open-review` in `home/<os>/bin`. On WSL it
-opens the folder through a `vscode-remote://wsl+…` address and hands the GitLens link
-to Windows with `Start-Process`. The macOS and Linux ones refuse until each has been
-tried on that platform.
+Opening VS Code is per platform: `vscode-open-review` in `home/<os>/bin`. VS Code
+hands a link to the window it opened or focused last, so an opener opens the folder
+first and then hands over the link. On WSL it opens the folder through a
+`vscode-remote://wsl+…` address and hands the GitLens link to Windows with
+`Start-Process`. On macOS, with VS Code running, it runs `code <folder>` and then
+`code --open-url <link>`; with VS Code not running, it starts it once with both, as
+`code --folder-uri file://<folder> --open-url <link>`. The Linux one refuses until it
+has been tried on Linux.
+
+The macOS one was run on a Mac on 2026-11-09, with `git review` from a checkout, in two
+states:
+
+- with VS Code running, another VS Code window focused last, and no window open on the
+  checkout, a new window opened on the checkout with the comparison;
+- with VS Code quit, VS Code started with a window on the checkout and the comparison.
+
+Two states have not been run yet. Running `git review` from a checkout in each would
+confirm them, and in each the comparison should appear in that checkout's window:
+
+- the checkout open in a window behind the focused one;
+- VS Code running with no windows open.

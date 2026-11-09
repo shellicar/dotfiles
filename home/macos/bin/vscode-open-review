@@ -1,8 +1,55 @@
 #!/bin/sh
 #
 # vscode-open-review <folder> <link>: open <folder> in VS Code, then hand it
-# <link>. Not built for macOS yet: the WSL version is the reference, and this
-# one needs trying on a Mac before it can be trusted.
+# <link>. git review calls this; see that command for the link.
+#
+# Written from the WSL version and from VS Code 1.143.1's own source. Run on a
+# Mac on 2026-11-09, with `git review` from a checkout, in two states. With VS
+# Code running, another VS Code window focused last and no window open on the
+# checkout, a new window opened on the checkout with the comparison. With VS
+# Code quit, VS Code started with a window on the checkout and the comparison.
+# Not run yet: the checkout already open in a window behind the focused one,
+# and VS Code running with no windows open. `git review` showing the comparison
+# in the checkout's window in each would confirm them. docs/git-commands.md,
+# under git review, lists the same.
+#
+# VS Code hands a link to the window it opened or focused last, so the folder
+# goes first. `code` returns before VS Code has done anything: it starts a new
+# instance through `open`, which passes its arguments to the running one and
+# quits. The link goes through `code --open-url` so it takes the same route as
+# the folder, started after it. Nothing makes it arrive second; `open <link>`
+# skips that start-up and can arrive first.
+#
+# A VS Code that is not running is started once, with both. Two calls would
+# start two instances, and a link that reached VS Code before its first window
+# existed would get a new empty window of its own. The folder goes as
+# --folder-uri in that launch, because --open-url takes every plain argument as
+# a link. A running VS Code with no windows gets the two calls, and opens an
+# empty window of its own for a link that arrives before the folder's window.
 
-echo "vscode-open-review: not supported on macOS yet" >&2
-exit 1
+set -eu
+
+DIR=$(cd "$(dirname "$0")" && pwd)
+# ../lib is ~/lib once install.sh has linked home/macos/bin and home/common/lib
+# into $HOME. Run from the repository path it is missing.
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../../common/lib/git-common.sh
+. "$DIR/../lib/git-common.sh"
+# Sourcing pinned git's settings again; VS Code must not inherit them.
+unpin_git_config
+
+[ $# -eq 2 ] || { echo "usage: vscode-open-review <folder> <link>" >&2; exit 64; }
+
+# TODO(claude): undecided: how a running VS Code is told from none. A process
+# named exactly Code for now, which the code command itself also is while it
+# runs, so a `code --wait` left open counts as VS Code running.
+if pgrep -xq Code; then
+  code "$1"
+  # TODO(claude): undecided: whether the link waits until the folder's window
+  # is focused. It is sent straight away for now.
+  code --open-url "$2"
+else
+  # TODO(claude): undecided: whether a VS Code that is not running gets this
+  # one launch or the same two calls as a running one. One launch for now.
+  code --folder-uri "file://$(uri_encode "$1")" --open-url "$2"
+fi
