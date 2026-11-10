@@ -45,6 +45,93 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   - Each feature's `platforms` file lists the OSes it applies to, one per line
     in `get-os.sh`'s names.
 
+## How changes land
+
+This is the current design, not a fixed rule, and dotfiles is where it is being
+worked out.
+
+- **No pull requests and no issues.** *Why:* this is the chance to strip the
+  process back; anything that turns out to be needed is layered back on top.
+- The session Stephen talks to squash-merges a branch into local `main` on his
+  word.
+- Commits to `main` are signed, and the checks run on pushes to `main` as well
+  as on pull requests.
+
+## Each kind of content has its own process
+
+- **Commands, their library and tests:** logic that runs, such as
+  `home/common/bin/`, `home/common/lib/`, `home/<os>/bin/`, `home/wsl/lib/`,
+  `.local/bin/`, `install.sh`, `setup.sh`, `get-os.sh`, `.vscode/sync.mjs`,
+  `tests/` and `test.sh`.
+  - A new tool's design is agreed with Stephen before it is built.
+  - A small change takes the light route by default: an agent makes it on its
+    own branch, the suite runs, Stephen looks, and his word merges it. No
+    reviewer.
+  - The full route when it changes a decision the tool makes, touches the
+    dry-run gate, changes what a test asserts, rests on a claim about what git
+    does, or would likely take rounds of review: an agent builds it on its own
+    branch, a reviewer checks it with fix rounds, each new test is shown to fail
+    without the change, the suites run, Stephen looks, and his word merges it.
+  - *Why:* the light route is a matchbox, a fixed cost known before you start.
+    Review is a spring: its cost grows with each round, as the wire does with
+    each coil, and isn't known at the start; a review that passes first time is
+    a short spring and costs little. So the question is whether a change is
+    likely to take rounds, not only whether to review it. Each round looks
+    reasonable on its own; the cost is in how they add up.
+  - Stephen's look, on either route: before it merges, he is given the change
+    through `git review`. What he looks at is his choice each time: how it fits
+    together, the comments, code smells, or all of it. On the full route, a
+    reviewer has already checked it, hopefully against what he asked for and
+    his skills, so this isn't a PR-style review.
+  - The tests get at least the code's scrutiny, because Stephen values them
+    more than the code they test.
+- **Git hooks** (`home/common/.config/git/hooks/`): always the full route.
+  *Why:* they run on every commit and push in every repo on the machine, so a
+  broken one blocks everything at once.
+- **Live config:** what a program or the shell reads live, such as the
+  dotfiles under `home/`, `.gitconfig.d/`, `load.sh`, `context.sh`, `certs.sh`,
+  `path.sh`, `os/`, `bash/`, `zsh/`, `.gitignore_global` and `.gitignore`.
+  Changed, tried in use, committed directly. No agent review: the machine has
+  the change before a reviewer could act. A file both machines read can only be
+  tried on the machine making the change.
+- **Rarely-run setup**, such as `setup/` (its scripts and their package and
+  version lists) and the VS Code settings: the VS Code settings are committed
+  directly; setup scripts with logic follow the commands route. Nothing here is
+  run before it lands, because a fresh machine is too dear a test.
+- **System config** (`system/`): copied from the machine, checked against the
+  live file and for secrets, committed. `system.sh` itself is a command.
+- **CI** (`.github/`): the commands route. Anything about signature enforcement
+  is shown to Stephen.
+- **CLAUDE.md and the repo's Claude settings:** drafted with only what was
+  asked, and the reason agreed with Stephen beside each rule; an agent checks
+  it against Stephen's words and Anthropic's
+  [prompting guidance](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices.md);
+  shown to him, and lands on his word. The Map, Commands and Testing sections
+  change with the code they describe.
+  *Why only what was asked:* adding what wasn't asked for erodes trust.
+- **Docs**, such as `docs/`, `README.md` and `LICENSE`: changed in the same
+  commit as the code they describe. A docs-only fix goes in directly on his
+  word. `docs/yubikey.md` records his signing decisions, so it is checked
+  against his words.
+- **Package files**, such as `package.json`, `pnpm-lock.yaml` and
+  `pnpm-workspace.yaml`: changed with whatever needs them. The supply-chain policy in
+  `pnpm-workspace.yaml` is shown to Stephen.
+
+**Across every kind:**
+
+- Changes to signing, auth, credentials, or what the machines trust are shown
+  to Stephen before they go live, such as the gpg bridge (`home/wsl/bin/gpg-bridge*`,
+  `home/wsl/lib/gpg-bridge.sh`), `.gitconfig.d/`, the signing parts of the
+  `.gitconfig` files, the CA certificates, and `certs.sh`.
+- Anything that widens the sandbox or the permissions in
+  `.claude/settings.json` is shown to Stephen.
+- Every commit gets a secret scan, because the repo is public.
+- Push after every merge or direct commit to `main`, because agents' worktrees
+  and the MacBook start from GitHub's `main`, so an unpushed merge or commit
+  leaves them on stale files.
+- A whole-repo look, when Stephen asks: live files that differ from the repo,
+  leftover branches and worktrees.
+
 ## Map
 
 - `install.sh` — symlink installer (`home/` → `$HOME`)
@@ -105,7 +192,7 @@ constraint, a trap, or an approach that was tried and failed, so it is not tried
 again. Justification argues that a choice was right, which protects whoever made
 it and gives the reader nothing to act on. What helps them is the decision
 itself, recorded the way an ADR records one: what was chosen, in what context, and
-what it rules out. That goes in the commit, the PR or the doc, and a comment keeps
+what it rules out. That goes in the commit or the doc, and a comment keeps
 to what someone changing the code needs in front of them. Read the header before
 changing one, and put what you learn there or in the doc rather than here.
 This list says only what a command is for, so that changing how one behaves leaves
@@ -138,7 +225,8 @@ this file alone.
 - **Hooks**: `core.hooksPath` → `~/.config/git/hooks`, which `install.sh` symlinks
   whole to `home/common/.config/git/hooks`. `pre-push` gates the *remote* ref name
   rather than the local branch (a local checkout can be called anything; what lands
-  on the remote is what matters): only `docs/ fix/ hotfix/ security/ feature/ epic/ review/`.
+  on the remote is what matters): only `main`, `master` and
+  `docs/ fix/ hotfix/ security/ feature/ epic/ review/`.
   `pre-commit` delegates to the repo's own `.git/hooks/pre-commit` when one
   exists, so a per-repo hook still runs. `commit-msg` delegates the same way,
   after adding a `Claude-Session: <id>` trailer to commits made from a Claude Code
