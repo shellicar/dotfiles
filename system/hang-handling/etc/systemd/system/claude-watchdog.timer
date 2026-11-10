@@ -1,0 +1,13 @@
+# Starts claude-watchdog.service 30 seconds after boot, then 5 seconds after
+# each start.
+
+[Unit]
+Description=Check for D-state claude processes
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=5s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
