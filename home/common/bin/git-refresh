@@ -557,12 +557,6 @@ draw() {
     if [ "$i" -eq "$CUR" ]; then point="$INV>$RESET"; else point=' '; fi
     [ "$why" = - ] && why=''
     body="$action  $why"
-    # A removal that can run names its ignored entries, ticked or not, the same
-    # rule say_selected follows. Here they go at the end of the row rather than
-    # on a line under it, because the frame counts one line per row.
-    # TODO(claude): undecided: every removal row that can run shows them, not
-    # only subagent rows. Every such row for now.
-    [ "$state" != skip ] && [ "$ign" != - ] && body="$body  ↳ also deletes $ign"
     if [ "$state" = on ]; then icon_of "$kind"; else IC='• '; fi
     # The class icon carries its own reset, so the dim of an unselected row is
     # reopened after it.
@@ -686,12 +680,9 @@ say_selected() {
     icon_of "$kind"
     class_icon "$class"
     printf '  %b%b %s %s %b  %b%s%b\n' "$mark" "$CICON" "$IC" "$action" "$meta" "$DIM" "$why" "$RESET"
-    # For any removal that can run, ticked or not: the entries are what it would
-    # delete, and for a subagent branch they are why it starts unticked. A [-]
-    # row deletes nothing, so it lists nothing.
-    # TODO(claude): undecided: every removal row that can run shows them, not
-    # only subagent rows. Every such row for now.
-    [ "$state" != skip ] && [ "$ign" != - ] && say_ignored "$ign"
+    # Only for something that is actually going to happen. On an unticked row it
+    # warns about a deletion nobody has asked for yet.
+    [ "$state" = on ] && [ "$ign" != - ] && say_ignored "$ign"
   done <<EOF
 $ROWS
 EOF

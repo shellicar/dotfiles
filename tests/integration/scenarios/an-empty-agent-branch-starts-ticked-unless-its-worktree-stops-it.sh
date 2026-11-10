@@ -11,8 +11,7 @@
 #   worktree-agent-staged     a staged file                       [-]
 #   worktree-agent-unstaged   a tracked file changed              [-]
 #   worktree-agent-untracked  an untracked file                   [-]
-#   worktree-agent-ignored    an ignored file                     [ ], the file
-#                                                                 listed under it
+#   worktree-agent-ignored    an ignored file                     [ ]
 #   feature/empty             a worktree with nothing in it       [ ]
 set -eu
 
@@ -73,12 +72,6 @@ for b in staged unstaged untracked; do
 done
 expect worktree-agent-ignored '[ ]' 'remove worktree-agent-ignored and its worktree' \
   'never diverged from main'
-# The unticked row says why: the line under it lists the ignored entries.
-under=$(printf '%s\n' "$out" | awk '/remove worktree-agent-ignored / { getline; print; exit }' | sed 's/^ *//')
-case "$under" in
-  '↳ also deletes 1 ignored entries: .env') printf '  ok   worktree-agent-ignored: %s\n' "$under" ;;
-  *) fail "worktree-agent-ignored: expected its ignored entries under the row, got [$under]" ;;
-esac
 expect feature/empty '[ ]' 'remove feature/empty and its worktree' \
   'never diverged from main'
 
