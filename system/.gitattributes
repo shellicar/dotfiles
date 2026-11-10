@@ -1,0 +1,4 @@
+# Owner and mode for the files in system/ that are not root:root 0644, or
+# 0755 when git marks them executable. system.sh reads owner= and mode= with
+# git check-attr.
+**/etc/sudoers.d/*  mode=0440
