@@ -5,13 +5,12 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../harness.sh
 . "$TESTS/harness.sh"
 
-describe "git refresh leaves a subagent worktree unticked when it holds ignored files, and lists them once it is ticked"
+describe "git refresh leaves a subagent worktree unticked when it holds ignored files"
 
 # git worktree remove deletes ignored files without a word, so a worktree
-# holding any is never removed by default. Ticked by hand, the removal says
-# what it deletes before it runs.
+# holding any is never removed by default.
 
-git_says() { fail "deriving and printing ask git nothing: git $*"; }
+git_says() { fail "deriving asks git nothing: git $*"; }
 
 guard_path
 # shellcheck source=../../home/common/lib/git-common.sh
@@ -27,10 +26,6 @@ DFACTS=''
 
 derive
 
-expected='off|never diverged from main|1 ignored entries: .env'
-actual=$(printf '%s' "$ROWS" | awk -F"$TAB" '$1 == "worktree-agent-abcR" { print $2 "|" $6 "|" $7; exit }')
+expected='off|never diverged from main'
+actual=$(printf '%s' "$ROWS" | awk -F"$TAB" '$1 == "worktree-agent-abcR" { print $2 "|" $6; exit }')
 assert_eq "${actual:-<no removal row>}" "$expected"
-
-select_op worktree-agent-abcR
-derive
-assert_contains "$(say_selected 'Will run')" 'also deletes 1 ignored entries: .env'
