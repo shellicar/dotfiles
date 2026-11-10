@@ -7,8 +7,8 @@
 # container's own /etc and /usr/local. The command runs as tester.
 
 R=/work/repo
-mkdir -p "$R/home/common/lib" "$R/system" /work/tmp
-chmod 1777 /work/tmp
+mkdir -p "$R/home/common/lib" "$R/system" /work/tmp /work/sudo
+chmod 1777 /work/tmp /work/sudo
 cp /repo/system.sh /repo/get-os.sh "$R/"
 cp /repo/home/common/lib/system.sh "$R/home/common/lib/"
 cp /repo/system/.gitattributes "$R/system/"
@@ -46,7 +46,7 @@ live_file() { # <path> <content> <owner:group> <mode>
 fingerprint() { # <path>...
   for p in "$@"; do
     if [ -e "$p" ]; then
-      printf '%s %s\n' "$(stat -c '%U:%G %a %s %Y' "$p")" "$(cksum < "$p")"
+      printf '%s %s\n' "$(stat -c '%U:%G %a %s %y' "$p")" "$(cksum < "$p")"
     else
       printf 'absent %s\n' "$p"
     fi

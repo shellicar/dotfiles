@@ -8,5 +8,5 @@ RUN apt-get update -qq \
  && rm -rf /var/lib/apt/lists/* \
  && useradd -m tester \
  && git config --system --add safe.directory '*' \
- && printf '#!/bin/sh\necho "sudo $*" >> /work/sudo-called\nexit 1\n' > /usr/local/bin/sudo \
+ && printf '#!/bin/sh\necho "sudo $*" >> /work/sudo/called\nexit 1\n' > /usr/local/bin/sudo \
  && chmod 0755 /usr/local/bin/sudo

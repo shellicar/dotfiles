@@ -333,8 +333,9 @@ ordinary user against a copy of the repo with a real git index. It covers each
 file state read from real files, the sudoers mode from the real
 `system/.gitattributes`, that the targets are unchanged and `sudo` never
 called, and that an interrupted run leaves no temporary files. Unit state is
-not covered there: systemd will not start in the rootless docker here
-(`/sys/fs/cgroup` is read-only), so the unit cases in `tests/cases/` fake
+not covered there: tried as PID 1 in the rootless docker on the WSL machine
+with `--cgroupns=private`, systemd exited because `/sys/fs/cgroup` was
+read-only, so the unit cases in `tests/cases/` fake
 `systemctl` and `sysctl` with `tests/fake-system.sh`. Run it after changing
 `system.sh` or `home/common/lib/system.sh`. A missing docker, or an image that
 will not build, exits 64; it never skips.

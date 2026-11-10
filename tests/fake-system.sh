@@ -100,6 +100,29 @@ live_owner() { # <path>
   printf '%s\n' "${o:-root:root}"
 }
 
+# The file's real mode, read from ls rather than the library's GNU stat, so
+# the cases run on macOS too. The real reader is run in tests/system.
+live_mode() { # <path>
+  # shellcheck disable=SC2012
+  ls -ld -- "$1" | awk '
+    function d(r, w, x,   n) {
+      n = 0
+      if (r == "r") n += 4
+      if (w == "w") n += 2
+      if (x ~ /[xst]/) n += 1
+      return n
+    }
+    {
+      p = $1; s = 0
+      if (substr(p, 4, 1) ~ /[sS]/) s += 4
+      if (substr(p, 7, 1) ~ /[sS]/) s += 2
+      if (substr(p, 10, 1) ~ /[tT]/) s += 1
+      printf "%d%d%d%d\n", s, d(substr(p, 2, 1), substr(p, 3, 1), substr(p, 4, 1)),
+        d(substr(p, 5, 1), substr(p, 6, 1), substr(p, 7, 1)),
+        d(substr(p, 8, 1), substr(p, 9, 1), substr(p, 10, 1))
+    }'
+}
+
 mtime_epoch() { printf '%s\n' "$FAKE_MTIME"; }
 boot_epoch() { printf '%s\n' "$FAKE_BOOT"; }
 

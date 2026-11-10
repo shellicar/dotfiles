@@ -209,6 +209,9 @@ EOF
 # ── one item ────────────────────────────────────────────────────────────────
 
 # The role decides which "in effect" check an item gets, from where it lives.
+# TODO(claude): undecided: which other kinds of file have an "in effect"
+# check. Only sysctl files and units for now; a tmpfiles.d file, for one, is
+# in sync when its content, owner and mode are.
 sys_role() { # <path within the feature>
   case $1 in
     */systemd/system/*.service | */systemd/system/*.socket | */systemd/system/*.timer | \
@@ -322,6 +325,8 @@ system_analyse_item() { # <feature> <path within the feature>
       sys_cmd "$install_cmd"
       changed=yes
     elif [ -L "$live" ] || [ ! -f "$live" ]; then
+      # TODO(claude): undecided: what a live path that is a symlink or a
+      # directory shows. It differs, with no diff, and is installed over.
       sys_note differs "not a regular file"
       sys_cmd "$install_cmd"
       changed=yes
@@ -427,6 +432,8 @@ system_check_unit() { # <unit> <wanted file> <changed: yes|no>
     return 0
   fi
 
+  # TODO(claude): undecided: whether a unit file changed on disk that systemd
+  # has not reloaded is not in effect. It is not checked for now.
   # Read from what systemctl prints, not its exit status: is-active exits
   # non-zero for a unit that is not running, and both fail with nothing
   # printed when systemd cannot be reached.

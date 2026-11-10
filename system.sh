@@ -18,6 +18,8 @@ set -u
 
 DIR=$(cd "$(dirname "$0")" && pwd)
 
+# TODO(claude): undecided: the exit status for a wrong call. 64 (EX_USAGE)
+# for now, where the commands in home/common/bin exit 2.
 usage() {
   printf '%s\n' 'usage: system.sh --plan' >&2
   exit 64
@@ -48,4 +50,6 @@ SYS_REPO=$DIR
 OS=$(sh "$DIR/get-os.sh") || exit 1
 SYS_USER=$(id -un)
 
+# TODO(claude): undecided: whether --plan's exit status says if anything is
+# out of line. It exits 0 whenever the plan was worked out, for now.
 system_plan_main

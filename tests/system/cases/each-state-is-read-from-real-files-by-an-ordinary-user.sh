@@ -60,7 +60,7 @@ $before
 ---
 $after"
 ok 'no target changed'
-[ -e /work/sudo-called ] && fail "sudo was called: $(cat /work/sudo-called)"
+[ -e /work/sudo/called ] && fail "sudo was called: $(cat /work/sudo/called)"
 ok 'nothing asked for root'
 [ -z "$(ls -A /work/tmp)" ] || fail "left behind: $(ls -A /work/tmp)"
 ok 'nothing left in TMPDIR'
