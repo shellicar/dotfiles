@@ -332,7 +332,8 @@ under the container's `/etc` and `/usr/local`, and runs `system.sh --plan` as an
 ordinary user against a copy of the repo with a real git index. It covers each
 file state read from real files, the sudoers mode from the real
 `system/.gitattributes`, that the targets are unchanged and `sudo` never
-called, and that an interrupted run leaves no temporary files. Unit state is
+called, that an interrupted run leaves no temporary files, and that the
+planned link for a masked unit refuses a folder at its path. Unit state is
 not covered there: tried as PID 1 in the rootless docker on the WSL machine
 with `--cgroupns=private`, systemd exited because `/sys/fs/cgroup` was
 read-only, so the unit cases in `tests/cases/` fake unit
