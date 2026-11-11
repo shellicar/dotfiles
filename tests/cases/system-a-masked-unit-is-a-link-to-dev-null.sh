@@ -28,5 +28,5 @@ assert_eq "$(commands_of /etc/systemd/system/absent.service)" 'sudo ln -s /dev/n
 sudo systemctl daemon-reload'
 
 assert_eq "$(field /etc/systemd/system/file.service state)" differs
-assert_eq "$(commands_of /etc/systemd/system/file.service)" 'sudo ln -sfn /dev/null /etc/systemd/system/file.service
+assert_eq "$(commands_of /etc/systemd/system/file.service)" 'sudo ln -sfnT /dev/null /etc/systemd/system/file.service
 sudo systemctl daemon-reload'

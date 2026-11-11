@@ -290,7 +290,10 @@ system_analyse_item() { # <feature> <path within the feature>
     elif [ -e "$live" ]; then
       sys_note differs "not a symlink, want one to $want"
       sys_diff_text "(not a symlink)" "-> $want" "$I_DIFF"
-      sys_cmd "sudo ln -sfn $(sys_q "$want") $(sys_q "$path")"
+      # -T makes ln refuse a folder at the path ("cannot overwrite
+      # directory") rather than put the link inside it; an ordinary file is
+      # replaced. GNU ln.
+      sys_cmd "sudo ln -sfnT $(sys_q "$want") $(sys_q "$path")"
       changed=yes
     else
       sys_note missing missing
