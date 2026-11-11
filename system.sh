@@ -29,7 +29,7 @@ PLAN=0
 while [ $# -gt 0 ]; do
   case $1 in
     --plan) PLAN=1 ;;
-    -h | --help) sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "system.sh: unknown option '$1'" >&2; usage ;;
   esac
   shift

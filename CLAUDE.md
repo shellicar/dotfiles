@@ -335,8 +335,8 @@ file state read from real files, the sudoers mode from the real
 called, and that an interrupted run leaves no temporary files. Unit state is
 not covered there: tried as PID 1 in the rootless docker on the WSL machine
 with `--cgroupns=private`, systemd exited because `/sys/fs/cgroup` was
-read-only, so the unit cases in `tests/cases/` fake
-`systemctl` and `sysctl` with `tests/fake-system.sh`. Run it after changing
+read-only, so the unit cases in `tests/cases/` fake unit
+state with a `systemctl` in `tests/fake-system.sh`. Run it after changing
 `system.sh` or `home/common/lib/system.sh`. A missing docker, or an image that
 will not build, exits 64; it never skips.
 
