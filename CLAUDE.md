@@ -44,6 +44,9 @@ not supported. Nothing here has to make zsh work on Linux or bash work on macOS.
   any of it.
   - Each feature's `platforms` file lists the OSes it applies to, one per line
     in `get-os.sh`'s names.
+  - A file is owned root:root, at 0755 if git marks it executable and 0644 if
+    not, unless `system/.gitattributes` sets `owner=` or `mode=` for its path.
+    That file sits outside every feature, so it is never a system file itself.
 
 ## How changes land
 
@@ -146,6 +149,8 @@ worked out.
   in `bin/` is argument parsing and a call to `main`. `tmux-snapshot.sh` is the
   same for `tmux-snapshot`: saving, the restore plan, the status view, and the
   sweep (the autosave logic that `.local/bin/tmux-snapshot-sweep` drives).
+  `system.sh` is the same for the repo root's `system.sh`: each item's state
+  and the commands that would bring it into line, as data the printout reads.
   `yubikeys.sh` holds the three serials.
 - `tests/` — behavioural tests for the above. No repository is built: `git` is a
   shell function backed by a fake commit graph, so a case states a situation
@@ -156,6 +161,8 @@ worked out.
   PATH because it is machinery, not a command the user runs)
 - `system/<feature>/`: files outside `$HOME` (`/etc`, `/usr/local`) as they
   should be on the machine, at their real paths
+- `system.sh`: shows what on the machine is out of line with `system/`, and the
+  commands that would bring it into line
 - `docs/yubikey.md`: hardware-backed signing and auth decisions, and their reasoning
 - `docs/git-commands.md`: what the git commands decide, how, and what stops them
 
@@ -317,6 +324,22 @@ anything about how tmux itself treats an argument belongs here instead. Run it
 after changing `tmux-snapshot`, `tmux-snapshot-sweep` or
 `home/common/lib/tmux-snapshot.sh`. A missing docker, or an image that will not
 build, exits 64; it never skips.
+
+`tests/system/run.sh` tests `system.sh` against real files owned by root, and is
+not part of `./test.sh` either. It needs docker: each case runs in a fresh
+Ubuntu 24.04 container built from `tests/system/Dockerfile`, sets up files
+under the container's `/etc` and `/usr/local`, and runs `system.sh --plan` as an
+ordinary user against a copy of the repo with a real git index. It covers each
+file state read from real files, the sudoers mode from the real
+`system/.gitattributes`, that the targets are unchanged and `sudo` never
+called, that an interrupted run leaves no temporary files, and that the
+planned link for a masked unit refuses a folder at its path. Unit state is
+not covered there: tried as PID 1 in the rootless docker on the WSL machine
+with `--cgroupns=private`, systemd exited because `/sys/fs/cgroup` was
+read-only, so the unit cases in `tests/cases/` fake unit
+state with a `systemctl` in `tests/fake-system.sh`. Run it after changing
+`system.sh` or `home/common/lib/system.sh`. A missing docker, or an image that
+will not build, exits 64; it never skips.
 
 A case in `tests/cases/` builds no repository. It sources the library, replaces
 `git` with a shell function backed by a fake commit graph, and asserts on what
