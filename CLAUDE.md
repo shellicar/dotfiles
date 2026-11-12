@@ -134,6 +134,10 @@ worked out.
   leaves them on stale files.
 - A whole-repo look, when Stephen asks: live files that differ from the repo,
   leftover branches and worktrees.
+- A `TODO(claude): undecided:` comment marks a choice built the simplest way
+  and left for Stephen to decide. A branch can merge with these in, and merging
+  doesn't decide them. *Why:* Stephen defers the decision rather than making it
+  at the merge.
 
 ## Map
 
