@@ -5,7 +5,7 @@ REPO=$(cd "$TESTS/.." && pwd)
 # shellcheck source=../harness.sh
 . "$TESTS/harness.sh"
 
-describe "unticking an old subagent branch's removal does not tick its fast-forward"
+describe "unticking a subagent branch's removal does not tick its fast-forward"
 
 # While the removal is ticked the update is a [-] row, and it is first offered
 # only once the removal is unticked. Its default comes from the class, which
@@ -21,13 +21,10 @@ guard_path
 # shellcheck source=../../home/common/bin/git-refresh
 . "$REPO/home/common/bin/git-refresh"
 
-NOW=$(date +%s)
-created=$((NOW - 30 * 86400))
-
 # name, worktree, class, ahead, not in main, why, behind, block, update action,
 # its detail, ignored, meta, unpushed, stash, other authors, merged pull
-# request, commits the rebase replays, merge edits the rebase drops, created
-BFACTS="worktree-agent-abc${TAB}/wt/agent${TAB}empty${TAB}0${TAB}0${TAB}never diverged from main${TAB}1${TAB}-${TAB}ff${TAB}-${TAB}-${TAB}[0 ahead, 5 days ago]${TAB}0${TAB}no${TAB}-${TAB}no${TAB}-${TAB}-${TAB}$created$NL"
+# request, commits the rebase replays, merge edits the rebase drops
+BFACTS="worktree-agent-abc${TAB}/wt/agent${TAB}empty${TAB}0${TAB}0${TAB}never diverged from main${TAB}1${TAB}-${TAB}ff${TAB}-${TAB}-${TAB}[0 ahead, 5 days ago]${TAB}0${TAB}no${TAB}-${TAB}no${TAB}-${TAB}-$NL"
 DFACTS=''
 
 state() {
